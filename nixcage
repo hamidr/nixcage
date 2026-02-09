@@ -327,6 +327,7 @@ SB_RELAXED
 profiles/sandbox-macos-resolved.sb
 store/
 isolated-store/
+local/
 *.log
 GI
 
@@ -629,6 +630,9 @@ build_macos_command() {
 		for var in "${_keep_vars[@]}"; do
 			nix_cmd+=" --keep $var"
 		done
+		# Also keep the local dir overrides that setup_local_dirs sets
+		nix_cmd+=" --keep TMPDIR --keep XDG_CACHE_HOME --keep XDG_DATA_HOME"
+		nix_cmd+=" --keep XDG_CONFIG_HOME --keep XDG_STATE_HOME --keep XDG_RUNTIME_DIR"
 	fi
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
@@ -653,6 +657,23 @@ warn_macos_unsupported() {
 	if [[ "$cpus" != "0" || -n "$memory" ]]; then
 		log_warn "Resource limits (cpus/memory) are not available on macOS"
 	fi
+}
+
+# Create project-local directories for system-level state.
+# Keeps sandbox state inside .nixcage/local/ instead of /var/folders, ~/.cache, etc.
+# Outputs VAR=PATH pairs (one per line) to stdout.
+setup_local_dirs() {
+	local project_dir="$1"
+	local base="$project_dir/$NIXCAGE_DIR_NAME/local"
+
+	local vars="TMPDIR:tmp XDG_CACHE_HOME:cache XDG_DATA_HOME:data XDG_CONFIG_HOME:config XDG_STATE_HOME:state XDG_RUNTIME_DIR:run"
+	local entry var subdir
+	for entry in $vars; do
+		var="${entry%%:*}"
+		subdir="$base/${entry#*:}"
+		mkdir -p "$subdir"
+		printf '%s=%s\n' "$var" "$subdir"
+	done
 }
 
 # ─── Sandbox Runners ────────────────────────────────────────────────────────
@@ -782,6 +803,12 @@ run_linux() {
 	env_args+=(--setenv NIXCAGE_PACKAGES_JSON "$pkg_json")
 	env_args+=(--setenv NIXCAGE_ACTIVE "1")
 
+	# Redirect system-level state dirs to project-local paths
+	local line
+	while IFS= read -r line; do
+		env_args+=(--setenv "${line%%=*}" "${line#*=}")
+	done < <(setup_local_dirs "$project_dir")
+
 	# Resource limits via systemd-run if available
 	local prefix=()
 	if [[ ("$CAGE_CPUS" != "0" || -n "$CAGE_MEMORY") ]] && command -v systemd-run &>/dev/null; then
@@ -798,6 +825,9 @@ run_linux() {
 		for var in "${CAGE_PASSTHROUGH_ENV[@]}"; do
 			nix_args+=(--keep "$var")
 		done
+		# Also keep the local dir overrides that setup_local_dirs sets
+		nix_args+=(--keep TMPDIR --keep XDG_CACHE_HOME --keep XDG_DATA_HOME)
+		nix_args+=(--keep XDG_CONFIG_HOME --keep XDG_STATE_HOME --keep XDG_RUNTIME_DIR)
 	fi
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
@@ -865,8 +895,15 @@ run_macos() {
 	warn_macos_unsupported CAGE_BLACKLIST "$CAGE_CPUS" "$CAGE_MEMORY"
 
 	# ── Build and execute sandboxed command ──
-	local env_exports
-	env_exports="$(build_macos_env_exports "$pkg_json" CAGE_PASSTHROUGH_ENV)"
+	# Redirect system-level state dirs to project-local paths
+	local local_env=""
+	local line
+	while IFS= read -r line; do
+		local_env+="export ${line%%=*}='${line#*=}'; "
+	done < <(setup_local_dirs "$project_dir")
+
+	local env_exports="$local_env"
+	env_exports+="$(build_macos_env_exports "$pkg_json" CAGE_PASSTHROUGH_ENV)"
 
 	local full_cmd
 	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" CAGE_PASSTHROUGH_ENV ${cmd[@]+"${cmd[@]}"})"
