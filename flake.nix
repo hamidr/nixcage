@@ -38,6 +38,10 @@
             ];
 
           BATS_LIB_PATH = "${pkgs.bats.libraries.bats-support}/share/bats:${pkgs.bats.libraries.bats-assert}/share/bats";
+
+          shellHook = ''
+            git config core.hooksPath .githooks
+          '';
         };
       }
     );

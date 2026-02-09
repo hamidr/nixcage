@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[pre-commit] Running shellcheck..."
+shellcheck nixcage
+
+echo "[pre-commit] Running tests..."
+bats --recursive tests/
+
+echo "[pre-commit] All checks passed."
