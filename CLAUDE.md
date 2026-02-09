@@ -49,6 +49,7 @@ The script follows a command-dispatch pattern: `main()` at the bottom dispatches
    - `run_linux()` — builds bwrap argument arrays from config (namespaces, bind mounts, network). Sources the generated `sandbox-linux.sh` profile for `build_bwrap_args()`.
    - `run_macos()` — resolves placeholders (`NIXCAGE_PROJECT_DIR`, `HOME_DIR`) in `.sb` Seatbelt profiles via sed, then calls `sandbox-exec`.
    - Both resolve nix packages on the host *before* entering the sandbox, then mount `/nix/store` inside.
+   - Both protect config files (`nixcage.toml`, `.envrc`, `.nixcage/`) as read-only inside the sandbox. The `.nixcage/local/` directory remains writable for nix state.
 
 3. **Store isolation** (`store_mode`) — four modes: `shared`, `readonly`, `copy`, `isolated`. Each mode adjusts how `/nix/store` is mounted/copied. The `copy` and `isolated` modes create local store directories under `.nixcage/`.
 
