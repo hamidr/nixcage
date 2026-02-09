@@ -1,0 +1,39 @@
+# Claude Code in a sandboxed Nix environment
+#
+# Usage:
+#   1. Copy this file to your project root
+#   2. Replace YOUR_KEY_HERE with your Anthropic API key
+#   3. Run: nixcage init && nixcage run -- claude
+#
+# Requirements:
+#   - claude-code package (nixpkgs unfree)
+#   - Network access for API calls
+#   - ~/.claude and ~/.claude.json for auth/config persistence
+
+[sandbox]
+level = "standard"
+
+[sandbox.filesystem]
+# macOS system files needed for locale/timezone
+ro_bind = ["/private/etc/localtime", "/private/var/select", "~/.CFUserTextEncoding"]
+# Claude Code stores auth and settings here
+rw_bind = ["~/.claude", "~/.claude.json"]
+blacklist = []
+
+[sandbox.network]
+allow = true
+
+[sandbox.resources]
+cpus = 0
+memory = ""
+
+[nix]
+packages = ["nodejs_22", "claude-code", "vim"]
+pure = true
+store_mode = "shared"
+
+[cage]
+command = "claude"
+passthrough_env = ["TERM", "LANG"]
+# Set your API key here (or use passthrough_env if it's in your host env)
+env = ["ANTHROPIC_API_KEY=YOUR_KEY_HERE", "NIX_PATH=nixpkgs=flake:nixpkgs"]
