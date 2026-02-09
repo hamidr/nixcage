@@ -845,7 +845,10 @@ run_linux() {
 	fi
 
 	# Build the nix-shell command to run INSIDE the sandbox
-	local nix_args=(nix-shell --quiet "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
+	# Resolve nix-shell to its absolute store path since /run and /nix/var/nix/profiles aren't mounted
+	local nix_shell_path
+	nix_shell_path="$(readlink -f "$(command -v nix-shell)")"
+	local nix_args=("$nix_shell_path" --quiet "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
 	if [[ "$CAGE_PURE" == "true" ]]; then
 		nix_args+=(--pure)
 		# Preserve passthrough env vars that --pure would strip
