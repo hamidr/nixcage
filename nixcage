@@ -619,7 +619,7 @@ build_macos_command() {
 	local cmd=("$@")
 
 	local nix_cmd
-	nix_cmd="nix-shell '$(escape_sq "$shell_nix")'"
+	nix_cmd="nix-shell --quiet '$(escape_sq "$shell_nix")'"
 	[[ "$pure_flag" == "true" ]] && nix_cmd+=" --pure"
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
@@ -779,7 +779,7 @@ run_linux() {
 	fi
 
 	# Build the nix-shell command to run INSIDE the sandbox
-	local nix_args=(nix-shell "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
+	local nix_args=(nix-shell --quiet "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
 	[[ "$CAGE_PURE" == "true" ]] && nix_args+=(--pure)
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
@@ -787,7 +787,8 @@ run_linux() {
 	fi
 
 	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
-	"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
+	"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}" \
+		2> >(grep -v '^warning:\|^fetching ' >&2)
 }
 
 run_macos() {
@@ -848,7 +849,8 @@ run_macos() {
 	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" ${cmd[@]+"${cmd[@]}"})"
 
 	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
-	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd"
+	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd" \
+		2> >(grep -v '^warning:\|^fetching ' >&2)
 }
 
 run_sandboxed() {

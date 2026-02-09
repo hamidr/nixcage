@@ -117,7 +117,7 @@ teardown() {
 
 	[[ "$result" == *"export A=1; "* ]]
 	[[ "$result" == *"cd '/tmp/proj'"* ]]
-	[[ "$result" == *"nix-shell '/tmp/proj/.nixcage/shell.nix'"* ]]
+	[[ "$result" == *"nix-shell --quiet '/tmp/proj/.nixcage/shell.nix'"* ]]
 	[[ "$result" != *"--run"* ]]
 }
 
@@ -156,7 +156,7 @@ teardown() {
 	result="$(build_macos_command "" "/tmp/my project" "/tmp/my project/shell.nix" "false")"
 
 	[[ "$result" == *"cd '/tmp/my project'"* ]]
-	[[ "$result" == *"nix-shell '/tmp/my project/shell.nix'"* ]]
+	[[ "$result" == *"nix-shell --quiet '/tmp/my project/shell.nix'"* ]]
 }
 
 # ─── strip_macos_network_rules ──────────────────────────────────────────────
