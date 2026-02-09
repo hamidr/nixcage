@@ -25,6 +25,8 @@ setup_temp_dir() {
 # Clean up temp directory after each test
 teardown_temp_dir() {
 	if [[ -n "${TEST_TEMP_DIR:-}" && -d "$TEST_TEMP_DIR" ]]; then
+		# Nix store files are read-only; make them writable before deleting
+		chmod -R u+w "$TEST_TEMP_DIR" 2>/dev/null || true
 		rm -rf "$TEST_TEMP_DIR"
 	fi
 }

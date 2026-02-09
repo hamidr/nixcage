@@ -844,10 +844,16 @@ run_linux() {
 		[[ -n "$CAGE_MEMORY" ]] && prefix+=(-p "MemoryMax=$CAGE_MEMORY")
 	fi
 
-	# Build the nix-shell command to run INSIDE the sandbox
-	# Resolve nix-shell to its absolute store path since /run and /nix/var/nix/profiles aren't mounted
+	# Mount the directory containing nix-shell so it's accessible inside the sandbox
+	# (e.g., /run/current-system/sw/bin on NixOS, /nix/var/nix/profiles/default/bin elsewhere)
 	local nix_shell_path
-	nix_shell_path="$(readlink -f "$(command -v nix-shell)")"
+	nix_shell_path="$(command -v nix-shell)"
+	local nix_shell_bin_dir
+	nix_shell_bin_dir="$(dirname "$nix_shell_path")"
+	bwrap_args+=(--ro-bind "$nix_shell_bin_dir" "$nix_shell_bin_dir")
+
+	# Build the nix-shell command to run INSIDE the sandbox
+	# Use full path since bwrap doesn't do PATH lookup
 	local nix_args=("$nix_shell_path" --quiet "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
 	if [[ "$CAGE_PURE" == "true" ]]; then
 		nix_args+=(--pure)
