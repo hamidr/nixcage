@@ -534,6 +534,17 @@ resolve_macos_profile() {
 		-e "s|HOME_DIR|$HOME|g" \
 		"$profile_src" >"$profile_resolved"
 
+	# Allow lstat on ancestor directories so tools can resolve real paths
+	# (e.g. Node.js realpathSync walks each component of the path)
+	local dir="$project_dir"
+	local ancestors=""
+	while dir="$(dirname "$dir")" && [[ "$dir" != "/" ]]; do
+		ancestors+="  (literal \"$dir\")"$'\n'
+	done
+	if [[ -n "$ancestors" ]]; then
+		printf '(allow file-read-metadata\n%s)\n' "$ancestors" >>"$profile_resolved"
+	fi
+
 	echo "$profile_resolved"
 }
 
