@@ -175,17 +175,29 @@ build_bwrap_args() {
 }
 BWRAP_PROFILE
 
-	# macOS sandbox-exec profile
+	# macOS sandbox-exec (Seatbelt) profiles
+	#
+	# Non-obvious permissions required for basic operation:
+	#   process-exec-interpreter  — needed for shebang script execution
+	#   file-ioctl                — terminal I/O (ioctl on /dev/tty et al.)
+	#   (literal "/")             — root dir read for path traversal/resolution
+	#
+	# See: Apple Sandbox Guide, Chromium seatbelt_sandbox_design.md,
+	#      OpenAI Codex macos-seatbelt.ts for reference profiles.
+
 	cat >"$cage_dir/profiles/sandbox-macos-strict.sb" <<'SB_STRICT'
 (version 1)
 (deny default)
 (allow process-exec)
+(allow process-exec-interpreter)
 (allow process-fork)
 (allow signal)
 (allow sysctl-read)
 (allow mach-lookup)
 (allow ipc-posix*)
+(allow file-ioctl)
 (allow file-read*
+  (literal "/")
   (subpath "/nix")
   (subpath "/bin")
   (subpath "/usr/bin")
@@ -211,12 +223,15 @@ SB_STRICT
 (version 1)
 (deny default)
 (allow process-exec)
+(allow process-exec-interpreter)
 (allow process-fork)
 (allow signal)
 (allow sysctl-read)
 (allow mach-lookup)
 (allow ipc-posix*)
+(allow file-ioctl)
 (allow file-read*
+  (literal "/")
   (subpath "/nix")
   (subpath "/bin")
   (subpath "/usr/bin")
@@ -246,12 +261,15 @@ SB_STANDARD
 (version 1)
 (deny default)
 (allow process-exec)
+(allow process-exec-interpreter)
 (allow process-fork)
 (allow signal)
 (allow sysctl-read)
 (allow mach-lookup)
 (allow ipc-posix*)
+(allow file-ioctl)
 (allow file-read*
+  (literal "/")
   (subpath "/nix")
   (subpath "/bin")
   (subpath "/usr/bin")

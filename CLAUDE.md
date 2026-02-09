@@ -11,6 +11,7 @@ nixcage is a single-file Bash tool that creates sandboxed Nix environments with 
 - `nixcage` — the entire tool: a single self-contained Bash script (~860 lines). All commands, config parsing, and sandbox logic live here.
 - `default.nix` — Nix derivation for packaging; copies `nixcage` into `$out/bin` and wraps it with runtime dependencies
 - `flake.nix` — Nix flake wrapping `default.nix`, also provides a dev shell
+- `.githooks/pre-commit` — shared pre-commit hook (shellcheck + bats tests)
 
 ## Development
 
@@ -20,13 +21,14 @@ nixcage is a single-file Bash tool that creates sandboxed Nix environments with 
 nix develop   # provides bash, jq, shellcheck, direnv (+ bwrap on Linux)
 ```
 
-### Lint
+### Lint & test
 
 ```bash
 shellcheck nixcage
+bats --recursive tests/
 ```
 
-There is no test suite yet. There is no build step — the script runs directly.
+There is no build step — the script runs directly. A shared pre-commit hook (`.githooks/pre-commit`) runs both shellcheck and bats before every commit. Entering `nix develop` auto-configures `core.hooksPath` via the dev shell's `shellHook`.
 
 ### Run locally without installing
 
@@ -63,3 +65,15 @@ The script follows a command-dispatch pattern: `main()` at the bottom dispatches
 - All config variables use the `CAGE_` prefix as globals.
 - Sandbox profiles are generated at `init` time into `.nixcage/profiles/`, not shipped as separate source files.
 - The resolved macOS profile (`sandbox-macos-resolved.sb`) is gitignored; the templates use literal placeholders.
+
+## macOS Seatbelt profiles
+
+The three `.sb` profiles (strict, standard, relaxed) use `(deny default)` and selectively allow operations. Beyond the obvious permissions (`process-exec`, `process-fork`, `file-read*`, `file-write*`), the following are required for `sandbox-exec -f profile /bin/bash -c "..."` to work at all:
+
+| Permission | Why |
+|---|---|
+| `process-exec-interpreter` | Shebang script execution (without it, only direct binaries work) |
+| `file-ioctl` | Terminal I/O operations (ioctl on `/dev/tty`); omitting causes silent abort |
+| `(literal "/")` in `file-read*` | Root directory read for path traversal — many UNIX tools fail without this |
+
+References: Apple Sandbox Guide v1.0, Chromium `seatbelt_sandbox_design.md`, OpenAI Codex `macos-seatbelt.ts`.
