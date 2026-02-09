@@ -55,3 +55,34 @@ teardown() {
 	[[ "$joined" == *'--setenv NIXCAGE_PACKAGES_JSON ["nodejs_22"]'* ]]
 	[[ "$joined" == *"--setenv NIXCAGE_ACTIVE 1"* ]]
 }
+
+@test "linux env: cage.env entries become --setenv args" {
+	CAGE_ENV=("MY_KEY=hello" "OTHER=world")
+
+	local env_args=()
+	local entry key val
+	for entry in "${CAGE_ENV[@]}"; do
+		key="${entry%%=*}"
+		val="${entry#*=}"
+		[[ -n "$key" ]] && env_args+=(--setenv "$key" "$val")
+	done
+
+	local joined="${env_args[*]}"
+	[[ "$joined" == *"--setenv MY_KEY hello"* ]]
+	[[ "$joined" == *"--setenv OTHER world"* ]]
+}
+
+@test "linux env: cage.env preserves equals in value" {
+	CAGE_ENV=("TOKEN=abc==123")
+
+	local env_args=()
+	local entry key val
+	for entry in "${CAGE_ENV[@]}"; do
+		key="${entry%%=*}"
+		val="${entry#*=}"
+		[[ -n "$key" ]] && env_args+=(--setenv "$key" "$val")
+	done
+
+	local joined="${env_args[*]}"
+	[[ "$joined" == *"--setenv TOKEN abc==123"* ]]
+}

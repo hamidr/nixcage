@@ -66,5 +66,6 @@ store_mode = "readonly"
 [cage]
 command = ""
 passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY"]
+env = []
 TOML
 }

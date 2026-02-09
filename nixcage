@@ -96,6 +96,8 @@ store_mode = "readonly"
 command = ""
 # Environment variables to passthrough from host
 passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY"]
+# Explicit key=value env vars to set inside the cage
+env = []
 TOML
 
 	# ── Generate shell.nix ──
@@ -386,6 +388,7 @@ parse_config() {
 	CAGE_PURE="true"
 	CAGE_STORE_MODE="readonly"
 	CAGE_PASSTHROUGH_ENV=("TERM" "LANG" "ANTHROPIC_API_KEY")
+	CAGE_ENV=()
 	CAGE_COMMAND=""
 
 	local current_section=""
@@ -445,6 +448,7 @@ parse_config() {
 				sandbox.filesystem.blacklist) CAGE_BLACKLIST=("${arr_items[@]}") ;;
 				nix.packages) CAGE_PACKAGES=("${arr_items[@]}") ;;
 				cage.passthrough_env) CAGE_PASSTHROUGH_ENV=("${arr_items[@]}") ;;
+				cage.env) CAGE_ENV=("${arr_items[@]}") ;;
 				esac
 			fi
 		fi
@@ -603,6 +607,16 @@ build_macos_env_exports() {
 	for var in "${_passthrough[@]}"; do
 		[[ -n "${!var:-}" ]] && env_exports+="export ${var}='$(escape_sq "${!var}")'; "
 	done
+	# Explicit key=value env vars from cage.env
+	if [[ -n "${3:-}" ]]; then
+		local -n _env_pairs=$3
+		local entry key val
+		for entry in "${_env_pairs[@]}"; do
+			key="${entry%%=*}"
+			val="${entry#*=}"
+			[[ -n "$key" ]] && env_exports+="export ${key}='$(escape_sq "$val")'; "
+		done
+	fi
 	env_exports+="export NIXCAGE_PACKAGES_JSON='$(escape_sq "$pkg_json")'; "
 	env_exports+="export NIXCAGE_ACTIVE=1; "
 
@@ -617,7 +631,8 @@ build_macos_command() {
 	local shell_nix="$3"
 	local pure_flag="$4"
 	local keep_vars_ref="$5"
-	shift 5
+	local env_pairs_ref="${6:-}"
+	shift 6
 	local cmd=("$@")
 
 	local nix_cmd
@@ -630,19 +645,24 @@ build_macos_command() {
 		for var in "${_keep_vars[@]}"; do
 			nix_cmd+=" --keep $var"
 		done
+		# Keep explicit env var keys from cage.env
+		if [[ -n "$env_pairs_ref" ]]; then
+			local -n _env_keep="$env_pairs_ref"
+			local entry
+			for entry in "${_env_keep[@]}"; do
+				nix_cmd+=" --keep ${entry%%=*}"
+			done
+		fi
 		# Also keep the local dir overrides that setup_local_dirs sets
 		nix_cmd+=" --keep TMPDIR --keep XDG_CACHE_HOME --keep XDG_DATA_HOME"
 		nix_cmd+=" --keep XDG_CONFIG_HOME --keep XDG_STATE_HOME --keep XDG_RUNTIME_DIR"
 	fi
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
-		# Save stderr (TTY) to fd 3, suppress nix-shell warnings via 2>/dev/null,
-		# then restore real stderr inside --run so TUI apps get the terminal back.
-		nix_cmd+=" --run 'exec 2>&3 3>&-; $(escape_sq "${cmd[*]}")'"
-		printf '%s' "${env_exports}exec 3>&2; cd '$(escape_sq "$project_dir")' && ${nix_cmd} 2>/dev/null"
-	else
-		printf '%s' "${env_exports}cd '$(escape_sq "$project_dir")' && ${nix_cmd}"
+		nix_cmd+=" --run '$(escape_sq "${cmd[*]}")'"
 	fi
+
+	printf '%s' "${env_exports}cd '$(escape_sq "$project_dir")' && ${nix_cmd}"
 }
 
 # Warn about macOS-unsupported features (blacklist, resource limits).
@@ -800,6 +820,13 @@ run_linux() {
 	for var in "${CAGE_PASSTHROUGH_ENV[@]}"; do
 		[[ -n "${!var:-}" ]] && env_args+=(--setenv "$var" "${!var}")
 	done
+	# Explicit key=value env vars from cage.env
+	local entry key val
+	for entry in "${CAGE_ENV[@]}"; do
+		key="${entry%%=*}"
+		val="${entry#*=}"
+		[[ -n "$key" ]] && env_args+=(--setenv "$key" "$val")
+	done
 	env_args+=(--setenv NIXCAGE_PACKAGES_JSON "$pkg_json")
 	env_args+=(--setenv NIXCAGE_ACTIVE "1")
 
@@ -825,23 +852,21 @@ run_linux() {
 		for var in "${CAGE_PASSTHROUGH_ENV[@]}"; do
 			nix_args+=(--keep "$var")
 		done
+		# Keep explicit env var keys from cage.env
+		for entry in "${CAGE_ENV[@]}"; do
+			nix_args+=(--keep "${entry%%=*}")
+		done
 		# Also keep the local dir overrides that setup_local_dirs sets
 		nix_args+=(--keep TMPDIR --keep XDG_CACHE_HOME --keep XDG_DATA_HOME)
 		nix_args+=(--keep XDG_CONFIG_HOME --keep XDG_STATE_HOME --keep XDG_RUNTIME_DIR)
 	fi
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
-		# Suppress nix-shell warnings while preserving real stderr for the command.
-		# Save stderr to fd 3, silence nix evaluation, restore inside --run.
-		nix_args+=(--run "exec 2>&3 3>&-; ${cmd[*]}")
-		log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
-		exec 3>&2
-		"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}" 2>/dev/null
-		exec 3>&-
-	else
-		log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
-		"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
+		nix_args+=(--run "${cmd[*]}")
 	fi
+
+	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
+	"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
 }
 
 run_macos() {
@@ -903,10 +928,10 @@ run_macos() {
 	done < <(setup_local_dirs "$project_dir")
 
 	local env_exports="$local_env"
-	env_exports+="$(build_macos_env_exports "$pkg_json" CAGE_PASSTHROUGH_ENV)"
+	env_exports+="$(build_macos_env_exports "$pkg_json" CAGE_PASSTHROUGH_ENV CAGE_ENV)"
 
 	local full_cmd
-	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" CAGE_PASSTHROUGH_ENV ${cmd[@]+"${cmd[@]}"})"
+	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" CAGE_PASSTHROUGH_ENV CAGE_ENV ${cmd[@]+"${cmd[@]}"})"
 
 	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
 	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd"

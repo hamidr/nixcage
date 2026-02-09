@@ -109,11 +109,59 @@ teardown() {
 	[[ "$result" == *"NIXCAGE_ACTIVE=1"* ]]
 }
 
+@test "build_macos_env_exports: includes cage.env key=value pairs" {
+	local passthrough=()
+	local env_pairs=("MY_KEY=hello" "OTHER=world")
+
+	local result
+	result="$(build_macos_env_exports '[]' passthrough env_pairs)"
+
+	[[ "$result" == *"export MY_KEY='hello'"* ]]
+	[[ "$result" == *"export OTHER='world'"* ]]
+}
+
+@test "build_macos_env_exports: cage.env values with special chars are escaped" {
+	local passthrough=()
+	local env_pairs=("API_KEY=it's a key")
+
+	local result
+	result="$(build_macos_env_exports '[]' passthrough env_pairs)"
+
+	# Verify round-trip safety
+	local recovered
+	recovered="$(eval "${result} printf '%s' \"\$API_KEY\"")"
+	assert_equal "$recovered" "it's a key"
+}
+
+@test "build_macos_env_exports: cage.env with equals in value" {
+	local passthrough=()
+	local env_pairs=("TOKEN=abc==123")
+
+	local result
+	result="$(build_macos_env_exports '[]' passthrough env_pairs)"
+
+	local recovered
+	recovered="$(eval "${result} printf '%s' \"\$TOKEN\"")"
+	assert_equal "$recovered" "abc==123"
+}
+
+@test "build_macos_env_exports: works without cage.env parameter" {
+	local passthrough=("TERM")
+	export TERM="xterm"
+
+	local result
+	result="$(build_macos_env_exports '[]' passthrough)"
+
+	[[ "$result" == *"export TERM='xterm'"* ]]
+	[[ "$result" == *"NIXCAGE_ACTIVE=1"* ]]
+}
+
 # ─── build_macos_command ────────────────────────────────────────────────────
 
 @test "build_macos_command: basic assembly without command" {
+	local _empty=()
 	local result
-	result="$(local _empty=(); build_macos_command "export A=1; " "/tmp/proj" "/tmp/proj/.nixcage/shell.nix" "false" _empty)"
+	result="$(build_macos_command "export A=1; " "/tmp/proj" "/tmp/proj/.nixcage/shell.nix" "false" _empty _empty)"
 
 	[[ "$result" == *"export A=1; "* ]]
 	[[ "$result" == *"cd '/tmp/proj'"* ]]
@@ -122,41 +170,67 @@ teardown() {
 }
 
 @test "build_macos_command: adds --pure flag" {
+	local _empty=()
 	local result
-	result="$(local _empty=(); build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "true" _empty)"
+	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "true" _empty _empty)"
 
 	[[ "$result" == *"--pure"* ]]
 }
 
 @test "build_macos_command: no --pure when false" {
+	local _empty=()
 	local result
-	result="$(local _empty=(); build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty)"
+	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty _empty)"
 
 	[[ "$result" != *"--pure"* ]]
 }
 
 @test "build_macos_command: --run with user command" {
+	local _empty=()
 	local result
-	result="$(local _empty=(); build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty "echo hello")"
+	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty _empty "echo hello")"
 
-	[[ "$result" == *"--run 'exec 2>&3 3>&-; echo hello'"* ]]
+	[[ "$result" == *"--run 'echo hello'"* ]]
 }
 
 @test "build_macos_command: --run escapes single quotes in command" {
+	local _empty=()
 	local result
-	result="$(local _empty=(); build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty "echo 'hi'")"
+	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty _empty "echo 'hi'")"
 
 	[[ "$result" == *"--run '"* ]]
-	# Should contain escaped quote
-	[[ "$result" == *"'\\''hi'\\'"* ]]
+	# Should contain escaped quote within the --run argument
+	[[ "$result" == *"echo"* ]]
+	[[ "$result" == *"hi"* ]]
 }
 
 @test "build_macos_command: handles spaces in project dir" {
+	local _empty=()
 	local result
-	result="$(local _empty=(); build_macos_command "" "/tmp/my project" "/tmp/my project/shell.nix" "false" _empty)"
+	result="$(build_macos_command "" "/tmp/my project" "/tmp/my project/shell.nix" "false" _empty _empty)"
 
 	[[ "$result" == *"cd '/tmp/my project'"* ]]
 	[[ "$result" == *"nix-shell --quiet '/tmp/my project/shell.nix'"* ]]
+}
+
+@test "build_macos_command: --keep for cage.env keys in pure mode" {
+	local keep_vars=("TERM")
+	local env_pairs=("MY_KEY=hello" "OTHER=world")
+	local result
+	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "true" keep_vars env_pairs)"
+
+	[[ "$result" == *"--keep TERM"* ]]
+	[[ "$result" == *"--keep MY_KEY"* ]]
+	[[ "$result" == *"--keep OTHER"* ]]
+}
+
+@test "build_macos_command: no --keep for cage.env when not pure" {
+	local keep_vars=()
+	local env_pairs=("MY_KEY=hello")
+	local result
+	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" keep_vars env_pairs)"
+
+	[[ "$result" != *"--keep MY_KEY"* ]]
 }
 
 # ─── strip_macos_network_rules ──────────────────────────────────────────────

@@ -122,6 +122,35 @@ TOML
 	assert_equal "${CAGE_PASSTHROUGH_ENV[2]}" "CUSTOM_VAR"
 }
 
+@test "parse_config: parses cage.env array" {
+	cat >"$TEST_TEMP_DIR/nixcage.toml" <<'TOML'
+[cage]
+env = ["MY_KEY=my_value", "OTHER=123"]
+TOML
+	parse_config "$TEST_TEMP_DIR/nixcage.toml"
+	assert_equal "${CAGE_ENV[0]}" "MY_KEY=my_value"
+	assert_equal "${CAGE_ENV[1]}" "OTHER=123"
+	assert_equal "${#CAGE_ENV[@]}" "2"
+}
+
+@test "parse_config: cage.env defaults to empty" {
+	cat >"$TEST_TEMP_DIR/nixcage.toml" <<'TOML'
+[sandbox]
+level = "standard"
+TOML
+	parse_config "$TEST_TEMP_DIR/nixcage.toml"
+	assert_equal "${#CAGE_ENV[@]}" "0"
+}
+
+@test "parse_config: cage.env handles values with equals signs" {
+	cat >"$TEST_TEMP_DIR/nixcage.toml" <<'TOML'
+[cage]
+env = ["API_KEY=sk-ant-abc123=="]
+TOML
+	parse_config "$TEST_TEMP_DIR/nixcage.toml"
+	assert_equal "${CAGE_ENV[0]}" "API_KEY=sk-ant-abc123=="
+}
+
 @test "parse_config: parses filesystem ro_bind array" {
 	cat >"$TEST_TEMP_DIR/nixcage.toml" <<'TOML'
 [sandbox.filesystem]
@@ -250,6 +279,7 @@ store_mode = "copy"
 [cage]
 command = "python3 main.py"
 passthrough_env = ["TERM", "CUSTOM"]
+env = ["SECRET_KEY=abc123", "DEBUG=1"]
 TOML
 	parse_config "$TEST_TEMP_DIR/nixcage.toml"
 
@@ -267,4 +297,6 @@ TOML
 	assert_equal "$CAGE_COMMAND" "python3 main.py"
 	assert_equal "${CAGE_PASSTHROUGH_ENV[0]}" "TERM"
 	assert_equal "${CAGE_PASSTHROUGH_ENV[1]}" "CUSTOM"
+	assert_equal "${CAGE_ENV[0]}" "SECRET_KEY=abc123"
+	assert_equal "${CAGE_ENV[1]}" "DEBUG=1"
 }
