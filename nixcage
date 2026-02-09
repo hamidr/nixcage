@@ -865,13 +865,50 @@ run_sandboxed() {
 
 cmd_run() {
 	local project_dir
-	project_dir="$(find_cage_root)"
-	run_sandboxed "$project_dir" "$@"
+	local cmd=()
+
+	# Support: nixcage run [dir] -- <cmd...>
+	#          nixcage run <cmd...>
+	local found_sep=false
+	local before_sep=()
+	for arg in "$@"; do
+		if [[ "$arg" == "--" ]]; then
+			found_sep=true
+			continue
+		fi
+		if $found_sep; then
+			cmd+=("$arg")
+		else
+			before_sep+=("$arg")
+		fi
+	done
+
+	if $found_sep; then
+		# Had a --, treat pre-separator arg as optional directory
+		if [[ ${#before_sep[@]} -gt 0 ]]; then
+			project_dir="$(cd "${before_sep[0]}" && find_cage_root)"
+		else
+			project_dir="$(find_cage_root)"
+		fi
+	else
+		# No --, all args are the command
+		project_dir="$(find_cage_root)"
+		cmd=("${before_sep[@]}")
+	fi
+
+	run_sandboxed "$project_dir" "${cmd[@]}"
 }
 
 cmd_shell() {
 	local project_dir
-	project_dir="$(find_cage_root)"
+
+	# Support: nixcage shell [dir]
+	if [[ $# -gt 0 ]]; then
+		project_dir="$(cd "$1" && find_cage_root)"
+	else
+		project_dir="$(find_cage_root)"
+	fi
+
 	run_sandboxed "$project_dir"
 }
 
@@ -983,8 +1020,8 @@ ${BOLD}Commands:${NC}
   init [dir]       Initialize a new cage in a directory (default: current)
   reinit [dir]     Re-initialize (destroy + init)
   destroy [dir]    Remove all nixcage files from a directory
-  shell            Enter an interactive sandboxed shell
-  run <cmd...>     Run a command inside the sandbox
+  shell [dir]      Enter an interactive sandboxed shell
+  run [dir --] <cmd...>  Run a command inside the sandbox
   status           Show cage status and check dependencies
   version          Print version
   help             Show this help
