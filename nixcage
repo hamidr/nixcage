@@ -100,7 +100,7 @@ TOML
 
 	# ── Generate shell.nix ──
 	cat >"$cage_dir/shell.nix" <<'NIX'
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixpkgs> { config.allowUnfree = true; } }:
 
 let
   # Read from nixcage.toml would happen via the wrapper.
@@ -657,10 +657,12 @@ run_linux() {
 
 	# Pre-build the environment on the host so all packages are in /nix/store
 	log_info "Resolving nix environment..."
-	NIXCAGE_PACKAGES_JSON="$pkg_json" nix-shell "$shell_nix" --run "true" 2>/dev/null || {
+	local nix_err
+	if ! nix_err="$(NIXCAGE_PACKAGES_JSON="$pkg_json" nix-shell "$shell_nix" --run "true" 2>&1)"; then
 		log_err "Failed to resolve nix-shell environment"
+		printf '%s\n' "$nix_err" >&2
 		exit 1
-	}
+	fi
 
 	# Collect the store closure (all paths needed by this shell)
 	local drv_path
@@ -794,10 +796,12 @@ run_macos() {
 	local shell_nix="$project_dir/$NIXCAGE_DIR_NAME/shell.nix"
 
 	log_info "Resolving nix environment..."
-	NIXCAGE_PACKAGES_JSON="$pkg_json" nix-shell "$shell_nix" --run "true" 2>/dev/null || {
+	local nix_err
+	if ! nix_err="$(NIXCAGE_PACKAGES_JSON="$pkg_json" nix-shell "$shell_nix" --run "true" 2>&1)"; then
 		log_err "Failed to resolve nix-shell environment"
+		printf '%s\n' "$nix_err" >&2
 		exit 1
-	}
+	fi
 
 	# ── Handle store mode (copy/isolated not supported on macOS) ──
 	case "$CAGE_STORE_MODE" in
