@@ -139,7 +139,7 @@ teardown() {
 	local result
 	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" "echo hello")"
 
-	[[ "$result" == *"--run 'echo hello'"* ]]
+	[[ "$result" == *"--run 'exec 2>&3 3>&-; echo hello'"* ]]
 }
 
 @test "build_macos_command: --run escapes single quotes in command" {

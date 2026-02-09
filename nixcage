@@ -623,10 +623,13 @@ build_macos_command() {
 	[[ "$pure_flag" == "true" ]] && nix_cmd+=" --pure"
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
-		nix_cmd+=" --run '$(escape_sq "${cmd[*]}")'"
+		# Save stderr (TTY) to fd 3, suppress nix-shell warnings via 2>/dev/null,
+		# then restore real stderr inside --run so TUI apps get the terminal back.
+		nix_cmd+=" --run 'exec 2>&3 3>&-; $(escape_sq "${cmd[*]}")'"
+		printf '%s' "${env_exports}exec 3>&2; cd '$(escape_sq "$project_dir")' && ${nix_cmd} 2>/dev/null"
+	else
+		printf '%s' "${env_exports}cd '$(escape_sq "$project_dir")' && ${nix_cmd}"
 	fi
-
-	printf '%s' "${env_exports}cd '$(escape_sq "$project_dir")' && ${nix_cmd}"
 }
 
 # Warn about macOS-unsupported features (blacklist, resource limits).
@@ -783,12 +786,17 @@ run_linux() {
 	[[ "$CAGE_PURE" == "true" ]] && nix_args+=(--pure)
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
-		nix_args+=(--run "${cmd[*]}")
+		# Suppress nix-shell warnings while preserving real stderr for the command.
+		# Save stderr to fd 3, silence nix evaluation, restore inside --run.
+		nix_args+=(--run "exec 2>&3 3>&-; ${cmd[*]}")
+		log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
+		exec 3>&2
+		"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}" 2>/dev/null
+		exec 3>&-
+	else
+		log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
+		"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
 	fi
-
-	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
-	"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}" \
-		2> >(grep -v '^warning:\|^fetching ' >&2)
 }
 
 run_macos() {
@@ -849,8 +857,7 @@ run_macos() {
 	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" ${cmd[@]+"${cmd[@]}"})"
 
 	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
-	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd" \
-		2> >(grep -v '^warning:\|^fetching ' >&2)
+	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd"
 }
 
 run_sandboxed() {
