@@ -788,6 +788,14 @@ run_linux() {
 		;;
 	esac
 
+	# Protect config files from modification inside the sandbox
+	bwrap_args+=(--ro-bind "$project_dir/nixcage.toml" "$project_dir/nixcage.toml")
+	bwrap_args+=(--ro-bind "$project_dir/.envrc" "$project_dir/.envrc")
+	bwrap_args+=(--ro-bind "$project_dir/$NIXCAGE_DIR_NAME" "$project_dir/$NIXCAGE_DIR_NAME")
+	# Re-mount local/ as writable for nix state/tmp files
+	mkdir -p "$project_dir/$NIXCAGE_DIR_NAME/local"
+	bwrap_args+=(--bind "$project_dir/$NIXCAGE_DIR_NAME/local" "$project_dir/$NIXCAGE_DIR_NAME/local")
+
 	# Extra ro binds from config
 	for path in "${CAGE_RO_BIND[@]}"; do
 		path="$(expand_tilde "$path")"
@@ -921,6 +929,17 @@ run_macos() {
 	[[ -n "$extra_sb_rules" ]] && echo "$extra_sb_rules" >>"$profile_resolved"
 
 	append_macos_bind_rules "$profile_resolved" CAGE_RO_BIND CAGE_RW_BIND
+
+	# Protect config files from modification inside the sandbox
+	# Note: .nixcage/local/ remains writable for nix state/tmp files
+	cat >>"$profile_resolved" <<PROTECT
+(deny file-write*
+  (literal "$project_dir/nixcage.toml")
+  (literal "$project_dir/.envrc")
+  (literal "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
+  (subpath "$project_dir/$NIXCAGE_DIR_NAME/profiles")
+)
+PROTECT
 
 	if [[ "$CAGE_NET_ALLOW" == "false" ]]; then
 		strip_macos_network_rules "$profile_resolved"
