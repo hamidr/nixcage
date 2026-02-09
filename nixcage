@@ -615,12 +615,21 @@ build_macos_command() {
 	local project_dir="$2"
 	local shell_nix="$3"
 	local pure_flag="$4"
-	shift 4
+	local keep_vars_ref="$5"
+	shift 5
 	local cmd=("$@")
 
 	local nix_cmd
 	nix_cmd="nix-shell --quiet '$(escape_sq "$shell_nix")'"
-	[[ "$pure_flag" == "true" ]] && nix_cmd+=" --pure"
+	if [[ "$pure_flag" == "true" ]]; then
+		nix_cmd+=" --pure"
+		# Preserve passthrough env vars that --pure would strip
+		local -n _keep_vars="$keep_vars_ref"
+		local var
+		for var in "${_keep_vars[@]}"; do
+			nix_cmd+=" --keep $var"
+		done
+	fi
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
 		# Save stderr (TTY) to fd 3, suppress nix-shell warnings via 2>/dev/null,
@@ -783,7 +792,13 @@ run_linux() {
 
 	# Build the nix-shell command to run INSIDE the sandbox
 	local nix_args=(nix-shell --quiet "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
-	[[ "$CAGE_PURE" == "true" ]] && nix_args+=(--pure)
+	if [[ "$CAGE_PURE" == "true" ]]; then
+		nix_args+=(--pure)
+		# Preserve passthrough env vars that --pure would strip
+		for var in "${CAGE_PASSTHROUGH_ENV[@]}"; do
+			nix_args+=(--keep "$var")
+		done
+	fi
 
 	if [[ ${#cmd[@]} -gt 0 ]]; then
 		# Suppress nix-shell warnings while preserving real stderr for the command.
@@ -854,7 +869,7 @@ run_macos() {
 	env_exports="$(build_macos_env_exports "$pkg_json" CAGE_PASSTHROUGH_ENV)"
 
 	local full_cmd
-	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" ${cmd[@]+"${cmd[@]}"})"
+	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" CAGE_PASSTHROUGH_ENV ${cmd[@]+"${cmd[@]}"})"
 
 	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
 	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd"

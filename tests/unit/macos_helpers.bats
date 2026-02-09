@@ -113,7 +113,7 @@ teardown() {
 
 @test "build_macos_command: basic assembly without command" {
 	local result
-	result="$(build_macos_command "export A=1; " "/tmp/proj" "/tmp/proj/.nixcage/shell.nix" "false")"
+	result="$(local _empty=(); build_macos_command "export A=1; " "/tmp/proj" "/tmp/proj/.nixcage/shell.nix" "false" _empty)"
 
 	[[ "$result" == *"export A=1; "* ]]
 	[[ "$result" == *"cd '/tmp/proj'"* ]]
@@ -123,28 +123,28 @@ teardown() {
 
 @test "build_macos_command: adds --pure flag" {
 	local result
-	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "true")"
+	result="$(local _empty=(); build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "true" _empty)"
 
 	[[ "$result" == *"--pure"* ]]
 }
 
 @test "build_macos_command: no --pure when false" {
 	local result
-	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false")"
+	result="$(local _empty=(); build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty)"
 
 	[[ "$result" != *"--pure"* ]]
 }
 
 @test "build_macos_command: --run with user command" {
 	local result
-	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" "echo hello")"
+	result="$(local _empty=(); build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty "echo hello")"
 
 	[[ "$result" == *"--run 'exec 2>&3 3>&-; echo hello'"* ]]
 }
 
 @test "build_macos_command: --run escapes single quotes in command" {
 	local result
-	result="$(build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" "echo 'hi'")"
+	result="$(local _empty=(); build_macos_command "" "/tmp/proj" "/tmp/shell.nix" "false" _empty "echo 'hi'")"
 
 	[[ "$result" == *"--run '"* ]]
 	# Should contain escaped quote
@@ -153,7 +153,7 @@ teardown() {
 
 @test "build_macos_command: handles spaces in project dir" {
 	local result
-	result="$(build_macos_command "" "/tmp/my project" "/tmp/my project/shell.nix" "false")"
+	result="$(local _empty=(); build_macos_command "" "/tmp/my project" "/tmp/my project/shell.nix" "false" _empty)"
 
 	[[ "$result" == *"cd '/tmp/my project'"* ]]
 	[[ "$result" == *"nix-shell --quiet '/tmp/my project/shell.nix'"* ]]
