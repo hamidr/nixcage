@@ -35,7 +35,7 @@ Built for running tools like [Claude Code](https://docs.anthropic.com/en/docs/cl
 nix profile install github:you/nixcage
 
 # Or clone + install locally
-git clone https://github.com/you/nixcage.git
+git clone https://github.com/hamidr/nixcage.git
 cd nixcage
 nix profile install .
 ```
