@@ -454,6 +454,132 @@ escape_sq() {
 	printf '%s' "${1//\'/\'\\\'\'}"
 }
 
+# ─── macOS Helpers ──────────────────────────────────────────────────────────
+
+# Select and resolve a macOS sandbox profile template.
+# Replaces NIXCAGE_PROJECT_DIR and HOME_DIR placeholders via sed.
+# Echoes the resolved profile path.
+resolve_macos_profile() {
+	local project_dir="$1"
+	local level="$2"
+
+	local profile
+	case "$level" in
+	strict) profile="sandbox-macos-strict.sb" ;;
+	standard) profile="sandbox-macos-standard.sb" ;;
+	relaxed) profile="sandbox-macos-relaxed.sb" ;;
+	*)
+		log_err "Unknown sandbox level: $level (expected: strict, standard, relaxed)"
+		return 1
+		;;
+	esac
+
+	local profile_src="$project_dir/$NIXCAGE_DIR_NAME/profiles/$profile"
+	local profile_resolved="$project_dir/$NIXCAGE_DIR_NAME/profiles/sandbox-macos-resolved.sb"
+
+	sed \
+		-e "s|NIXCAGE_PROJECT_DIR|$project_dir|g" \
+		-e "s|HOME_DIR|$HOME|g" \
+		"$profile_src" >"$profile_resolved"
+
+	echo "$profile_resolved"
+}
+
+# Return seatbelt rule for store mode.
+# shared → empty; readonly/copy/isolated → deny file-write* on /nix
+build_macos_store_rules() {
+	local store_mode="$1"
+	case "$store_mode" in
+	shared) ;;
+	readonly | copy | isolated)
+		echo '(deny file-write* (subpath "/nix"))'
+		;;
+	*)
+		log_err "Unknown store_mode: $store_mode (expected: shared, readonly, copy, isolated)"
+		return 1
+		;;
+	esac
+}
+
+# Append read-only and read-write seatbelt rules for extra bind paths.
+# Skips nonexistent paths. Expands tildes.
+append_macos_bind_rules() {
+	local profile_path="$1"
+	local -n _ro_binds=$2
+	local -n _rw_binds=$3
+
+	local path
+	for path in "${_ro_binds[@]}"; do
+		path="$(expand_tilde "$path")"
+		[[ -n "$path" && -e "$path" ]] && echo "(allow file-read* (subpath \"$path\"))" >>"$profile_path"
+	done
+
+	for path in "${_rw_binds[@]}"; do
+		path="$(expand_tilde "$path")"
+		[[ -n "$path" && -e "$path" ]] && echo "(allow file-read* file-write* (subpath \"$path\"))" >>"$profile_path"
+	done
+}
+
+# Remove all (allow network lines from a seatbelt profile.
+# Uses portable temp-file approach (avoids BSD vs GNU sed -i differences).
+strip_macos_network_rules() {
+	local profile_path="$1"
+	sed '/(allow network/d' "$profile_path" >"${profile_path}.tmp"
+	mv "${profile_path}.tmp" "$profile_path"
+}
+
+# Build env export string for macOS sandbox bash -c invocation.
+# Always includes NIXCAGE_PACKAGES_JSON and NIXCAGE_ACTIVE.
+build_macos_env_exports() {
+	local pkg_json="$1"
+	local -n _passthrough=$2
+
+	local env_exports=""
+	local var
+	for var in "${_passthrough[@]}"; do
+		[[ -n "${!var:-}" ]] && env_exports+="export ${var}='$(escape_sq "${!var}")'; "
+	done
+	env_exports+="export NIXCAGE_PACKAGES_JSON='$(escape_sq "$pkg_json")'; "
+	env_exports+="export NIXCAGE_ACTIVE=1; "
+
+	printf '%s' "$env_exports"
+}
+
+# Assemble the full bash -c command for macOS sandbox-exec.
+# Returns: "env_exports cd 'dir' && nix-shell 'path' [--pure] [--run 'cmd']"
+build_macos_command() {
+	local env_exports="$1"
+	local project_dir="$2"
+	local shell_nix="$3"
+	local pure_flag="$4"
+	shift 4
+	local cmd=("$@")
+
+	local nix_cmd
+	nix_cmd="nix-shell '$(escape_sq "$shell_nix")'"
+	[[ "$pure_flag" == "true" ]] && nix_cmd+=" --pure"
+
+	if [[ ${#cmd[@]} -gt 0 ]]; then
+		nix_cmd+=" --run '$(escape_sq "${cmd[*]}")'"
+	fi
+
+	printf '%s' "${env_exports}cd '$(escape_sq "$project_dir")' && ${nix_cmd}"
+}
+
+# Warn about macOS-unsupported features (blacklist, resource limits).
+warn_macos_unsupported() {
+	local -n _blacklist=$1
+	local cpus="$2"
+	local memory="$3"
+
+	if [[ ${#_blacklist[@]} -gt 0 ]]; then
+		log_warn "blacklist is not supported on macOS (Seatbelt cannot selectively deny subpaths)"
+	fi
+	if [[ "$cpus" != "0" || -n "$memory" ]]; then
+		log_warn "Resource limits (cpus/memory) are not available on macOS"
+	fi
+}
+
 # ─── Sandbox Runners ────────────────────────────────────────────────────────
 
 run_linux() {
@@ -610,16 +736,6 @@ run_macos() {
 		exit 1
 	fi
 
-	local profile
-	case "$CAGE_LEVEL" in
-	strict) profile="sandbox-macos-strict.sb" ;;
-	standard) profile="sandbox-macos-standard.sb" ;;
-	relaxed) profile="sandbox-macos-relaxed.sb" ;;
-	esac
-
-	local profile_src="$project_dir/$NIXCAGE_DIR_NAME/profiles/$profile"
-	local profile_resolved="$project_dir/$NIXCAGE_DIR_NAME/profiles/sandbox-macos-resolved.sb"
-
 	# ── Pre-resolve packages on host ──
 	local pkg_json
 	pkg_json="$(printf '%s\n' "${CAGE_PACKAGES[@]}" | jq -R . | jq -s .)"
@@ -631,80 +747,38 @@ run_macos() {
 		exit 1
 	}
 
-	# ── Handle store mode ──
-	local extra_sb_rules=""
-
+	# ── Handle store mode (copy/isolated not supported on macOS) ──
 	case "$CAGE_STORE_MODE" in
-	shared)
-		;;
-	readonly)
-		extra_sb_rules='(deny file-write* (subpath "/nix"))'
-		;;
 	copy | isolated)
 		log_warn "store_mode '$CAGE_STORE_MODE' is not supported on macOS (cannot remap /nix/store)"
 		log_warn "Falling back to 'readonly'"
 		CAGE_STORE_MODE="readonly"
-		extra_sb_rules='(deny file-write* (subpath "/nix"))'
-		;;
-	*)
-		log_err "Unknown store_mode: $CAGE_STORE_MODE (expected: shared, readonly, copy, isolated)"
-		exit 1
 		;;
 	esac
 
-	# Resolve placeholders in sandbox profile
-	sed \
-		-e "s|NIXCAGE_PROJECT_DIR|$project_dir|g" \
-		-e "s|HOME_DIR|$HOME|g" \
-		"$profile_src" >"$profile_resolved"
+	local extra_sb_rules
+	extra_sb_rules="$(build_macos_store_rules "$CAGE_STORE_MODE")"
 
-	# Append store mode rules
+	# ── Resolve sandbox profile ──
+	local profile_resolved
+	profile_resolved="$(resolve_macos_profile "$project_dir" "$CAGE_LEVEL")"
+
 	[[ -n "$extra_sb_rules" ]] && echo "$extra_sb_rules" >>"$profile_resolved"
 
-	# Add extra ro_bind paths (skip nonexistent, matching Linux behavior)
-	for path in "${CAGE_RO_BIND[@]}"; do
-		path="$(expand_tilde "$path")"
-		[[ -n "$path" && -e "$path" ]] && echo "(allow file-read* (subpath \"$path\"))" >>"$profile_resolved"
-	done
+	append_macos_bind_rules "$profile_resolved" CAGE_RO_BIND CAGE_RW_BIND
 
-	# Add extra rw_bind paths (skip nonexistent, matching Linux behavior)
-	for path in "${CAGE_RW_BIND[@]}"; do
-		path="$(expand_tilde "$path")"
-		[[ -n "$path" && -e "$path" ]] && echo "(allow file-read* file-write* (subpath \"$path\"))" >>"$profile_resolved"
-	done
-
-	# Warn about unsupported features on macOS
-	if [[ ${#CAGE_BLACKLIST[@]} -gt 0 ]]; then
-		log_warn "blacklist is not supported on macOS (Seatbelt cannot selectively deny subpaths)"
-	fi
-	if [[ "$CAGE_CPUS" != "0" || -n "$CAGE_MEMORY" ]]; then
-		log_warn "Resource limits (cpus/memory) are not available on macOS"
-	fi
-
-	# Build passthrough env (escape single quotes to prevent injection)
-	local env_exports=""
-	for var in "${CAGE_PASSTHROUGH_ENV[@]}"; do
-		[[ -n "${!var:-}" ]] && env_exports+="export ${var}='$(escape_sq "${!var}")'; "
-	done
-	env_exports+="export NIXCAGE_PACKAGES_JSON='$(escape_sq "$pkg_json")'; "
-	env_exports+="export NIXCAGE_ACTIVE=1; "
-
-	# Network override: strip allow rules when network is disabled
 	if [[ "$CAGE_NET_ALLOW" == "false" ]]; then
-		sed -i '' '/(allow network/d' "$profile_resolved"
+		strip_macos_network_rules "$profile_resolved"
 	fi
 
-	# Build the nix-shell command
-	local nix_cmd
-	nix_cmd="nix-shell '$(escape_sq "$shell_nix")'"
-	[[ "$CAGE_PURE" == "true" ]] && nix_cmd+=" --pure"
+	warn_macos_unsupported CAGE_BLACKLIST "$CAGE_CPUS" "$CAGE_MEMORY"
 
-	if [[ ${#cmd[@]} -gt 0 ]]; then
-		nix_cmd+=" --run '$(escape_sq "${cmd[*]}")'"
-	fi
+	# ── Build and execute sandboxed command ──
+	local env_exports
+	env_exports="$(build_macos_env_exports "$pkg_json" CAGE_PASSTHROUGH_ENV)"
 
 	local full_cmd
-	full_cmd="${env_exports} cd '$(escape_sq "$project_dir")' && ${nix_cmd}"
+	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" ${cmd[@]+"${cmd[@]}"})"
 
 	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
 	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd"
