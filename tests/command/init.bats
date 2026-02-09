@@ -172,6 +172,30 @@ teardown() {
 	done
 }
 
+@test "init: all macOS profiles allow process-exec-interpreter" {
+	run_nixcage init "$TEST_TEMP_DIR"
+	for level in strict standard relaxed; do
+		run grep -q '(allow process-exec-interpreter)' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-${level}.sb"
+		assert_success
+	done
+}
+
+@test "init: all macOS profiles allow file-ioctl" {
+	run_nixcage init "$TEST_TEMP_DIR"
+	for level in strict standard relaxed; do
+		run grep -q '(allow file-ioctl)' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-${level}.sb"
+		assert_success
+	done
+}
+
+@test "init: all macOS profiles allow reading root directory" {
+	run_nixcage init "$TEST_TEMP_DIR"
+	for level in strict standard relaxed; do
+		run grep -q '(literal "/")' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-${level}.sb"
+		assert_success
+	done
+}
+
 @test "init: prints success message" {
 	run_nixcage init "$TEST_TEMP_DIR"
 	assert_success

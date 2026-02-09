@@ -114,6 +114,28 @@ teardown() {
 	done
 }
 
+@test "story: all macOS profiles have base permissions for sandbox-exec" {
+	run_nixcage init "$TEST_TEMP_DIR"
+
+	# These three permissions are required for sandbox-exec to run
+	# /bin/bash -c "..." without silently aborting (exit 134).
+	for level in strict standard relaxed; do
+		local profile="$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-${level}.sb"
+
+		# Shebang script execution
+		run grep -q '(allow process-exec-interpreter)' "$profile"
+		assert_success
+
+		# Terminal I/O (ioctl on /dev/tty)
+		run grep -q '(allow file-ioctl)' "$profile"
+		assert_success
+
+		# Root directory read for path traversal
+		run grep -q '(literal "/")' "$profile"
+		assert_success
+	done
+}
+
 @test "story: strict profile denies network" {
 	run_nixcage init "$TEST_TEMP_DIR"
 	local profile="$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-strict.sb"
