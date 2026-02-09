@@ -1,0 +1,65 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What is nixcage
+
+nixcage is a single-file Bash tool that creates sandboxed Nix environments with direnv auto-activation. It uses **bubblewrap (bwrap)** on Linux and **sandbox-exec (Seatbelt)** on macOS. The primary use case is running tools like Claude Code in isolated project directories.
+
+## Repository layout
+
+- `nixcage` — the entire tool: a single self-contained Bash script (~860 lines). All commands, config parsing, and sandbox logic live here.
+- `default.nix` — Nix derivation for packaging; copies `nixcage` into `$out/bin` and wraps it with runtime dependencies
+- `flake.nix` — Nix flake wrapping `default.nix`, also provides a dev shell
+
+## Development
+
+### Enter the dev shell
+
+```bash
+nix develop   # provides bash, jq, shellcheck, direnv (+ bwrap on Linux)
+```
+
+### Lint
+
+```bash
+shellcheck nixcage
+```
+
+There is no test suite yet. There is no build step — the script runs directly.
+
+### Run locally without installing
+
+```bash
+bash nixcage help
+bash nixcage init /tmp/test-project
+```
+
+## Architecture
+
+The script follows a command-dispatch pattern: `main()` at the bottom dispatches to `cmd_*` functions.
+
+### Key subsystems
+
+1. **Config parser** (`parse_config`) — minimal TOML parser that reads `nixcage.toml` into `CAGE_*` global variables. Only handles flat keys and simple arrays; does not support nested tables or inline tables.
+
+2. **Sandbox runners** — platform-specific functions that build sandbox arguments:
+   - `run_linux()` — builds bwrap argument arrays from config (namespaces, bind mounts, network). Sources the generated `sandbox-linux.sh` profile for `build_bwrap_args()`.
+   - `run_macos()` — resolves placeholders (`NIXCAGE_PROJECT_DIR`, `HOME_DIR`) in `.sb` Seatbelt profiles via sed, then calls `sandbox-exec`.
+   - Both resolve nix packages on the host *before* entering the sandbox, then mount `/nix/store` inside.
+
+3. **Store isolation** (`store_mode`) — four modes: `shared`, `readonly`, `copy`, `isolated`. Each mode adjusts how `/nix/store` is mounted/copied. The `copy` and `isolated` modes create local store directories under `.nixcage/`.
+
+4. **direnv hook** (`cmd_direnv_hook`) — outputs shell code that exports `NIXCAGE_*` env vars and defines `cage`/`cagerun` aliases. Called from the generated `.envrc`.
+
+5. **Init** (`cmd_init`) — generates all per-project files: `nixcage.toml`, `.envrc`, `.nixcage/shell.nix`, `.nixcage/profiles/` (three macOS `.sb` profiles + one Linux `.sh` profile).
+
+### Platform branching
+
+`detect_os()` echoes `"linux"` or `"macos"`; captured at top-level as `OS="$(detect_os)"`. `run_sandboxed()` dispatches to the appropriate runner. Resource limits (cgroups via `systemd-run`) are Linux-only. Store modes `copy` and `isolated` are Linux-only; on macOS they fall back to `readonly`.
+
+## Conventions
+
+- All config variables use the `CAGE_` prefix as globals.
+- Sandbox profiles are generated at `init` time into `.nixcage/profiles/`, not shipped as separate source files.
+- The resolved macOS profile (`sandbox-macos-resolved.sb`) is gitignored; the templates use literal placeholders.

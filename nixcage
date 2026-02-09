@@ -1,0 +1,907 @@
+#!/usr/bin/env bash
+# nixcage - Sandboxed Nix environments with direnv integration
+# Works on Linux (bwrap) and macOS (sandbox-exec)
+
+set -euo pipefail
+
+NIXCAGE_VERSION="0.1.0"
+NIXCAGE_DIR_NAME=".nixcage"
+NIXCAGE_CONF="nixcage.toml"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+log_info() { echo -e "${CYAN}[nixcage]${NC} $*"; }
+log_ok() { echo -e "${GREEN}[nixcage]${NC} $*"; }
+log_warn() { echo -e "${YELLOW}[nixcage]${NC} $*"; }
+log_err() { echo -e "${RED}[nixcage]${NC} $*" >&2; }
+
+detect_os() {
+	case "$(uname -s)" in
+	Linux*) echo "linux" ;;
+	Darwin*) echo "macos" ;;
+	*)
+		log_err "Unsupported OS: $(uname -s)"
+		exit 1
+		;;
+	esac
+}
+
+OS="$(detect_os)"
+
+# ─── Commands ────────────────────────────────────────────────────────────────
+
+cmd_init() {
+	local dir="${1:-.}"
+	local cage_dir="$dir/$NIXCAGE_DIR_NAME"
+
+	if [[ -d "$cage_dir" ]]; then
+		log_warn "nixcage already initialized in $dir"
+		log_warn "Use 'nixcage reinit' to overwrite, or 'nixcage destroy' first."
+		exit 1
+	fi
+
+	log_info "Initializing nixcage in ${BOLD}$dir${NC}"
+
+	mkdir -p "$cage_dir"
+
+	# ── Generate config ──
+	cat >"$dir/$NIXCAGE_CONF" <<'TOML'
+# nixcage configuration
+
+[sandbox]
+# Isolation level: "strict" | "standard" | "relaxed"
+#   strict   = minimal access, no network, tmpfs home
+#   standard = project dir writable, network allowed, tmpfs home
+#   relaxed  = project dir writable, network allowed, real home readable
+level = "standard"
+
+[sandbox.filesystem]
+# Extra read-only paths accessible inside the cage
+ro_bind = []
+# Extra read-write paths accessible inside the cage
+rw_bind = []
+# Paths explicitly hidden from the cage
+blacklist = []
+
+[sandbox.network]
+# Allow network access
+allow = true
+
+[sandbox.resources]
+# Max CPU cores (0 = unlimited)
+cpus = 0
+# Max memory, e.g. "4G" (empty = unlimited)
+memory = ""
+
+[nix]
+# Extra packages to include
+packages = ["nodejs_22"]
+# Run nix-shell with --pure
+pure = true
+# Nix store isolation mode:
+#   "shared"   = reads AND writes host /nix/store (fastest, no isolation)
+#   "readonly" = reads host store, writes go to tmpfs (fast, but new pkgs fail)
+#   "copy"     = copies closure to a local store, fully isolated (Linux only)
+#   "isolated" = completely separate store, no host access (Linux only)
+store_mode = "readonly"
+
+[cage]
+# Command to run when entering the cage (empty = shell)
+command = ""
+# Environment variables to passthrough from host
+passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY"]
+TOML
+
+	# ── Generate shell.nix ──
+	cat >"$cage_dir/shell.nix" <<'NIX'
+{ pkgs ? import <nixpkgs> {} }:
+
+let
+  # Read from nixcage.toml would happen via the wrapper.
+  # This is the base shell — nixcage injects extra packages at runtime.
+  extraPackages = builtins.fromJSON (builtins.getEnv "NIXCAGE_PACKAGES_JSON");
+  resolvedPkgs = map (name: pkgs.${name} or (throw "Unknown package: ${name}")) extraPackages;
+in
+pkgs.mkShell {
+  buildInputs = resolvedPkgs;
+
+  shellHook = ''
+    export NIXCAGE_ACTIVE=1
+    export NIXCAGE_ROOT="$(pwd)"
+  '';
+}
+NIX
+
+	# ── Generate .envrc ──
+	cat >"$dir/.envrc" <<'ENVRC'
+# Managed by nixcage — do not edit this block
+# ─────────────────────────────────────────────
+if command -v nixcage &>/dev/null; then
+  eval "$(nixcage _direnv_hook)"
+else
+  echo "[nixcage] Warning: nixcage not found in PATH. Falling back to plain nix-shell."
+  use nix .nixcage/shell.nix
+fi
+ENVRC
+
+	# ── Generate sandbox profiles ──
+	mkdir -p "$cage_dir/profiles"
+
+	# Linux bwrap profile
+	cat >"$cage_dir/profiles/sandbox-linux.sh" <<'BWRAP_PROFILE'
+#!/usr/bin/env bash
+# Auto-generated bwrap sandbox profile for nixcage
+
+build_bwrap_args() {
+  local project_dir="$1"
+  local level="$2"
+  local -n _args=$3
+
+  # Base: new namespaces
+  _args+=(--unshare-pid --unshare-uts --unshare-ipc --die-with-parent)
+
+  # /nix/store is always needed, read-only
+  _args+=(--ro-bind /nix/store /nix/store)
+
+  # Basic system paths (read-only)
+  _args+=(--ro-bind /etc/resolv.conf /etc/resolv.conf)
+  [[ -d /etc/ssl ]] && _args+=(--ro-bind /etc/ssl /etc/ssl)
+  [[ -d /etc/static ]] && _args+=(--ro-bind /etc/static /etc/static)
+  [[ -d /etc/nix ]] && _args+=(--ro-bind /etc/nix /etc/nix)
+  _args+=(--proc /proc --dev /dev)
+  _args+=(--tmpfs /tmp)
+
+  case "$level" in
+    strict)
+      _args+=(--tmpfs /home --unshare-net)
+      ;;
+    standard)
+      _args+=(--tmpfs /home --share-net)
+      _args+=(--bind "$project_dir" "$project_dir")
+      ;;
+    relaxed)
+      _args+=(--ro-bind "$HOME" "$HOME" --share-net)
+      _args+=(--bind "$project_dir" "$project_dir")
+      ;;
+  esac
+
+  _args+=(--chdir "$project_dir")
+}
+BWRAP_PROFILE
+
+	# macOS sandbox-exec profile
+	cat >"$cage_dir/profiles/sandbox-macos-strict.sb" <<'SB_STRICT'
+(version 1)
+(deny default)
+(allow process-exec)
+(allow process-fork)
+(allow signal)
+(allow sysctl-read)
+(allow mach-lookup)
+(allow ipc-posix*)
+(allow file-read*
+  (subpath "/nix")
+  (subpath "/dev")
+  (subpath "/private/tmp")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/System")
+  (subpath "/Library/Frameworks")
+  (subpath "/private/var/run")
+  (literal "/etc/resolv.conf")
+  (literal "/private/etc/resolv.conf")
+)
+(allow file-write*
+  (subpath "/private/tmp")
+  (subpath "/dev/null")
+  (subpath "/dev/tty")
+)
+; No network in strict mode
+SB_STRICT
+
+	cat >"$cage_dir/profiles/sandbox-macos-standard.sb" <<'SB_STANDARD'
+(version 1)
+(deny default)
+(allow process-exec)
+(allow process-fork)
+(allow signal)
+(allow sysctl-read)
+(allow mach-lookup)
+(allow ipc-posix*)
+(allow file-read*
+  (subpath "/nix")
+  (subpath "/dev")
+  (subpath "/private/tmp")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/System")
+  (subpath "/Library/Frameworks")
+  (subpath "/private/var/run")
+  (literal "/etc/resolv.conf")
+  (literal "/private/etc/resolv.conf")
+)
+(allow file-write*
+  (subpath "/private/tmp")
+  (subpath "/dev/null")
+  (subpath "/dev/tty")
+)
+(allow file-read* file-write*
+  (subpath "NIXCAGE_PROJECT_DIR")
+)
+(allow network-outbound)
+(allow network-inbound)
+SB_STANDARD
+
+	cat >"$cage_dir/profiles/sandbox-macos-relaxed.sb" <<'SB_RELAXED'
+(version 1)
+(deny default)
+(allow process-exec)
+(allow process-fork)
+(allow signal)
+(allow sysctl-read)
+(allow mach-lookup)
+(allow ipc-posix*)
+(allow file-read*
+  (subpath "/nix")
+  (subpath "/dev")
+  (subpath "/private/tmp")
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/System")
+  (subpath "/Library/Frameworks")
+  (subpath "/private/var/run")
+  (subpath "HOME_DIR")
+  (literal "/etc/resolv.conf")
+  (literal "/private/etc/resolv.conf")
+)
+(allow file-write*
+  (subpath "/private/tmp")
+  (subpath "/dev/null")
+  (subpath "/dev/tty")
+  (subpath "NIXCAGE_PROJECT_DIR")
+)
+(allow network-outbound)
+(allow network-inbound)
+SB_RELAXED
+
+	# ── Create .gitignore for the cage dir ──
+	cat >"$cage_dir/.gitignore" <<'GI'
+# Don't commit generated/runtime files
+profiles/sandbox-macos-resolved.sb
+store/
+isolated-store/
+*.log
+GI
+
+	log_ok "Initialized! Files created:"
+	log_info "  $dir/$NIXCAGE_CONF        ← edit your config here"
+	log_info "  $dir/.envrc                ← direnv hook"
+	log_info "  $dir/.nixcage/             ← sandbox profiles & shell.nix"
+	echo ""
+	log_info "Next steps:"
+	log_info "  1. Edit ${BOLD}$NIXCAGE_CONF${NC} to configure packages, sandbox level, etc."
+	log_info "  2. Run ${BOLD}direnv allow${NC} in the project directory"
+	log_info "  3. Use ${BOLD}nixcage run <cmd>${NC} to run commands in the sandbox"
+	log_info "  4. Or just ${BOLD}nixcage shell${NC} to enter an interactive sandboxed shell"
+}
+
+cmd_reinit() {
+	local dir="${1:-.}"
+	if [[ -d "$dir/$NIXCAGE_DIR_NAME" ]]; then
+		rm -rf "${dir:?}/$NIXCAGE_DIR_NAME"
+		log_info "Removed existing .nixcage directory"
+	fi
+	cmd_init "$dir"
+}
+
+cmd_destroy() {
+	local dir="${1:-.}"
+	if [[ -d "$dir/$NIXCAGE_DIR_NAME" ]]; then
+		rm -rf "${dir:?}/$NIXCAGE_DIR_NAME"
+		rm -f "$dir/$NIXCAGE_CONF"
+		rm -f "$dir/.envrc"
+		log_ok "Removed all nixcage files from $dir"
+	else
+		log_warn "No nixcage found in $dir"
+	fi
+}
+
+# ─── Config Parser ───────────────────────────────────────────────────────────
+# Minimal TOML parser (handles our flat config). For complex needs, use a real parser.
+
+parse_config() {
+	local config_file="$1"
+	if [[ ! -f "$config_file" ]]; then
+		log_err "Config not found: $config_file"
+		exit 1
+	fi
+
+	# Defaults
+	CAGE_LEVEL="standard"
+	CAGE_NET_ALLOW="true"
+	CAGE_RO_BIND=()
+	CAGE_RW_BIND=()
+	CAGE_BLACKLIST=()
+	CAGE_CPUS="0"
+	CAGE_MEMORY=""
+	CAGE_PACKAGES=("nodejs_22")
+	CAGE_PURE="true"
+	CAGE_STORE_MODE="readonly"
+	CAGE_PASSTHROUGH_ENV=("TERM" "LANG" "ANTHROPIC_API_KEY")
+	CAGE_COMMAND=""
+
+	local current_section=""
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		# Strip whitespace; skip empty lines and full-line comments
+		line="$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')"
+		[[ -z "$line" || "$line" =~ ^# ]] && continue
+
+		# Section headers
+		if [[ "$line" =~ ^\[(.+)\]$ ]]; then
+			current_section="${BASH_REMATCH[1]}"
+			continue
+		fi
+
+		# Key = value
+		if [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*(.+)$ ]]; then
+			local key="${BASH_REMATCH[1]}"
+			local val="${BASH_REMATCH[2]}"
+
+			# Strip inline comments (only outside quoted strings and arrays)
+			if [[ "$val" =~ ^\".*\"[[:space:]]*#.*$ ]]; then
+				val="$(echo "$val" | sed 's/^\("[^"]*"\)[[:space:]]*#.*/\1/')"
+			elif [[ "$val" =~ ^\'.*\'[[:space:]]*#.*$ ]]; then
+				val="$(echo "$val" | sed "s/^\('[^']*'\)[[:space:]]*#.*/\1/")"
+			elif [[ ! "$val" =~ ^\[.*\]$ ]] && [[ "$val" =~ ^[^\"\'][^#]*#.*$ ]]; then
+				val="$(echo "$val" | sed 's/[[:space:]]*#.*//')"
+			fi
+
+			# Strip quotes
+			val="$(echo "$val" | sed 's/^"//' | sed 's/"$//' | sed "s/^'//" | sed "s/'$//")"
+
+			case "${current_section}.${key}" in
+			sandbox.level) CAGE_LEVEL="$val" ;;
+			sandbox.network.allow) CAGE_NET_ALLOW="$val" ;;
+			sandbox.resources.cpus) CAGE_CPUS="$val" ;;
+			sandbox.resources.memory) CAGE_MEMORY="$val" ;;
+			nix.pure) CAGE_PURE="$val" ;;
+			nix.store_mode) CAGE_STORE_MODE="$val" ;;
+			cage.command) CAGE_COMMAND="$val" ;;
+			esac
+
+			# Array values
+			if [[ "$val" =~ ^\[.*\]$ ]]; then
+				local arr_content
+				arr_content="$(echo "$val" | sed 's/^\[//' | sed 's/\]$//')"
+				local arr_items=()
+				# Parse comma-separated items, respecting quoted values with spaces
+				while IFS= read -r -d ',' item || [[ -n "$item" ]]; do
+					item="$(echo "$item" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^"//' | sed 's/"$//' | sed "s/^'//" | sed "s/'$//")"
+					[[ -n "$item" ]] && arr_items+=("$item")
+				done <<<"$arr_content"
+				case "${current_section}.${key}" in
+				sandbox.filesystem.ro_bind) CAGE_RO_BIND=("${arr_items[@]}") ;;
+				sandbox.filesystem.rw_bind) CAGE_RW_BIND=("${arr_items[@]}") ;;
+				sandbox.filesystem.blacklist) CAGE_BLACKLIST=("${arr_items[@]}") ;;
+				nix.packages) CAGE_PACKAGES=("${arr_items[@]}") ;;
+				cage.passthrough_env) CAGE_PASSTHROUGH_ENV=("${arr_items[@]}") ;;
+				esac
+			fi
+		fi
+	done <"$config_file"
+}
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+expand_tilde() {
+	local p="$1"
+	# shellcheck disable=SC2088
+	if [[ "$p" == "~/"* ]]; then
+		echo "$HOME/${p:2}"
+	elif [[ "$p" == "~" ]]; then
+		echo "$HOME"
+	else
+		echo "$p"
+	fi
+}
+
+# Remove --ro-bind /nix/store /nix/store triplet from a bwrap args array
+strip_nix_store_bind() {
+	local -n _arr=$1
+	local filtered=()
+	local len=${#_arr[@]}
+	local i=0
+	while [[ $i -lt $len ]]; do
+		if [[ "${_arr[$i]}" == "--ro-bind" ]] \
+			&& [[ "${_arr[$((i + 1))]:-}" == "/nix/store" ]] \
+			&& [[ "${_arr[$((i + 2))]:-}" == "/nix/store" ]]; then
+			i=$((i + 3))
+			continue
+		fi
+		filtered+=("${_arr[$i]}")
+		i=$((i + 1))
+	done
+	_arr=("${filtered[@]}")
+}
+
+# Copy a Nix store closure to a local directory
+copy_store_closure() {
+	local drv_path="$1"
+	local target_store="$2"
+	[[ -n "$drv_path" ]] || return 1
+
+	local paths
+	paths="$(nix-store -qR "$drv_path" 2>/dev/null)" || return 1
+
+	local path
+	for path in $paths; do
+		if [[ -e "$path" && ! -e "${target_store}${path}" ]]; then
+			mkdir -p "${target_store}$(dirname "$path")"
+			cp -a "$path" "${target_store}${path}"
+		fi
+	done
+}
+
+# Escape single quotes for safe embedding in '...' shell strings
+escape_sq() {
+	printf '%s' "${1//\'/\'\\\'\'}"
+}
+
+# ─── Sandbox Runners ────────────────────────────────────────────────────────
+
+run_linux() {
+	local project_dir="$1"
+	shift
+	local cmd=("$@")
+
+	if ! command -v bwrap &>/dev/null; then
+		log_err "bubblewrap (bwrap) not found. Install it:"
+		log_err "  nix-env -iA nixpkgs.bubblewrap"
+		log_err "  # or: apt install bubblewrap / dnf install bubblewrap"
+		exit 1
+	fi
+
+	# shellcheck source=/dev/null
+	source "$project_dir/$NIXCAGE_DIR_NAME/profiles/sandbox-linux.sh"
+
+	# ── Resolve nix environment BEFORE entering sandbox ──
+	local pkg_json
+	pkg_json="$(printf '%s\n' "${CAGE_PACKAGES[@]}" | jq -R . | jq -s .)"
+
+	local shell_nix="$project_dir/$NIXCAGE_DIR_NAME/shell.nix"
+
+	# Pre-build the environment on the host so all packages are in /nix/store
+	log_info "Resolving nix environment..."
+	NIXCAGE_PACKAGES_JSON="$pkg_json" nix-shell "$shell_nix" --run "true" 2>/dev/null || {
+		log_err "Failed to resolve nix-shell environment"
+		exit 1
+	}
+
+	# Collect the store closure (all paths needed by this shell)
+	local drv_path
+	drv_path="$(NIXCAGE_PACKAGES_JSON="$pkg_json" nix-instantiate "$shell_nix" 2>/dev/null)" || true
+
+	# ── Build bwrap args based on store_mode ──
+	local bwrap_args=()
+	build_bwrap_args "$project_dir" "$CAGE_LEVEL" bwrap_args
+
+	case "$CAGE_STORE_MODE" in
+	shared)
+		# Default: full host store, read-write daemon socket
+		# /nix/store already added by build_bwrap_args as ro-bind
+		# Allow daemon access for writes
+		[[ -S /nix/var/nix/daemon-socket/socket ]] &&
+			bwrap_args+=(--bind /nix/var/nix/daemon-socket /nix/var/nix/daemon-socket)
+		;;
+
+	readonly)
+		# /nix/store is read-only (already set by build_bwrap_args)
+		# No daemon socket — can't install new packages inside cage
+		# tmpfs over /nix/var so nix doesn't try to write state
+		bwrap_args+=(--tmpfs /nix/var)
+		;;
+
+	copy)
+		local local_store="$project_dir/$NIXCAGE_DIR_NAME/store"
+		mkdir -p "$local_store"
+
+		if [[ -n "$drv_path" ]]; then
+			log_info "Copying closure to local store..."
+			copy_store_closure "$drv_path" "$local_store" || true
+		fi
+
+		strip_nix_store_bind bwrap_args
+		bwrap_args+=(--ro-bind "$local_store/nix/store" /nix/store)
+		bwrap_args+=(--tmpfs /nix/var)
+		;;
+
+	isolated)
+		local iso_store="$project_dir/$NIXCAGE_DIR_NAME/isolated-store"
+		if [[ ! -d "$iso_store/nix/store" ]]; then
+			log_info "Copying closure to isolated store (first run will be slow)..."
+			mkdir -p "$iso_store"
+			copy_store_closure "$drv_path" "$iso_store" || {
+				log_err "Failed to build isolated store"
+				exit 1
+			}
+		fi
+
+		strip_nix_store_bind bwrap_args
+		bwrap_args+=(--ro-bind "$iso_store/nix/store" /nix/store)
+		bwrap_args+=(--tmpfs /nix/var)
+		;;
+
+	*)
+		log_err "Unknown store_mode: $CAGE_STORE_MODE (expected: shared, readonly, copy, isolated)"
+		exit 1
+		;;
+	esac
+
+	# Extra ro binds from config
+	for path in "${CAGE_RO_BIND[@]}"; do
+		path="$(expand_tilde "$path")"
+		[[ -n "$path" && -e "$path" ]] && bwrap_args+=(--ro-bind "$path" "$path")
+	done
+
+	# Extra rw binds from config
+	for path in "${CAGE_RW_BIND[@]}"; do
+		path="$(expand_tilde "$path")"
+		[[ -n "$path" && -e "$path" ]] && bwrap_args+=(--bind "$path" "$path")
+	done
+
+	# Blacklisted paths
+	for path in "${CAGE_BLACKLIST[@]}"; do
+		path="$(expand_tilde "$path")"
+		[[ -n "$path" ]] && bwrap_args+=(--tmpfs "$path")
+	done
+
+	# Network override
+	if [[ "$CAGE_NET_ALLOW" == "false" ]]; then
+		local filtered=()
+		for arg in "${bwrap_args[@]}"; do
+			[[ "$arg" != "--share-net" ]] && filtered+=("$arg")
+		done
+		bwrap_args=("${filtered[@]}" --unshare-net)
+	fi
+
+	# Passthrough env
+	local env_args=()
+	for var in "${CAGE_PASSTHROUGH_ENV[@]}"; do
+		[[ -n "${!var:-}" ]] && env_args+=(--setenv "$var" "${!var}")
+	done
+	env_args+=(--setenv NIXCAGE_PACKAGES_JSON "$pkg_json")
+	env_args+=(--setenv NIXCAGE_ACTIVE "1")
+
+	# Resource limits via systemd-run if available
+	local prefix=()
+	if [[ ("$CAGE_CPUS" != "0" || -n "$CAGE_MEMORY") ]] && command -v systemd-run &>/dev/null; then
+		prefix=(systemd-run --user --scope -q)
+		[[ "$CAGE_CPUS" != "0" ]] && prefix+=(-p "CPUQuota=${CAGE_CPUS}00%")
+		[[ -n "$CAGE_MEMORY" ]] && prefix+=(-p "MemoryMax=$CAGE_MEMORY")
+	fi
+
+	# Build the nix-shell command to run INSIDE the sandbox
+	local nix_args=(nix-shell "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
+	[[ "$CAGE_PURE" == "true" ]] && nix_args+=(--pure)
+
+	if [[ ${#cmd[@]} -gt 0 ]]; then
+		nix_args+=(--run "${cmd[*]}")
+	fi
+
+	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
+	"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
+}
+
+run_macos() {
+	local project_dir="$1"
+	shift
+	local cmd=("$@")
+
+	if ! command -v sandbox-exec &>/dev/null; then
+		log_err "sandbox-exec not found. It should be built into macOS."
+		log_err "If you are on a non-Apple system, nixcage requires macOS or Linux with bwrap."
+		exit 1
+	fi
+
+	local profile
+	case "$CAGE_LEVEL" in
+	strict) profile="sandbox-macos-strict.sb" ;;
+	standard) profile="sandbox-macos-standard.sb" ;;
+	relaxed) profile="sandbox-macos-relaxed.sb" ;;
+	esac
+
+	local profile_src="$project_dir/$NIXCAGE_DIR_NAME/profiles/$profile"
+	local profile_resolved="$project_dir/$NIXCAGE_DIR_NAME/profiles/sandbox-macos-resolved.sb"
+
+	# ── Pre-resolve packages on host ──
+	local pkg_json
+	pkg_json="$(printf '%s\n' "${CAGE_PACKAGES[@]}" | jq -R . | jq -s .)"
+	local shell_nix="$project_dir/$NIXCAGE_DIR_NAME/shell.nix"
+
+	log_info "Resolving nix environment..."
+	NIXCAGE_PACKAGES_JSON="$pkg_json" nix-shell "$shell_nix" --run "true" 2>/dev/null || {
+		log_err "Failed to resolve nix-shell environment"
+		exit 1
+	}
+
+	# ── Handle store mode ──
+	local extra_sb_rules=""
+
+	case "$CAGE_STORE_MODE" in
+	shared)
+		;;
+	readonly)
+		extra_sb_rules='(deny file-write* (subpath "/nix"))'
+		;;
+	copy | isolated)
+		log_warn "store_mode '$CAGE_STORE_MODE' is not supported on macOS (cannot remap /nix/store)"
+		log_warn "Falling back to 'readonly'"
+		CAGE_STORE_MODE="readonly"
+		extra_sb_rules='(deny file-write* (subpath "/nix"))'
+		;;
+	*)
+		log_err "Unknown store_mode: $CAGE_STORE_MODE (expected: shared, readonly, copy, isolated)"
+		exit 1
+		;;
+	esac
+
+	# Resolve placeholders in sandbox profile
+	sed \
+		-e "s|NIXCAGE_PROJECT_DIR|$project_dir|g" \
+		-e "s|HOME_DIR|$HOME|g" \
+		"$profile_src" >"$profile_resolved"
+
+	# Append store mode rules
+	[[ -n "$extra_sb_rules" ]] && echo "$extra_sb_rules" >>"$profile_resolved"
+
+	# Add extra ro_bind paths (skip nonexistent, matching Linux behavior)
+	for path in "${CAGE_RO_BIND[@]}"; do
+		path="$(expand_tilde "$path")"
+		[[ -n "$path" && -e "$path" ]] && echo "(allow file-read* (subpath \"$path\"))" >>"$profile_resolved"
+	done
+
+	# Add extra rw_bind paths (skip nonexistent, matching Linux behavior)
+	for path in "${CAGE_RW_BIND[@]}"; do
+		path="$(expand_tilde "$path")"
+		[[ -n "$path" && -e "$path" ]] && echo "(allow file-read* file-write* (subpath \"$path\"))" >>"$profile_resolved"
+	done
+
+	# Warn about unsupported features on macOS
+	if [[ ${#CAGE_BLACKLIST[@]} -gt 0 ]]; then
+		log_warn "blacklist is not supported on macOS (Seatbelt cannot selectively deny subpaths)"
+	fi
+	if [[ "$CAGE_CPUS" != "0" || -n "$CAGE_MEMORY" ]]; then
+		log_warn "Resource limits (cpus/memory) are not available on macOS"
+	fi
+
+	# Build passthrough env (escape single quotes to prevent injection)
+	local env_exports=""
+	for var in "${CAGE_PASSTHROUGH_ENV[@]}"; do
+		[[ -n "${!var:-}" ]] && env_exports+="export ${var}='$(escape_sq "${!var}")'; "
+	done
+	env_exports+="export NIXCAGE_PACKAGES_JSON='$(escape_sq "$pkg_json")'; "
+	env_exports+="export NIXCAGE_ACTIVE=1; "
+
+	# Network override: strip allow rules when network is disabled
+	if [[ "$CAGE_NET_ALLOW" == "false" ]]; then
+		sed -i '' '/(allow network/d' "$profile_resolved"
+	fi
+
+	# Build the nix-shell command
+	local nix_cmd
+	nix_cmd="nix-shell '$(escape_sq "$shell_nix")'"
+	[[ "$CAGE_PURE" == "true" ]] && nix_cmd+=" --pure"
+
+	if [[ ${#cmd[@]} -gt 0 ]]; then
+		nix_cmd+=" --run '$(escape_sq "${cmd[*]}")'"
+	fi
+
+	local full_cmd
+	full_cmd="${env_exports} cd '$(escape_sq "$project_dir")' && ${nix_cmd}"
+
+	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
+	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd"
+}
+
+run_sandboxed() {
+	local project_dir="$1"
+	shift
+
+	parse_config "$project_dir/$NIXCAGE_CONF"
+
+	# Validate sandbox level
+	case "$CAGE_LEVEL" in
+	strict | standard | relaxed) ;;
+	*)
+		log_err "Invalid sandbox level: '$CAGE_LEVEL' (expected: strict, standard, relaxed)"
+		exit 1
+		;;
+	esac
+
+	# Use default command from config if no command provided
+	local args=("$@")
+	if [[ ${#args[@]} -eq 0 && -n "$CAGE_COMMAND" ]]; then
+		args=("$CAGE_COMMAND")
+	fi
+
+	case "$OS" in
+	linux) run_linux "$project_dir" "${args[@]}" ;;
+	macos) run_macos "$project_dir" "${args[@]}" ;;
+	esac
+}
+
+cmd_run() {
+	local project_dir
+	project_dir="$(find_cage_root)"
+	run_sandboxed "$project_dir" "$@"
+}
+
+cmd_shell() {
+	local project_dir
+	project_dir="$(find_cage_root)"
+	run_sandboxed "$project_dir"
+}
+
+cmd_status() {
+	local project_dir
+	project_dir="$(find_cage_root)" 2>/dev/null || {
+		log_warn "Not inside a nixcage project"
+		exit 1
+	}
+
+	parse_config "$project_dir/$NIXCAGE_CONF"
+
+	echo -e "${BOLD}nixcage status${NC}"
+	echo -e "  Project:    $project_dir"
+	echo -e "  OS:         $OS"
+	echo -e "  Level:      $CAGE_LEVEL"
+	echo -e "  Store:      $CAGE_STORE_MODE"
+	echo -e "  Network:    $CAGE_NET_ALLOW"
+	echo -e "  Packages:   ${CAGE_PACKAGES[*]}"
+	echo -e "  Pure:       $CAGE_PURE"
+	echo ""
+
+	echo -e "${BOLD}Dependencies:${NC}"
+	local all_ok=true
+
+	check_dep() {
+		if command -v "$1" &>/dev/null; then
+			echo -e "  ${GREEN}✓${NC} $1"
+		else
+			echo -e "  ${RED}✗${NC} $1 — $2"
+			all_ok=false
+		fi
+	}
+
+	check_dep "nix-shell" "Install Nix: https://nixos.org/download"
+	check_dep "direnv" "Install: nix-env -iA nixpkgs.direnv"
+	check_dep "jq" "Install: nix-env -iA nixpkgs.jq"
+
+	if [[ "$OS" == "linux" ]]; then
+		check_dep "bwrap" "Install: nix-env -iA nixpkgs.bubblewrap"
+	else
+		check_dep "sandbox-exec" "Built into macOS (should already exist)"
+	fi
+
+	echo ""
+	if $all_ok; then
+		log_ok "All dependencies satisfied"
+	else
+		log_warn "Some dependencies missing (see above)"
+	fi
+}
+
+# ─── direnv hook ────────────────────────────────────────────────────────────
+
+cmd_direnv_hook() {
+	local project_dir
+	project_dir="$(find_cage_root)" 2>/dev/null || {
+		echo "echo '[nixcage] Not in a nixcage project'"
+		return
+	}
+
+	parse_config "$project_dir/$NIXCAGE_CONF"
+
+	# Export cage metadata into the shell
+	cat <<HOOK
+export NIXCAGE_ACTIVE=1
+export NIXCAGE_ROOT="$project_dir"
+export NIXCAGE_LEVEL="$CAGE_LEVEL"
+export NIXCAGE_OS="$OS"
+
+# Alias so 'cage run' works as shorthand
+cage() {
+  nixcage "\$@"
+}
+
+# Convenience: sandboxed command runner
+cagerun() {
+  nixcage run "\$@"
+}
+
+echo "[nixcage] Cage active: level=$CAGE_LEVEL os=$OS"
+echo "[nixcage] Use 'nixcage run <cmd>' or 'nixcage shell' to enter the sandbox"
+HOOK
+}
+
+# ─── Utility ────────────────────────────────────────────────────────────────
+
+find_cage_root() {
+	local dir="$PWD"
+	while [[ "$dir" != "/" ]]; do
+		if [[ -f "$dir/$NIXCAGE_CONF" ]]; then
+			echo "$dir"
+			return
+		fi
+		dir="$(dirname "$dir")"
+	done
+	log_err "No nixcage.toml found (searched up from $PWD)"
+	exit 1
+}
+
+cmd_help() {
+	cat <<HELP
+${BOLD}nixcage${NC} v${NIXCAGE_VERSION} — Sandboxed Nix environments
+
+${BOLD}Usage:${NC}
+  nixcage <command> [args...]
+
+${BOLD}Commands:${NC}
+  init [dir]       Initialize a new cage in a directory (default: current)
+  reinit [dir]     Re-initialize (destroy + init)
+  destroy [dir]    Remove all nixcage files from a directory
+  shell            Enter an interactive sandboxed shell
+  run <cmd...>     Run a command inside the sandbox
+  status           Show cage status and check dependencies
+  version          Print version
+  help             Show this help
+
+${BOLD}Quick start:${NC}
+  nixcage init
+  \$EDITOR nixcage.toml        # configure packages, sandbox level, etc.
+  direnv allow
+  nixcage run npx @anthropic-ai/claude-code
+
+${BOLD}How it works:${NC}
+  • direnv auto-activates when you cd into the project
+  • 'nixcage run' wraps commands in bwrap (Linux) or sandbox-exec (macOS)
+  • nix-shell provides reproducible dependencies
+  • Configure everything in nixcage.toml
+HELP
+}
+
+# ─── Main ───────────────────────────────────────────────────────────────────
+
+main() {
+	local command="${1:-help}"
+	shift || true
+
+	case "$command" in
+	init) cmd_init "$@" ;;
+	reinit) cmd_reinit "$@" ;;
+	destroy) cmd_destroy "$@" ;;
+	shell) cmd_shell "$@" ;;
+	run) cmd_run "$@" ;;
+	status) cmd_status "$@" ;;
+	_direnv_hook) cmd_direnv_hook "$@" ;;
+	help | --help | -h) cmd_help ;;
+	version | --version | -v) echo "nixcage $NIXCAGE_VERSION" ;;
+	*)
+		log_err "Unknown command: $command"
+		cmd_help
+		exit 1
+		;;
+	esac
+}
+
+# Allow sourcing without executing (for tests)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+	main "$@"
+fi
