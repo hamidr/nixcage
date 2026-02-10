@@ -3,46 +3,81 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    flake-parts.url = "github:hercules-ci/flake-parts";
   };
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-    }:
-    flake-utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-      in
-      {
-        packages.default = pkgs.callPackage ./default.nix { };
+    inputs:
+    inputs.flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
 
-        # Dev shell for working on nixcage itself
-        devShells.default = pkgs.mkShell {
-          buildInputs =
+      perSystem =
+        { pkgs, ... }:
+        let
+          runtimeDeps =
             with pkgs;
             [
-              bash
               jq
-              shellcheck
-              direnv
-              bats
-              bats.libraries.bats-support
-              bats.libraries.bats-assert
+              coreutils
+              gnused
+              bash
             ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               bubblewrap
             ];
+        in
+        {
+          packages.default = pkgs.stdenv.mkDerivation {
+            pname = "nixcage";
+            version = "0.1.0";
 
-          BATS_LIB_PATH = "${pkgs.bats.libraries.bats-support}/share/bats:${pkgs.bats.libraries.bats-assert}/share/bats";
+            src = ./.;
 
-          shellHook = ''
-            git config core.hooksPath .githooks
-          '';
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+
+            installPhase = ''
+              mkdir -p $out/bin
+              cp nixcage $out/bin/nixcage
+              chmod +x $out/bin/nixcage
+
+              wrapProgram $out/bin/nixcage \
+                --prefix PATH : ${pkgs.lib.makeBinPath runtimeDeps}
+            '';
+
+            meta = with pkgs.lib; {
+              description = "Sandboxed Nix environments with direnv integration";
+              license = licenses.gpl3Only;
+              platforms = platforms.unix;
+            };
+          };
+
+          devShells.default = pkgs.mkShell {
+            buildInputs =
+              with pkgs;
+              [
+                bash
+                jq
+                shellcheck
+                direnv
+                bats
+                bats.libraries.bats-support
+                bats.libraries.bats-assert
+              ]
+              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+                bubblewrap
+              ];
+
+            BATS_LIB_PATH = "${pkgs.bats.libraries.bats-support}/share/bats:${pkgs.bats.libraries.bats-assert}/share/bats";
+
+            shellHook = ''
+              git config core.hooksPath .githooks
+            '';
+          };
         };
-      }
-    );
+    };
 }

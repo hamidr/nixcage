@@ -377,27 +377,12 @@ It is **not** designed to contain a determined adversary with root-level exploit
 
 ## 11. Packaging
 
-### 11.1 Nix derivation (`default.nix`)
+### 11.1 Flake (`flake.nix`)
 
-```nix
-pkgs.stdenv.mkDerivation {
-  pname = "nixcage";
-  version = "0.1.0";
-  src = ./.;
-  nativeBuildInputs = [ pkgs.makeWrapper ];
-  installPhase = ''
-    cp nixcage $out/bin/nixcage
-    wrapProgram $out/bin/nixcage --prefix PATH : <runtime_deps>
-  '';
-}
-```
+Uses [flake-parts](https://flake.parts/) for per-system outputs.
 
-Runtime dependencies injected into `PATH` via `wrapProgram`: `jq`, `coreutils`, `gnused`, `bash`, and (on Linux) `bubblewrap`.
-
-### 11.2 Flake (`flake.nix`)
-
-- `packages.default`: calls `default.nix`
-- `devShells.default`: provides `bash`, `jq`, `shellcheck`, `direnv`, and (on Linux) `bubblewrap`
+- `packages.default`: `mkDerivation` that copies `nixcage` into `$out/bin` and wraps it with runtime deps (`jq`, `coreutils`, `gnused`, `bash`, and `bubblewrap` on Linux) via `wrapProgram`.
+- `devShells.default`: provides `bash`, `jq`, `shellcheck`, `direnv`, `bats`, and (on Linux) `bubblewrap`.
 
 Nixpkgs input tracks `nixos-unstable`.
 

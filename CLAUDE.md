@@ -9,8 +9,7 @@ nixcage is a single-file Bash tool that creates sandboxed Nix environments with 
 ## Repository layout
 
 - `nixcage` — the entire tool: a single self-contained Bash script (~860 lines). All commands, config parsing, and sandbox logic live here.
-- `default.nix` — Nix derivation for packaging; copies `nixcage` into `$out/bin` and wraps it with runtime dependencies
-- `flake.nix` — Nix flake wrapping `default.nix`, also provides a dev shell
+- `flake.nix` — Nix flake (using flake-parts) that defines the package derivation and dev shell
 - `.githooks/pre-commit` — shared pre-commit hook (shellcheck + bats tests)
 
 ## Development
