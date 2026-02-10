@@ -972,13 +972,38 @@ run_linux() {
 	fi
 
 	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
+
+	# ── Debug: wrap with strace to capture access failures ──
+	if [[ "$NIXCAGE_DEBUG" == "true" ]]; then
+		if ! command -v strace &>/dev/null; then
+			log_warn "--debug requires strace (install: nix-env -iA nixpkgs.strace)"
+			log_warn "Continuing without debug logging..."
+			"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
+			return $?
+		fi
+
+		_NIXCAGE_DEBUG_LOG="$(mktemp)"
+		trap _debug_cleanup_linux EXIT
+
+		# strace with -f (follow forks), trace file and network syscalls
+		# -qq suppresses attach/detach messages, -y shows paths for fds
+		strace -f -qq -e trace=file,network -o "$_NIXCAGE_DEBUG_LOG" \
+			"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
+		local exit_code=$?
+
+		_debug_cleanup_linux
+		trap - EXIT
+
+		return "$exit_code"
+	fi
+
 	"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
 }
 
 _NIXCAGE_DEBUG_PID=""
 _NIXCAGE_DEBUG_LOG=""
 
-_debug_cleanup() {
+_debug_cleanup_macos() {
 	if [[ -z "$_NIXCAGE_DEBUG_PID" ]]; then
 		return
 	fi
@@ -1005,6 +1030,62 @@ _debug_cleanup() {
 		done
 	else
 		log_ok "No sandbox denials detected"
+	fi
+	rm -f "$_NIXCAGE_DEBUG_LOG"
+}
+
+_debug_cleanup_linux() {
+	if [[ -z "$_NIXCAGE_DEBUG_LOG" || ! -f "$_NIXCAGE_DEBUG_LOG" ]]; then
+		return
+	fi
+	# Parse strace output for failed syscalls
+	# Format: [pid 12345] openat(AT_FDCWD, "/path", ...) = -1 ENOENT (No such file or directory)
+	# We extract: syscall, path, error
+	#
+	# Use grep pre-filter + simplified awk for speed on large logs
+	local details
+	details="$(grep -E '= -1 E(NOENT|ACCES|PERM|NOTDIR)' "$_NIXCAGE_DEBUG_LOG" 2>/dev/null | \
+		grep -v -E '"/(proc|sys)/' | \
+		grep -v -E '"/nix/store/[^/]+"' | \
+		awk -F'"' '
+		{
+			# Extract path from first quoted string
+			if (NF < 2) next
+			path = $2
+			# Skip nix hook lookups (noise from nix-shell)
+			if (path ~ /env.*Hook$/) next
+			# Extract error code
+			if (match($0, /= -1 ([A-Z]+)/, err)) {
+				error = err[1]
+			} else next
+			# Extract syscall
+			if (match($0, /] *([a-z_]+)\(/, sc)) {
+				syscall = sc[1]
+			} else if (match($0, /^([a-z_]+)\(/, sc)) {
+				syscall = sc[1]
+			} else next
+			print error, syscall, path
+		}
+	' 2>/dev/null | sort | uniq -c | sort -rn | head -50 || true)"
+
+	if [[ -n "$details" ]]; then
+		local unique
+		unique="$(printf '%s\n' "$details" | wc -l | tr -d ' ')"
+		local total
+		total="$(printf '%s\n' "$details" | awk '{s+=$1} END {print s}')"
+		log_warn "Sandbox access failures ($unique unique, $total total):"
+		printf '%s\n' "$details" | head -20 | while IFS= read -r line; do
+			# line format: "  12 ENOENT openat /some/path"
+			local n err op path
+			n="$(printf '%s' "$line" | awk '{print $1}')"
+			err="$(printf '%s' "$line" | awk '{print $2}')"
+			op="$(printf '%s' "$line" | awk '{print $3}')"
+			path="$(printf '%s' "$line" | awk '{$1=$2=$3=""; print}' | sed 's/^ *//')"
+			printf '  %4sx  %-7s %-10s %s\n' "$n" "$err" "$op" "$path" >&2
+		done
+		[[ "$unique" -gt 20 ]] && log_info "  ... and $((unique - 20)) more (use grep on strace log for full list)"
+	else
+		log_ok "No sandbox access failures detected"
 	fi
 	rm -f "$_NIXCAGE_DEBUG_LOG"
 }
@@ -1090,7 +1171,7 @@ PROTECT
 		log stream --predicate 'sender == "Sandbox"' \
 			--style compact >"$_NIXCAGE_DEBUG_LOG" 2>&1 &
 		_NIXCAGE_DEBUG_PID=$!
-		trap _debug_cleanup EXIT
+		trap _debug_cleanup_macos EXIT
 		sleep 0.3 # let log stream attach
 	fi
 
@@ -1098,7 +1179,7 @@ PROTECT
 	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd"
 	local exit_code=$?
 
-	_debug_cleanup
+	_debug_cleanup_macos
 	trap - EXIT
 
 	return "$exit_code"

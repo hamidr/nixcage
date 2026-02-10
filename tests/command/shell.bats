@@ -36,18 +36,31 @@ teardown() {
 	assert_output --partial "No nixcage.toml found"
 }
 
-@test "shell: --debug flag does not break dispatch" {
+@test "shell: --debug flag is parsed and stripped" {
+	# Test that --debug is extracted without running the sandbox
+	source "$NIXCAGE_BIN"
+
+	# Mock run_sandboxed to capture what it receives
+	run_sandboxed() { echo "project_dir=$1"; }
+
 	run_nixcage init "$TEST_TEMP_DIR"
 	cd "$TEST_TEMP_DIR"
-	run_nixcage shell --debug
-	refute_output --partial "No nixcage.toml found"
-	refute_output --partial "Unknown command"
+
+	run cmd_shell --debug
+	# Verify it found the cage and called run_sandboxed
+	assert_output --partial "project_dir=$TEST_TEMP_DIR"
 }
 
-@test "shell: --debug with explicit dir works" {
+@test "shell: --debug with explicit dir parses correctly" {
+	source "$NIXCAGE_BIN"
+
+	# Mock run_sandboxed
+	run_sandboxed() { echo "project_dir=$1"; }
+
 	run_nixcage init "$TEST_TEMP_DIR"
-	run_nixcage shell --debug "$TEST_TEMP_DIR"
-	refute_output --partial "No nixcage.toml found"
+
+	run cmd_shell --debug "$TEST_TEMP_DIR"
+	assert_output --partial "project_dir=$TEST_TEMP_DIR"
 }
 
 @test "shell: --debug without cage still fails" {

@@ -52,23 +52,41 @@ teardown() {
 	assert_output --partial "No nixcage.toml found"
 }
 
-@test "run: --debug flag does not break dispatch" {
+@test "run: --debug flag is parsed and stripped" {
+	# Test that --debug is extracted without running the sandbox
+	source "$NIXCAGE_BIN"
+	NIXCAGE_DEBUG=false
+
+	# Mock run_sandboxed to capture what it receives
+	run_sandboxed() { echo "project_dir=$1 cmd=${*:2}"; }
+
 	run_nixcage init "$TEST_TEMP_DIR"
 	cd "$TEST_TEMP_DIR"
-	run_nixcage run --debug echo hello
-	refute_output --partial "No nixcage.toml found"
-	refute_output --partial "Unknown command"
+
+	# Call cmd_run with --debug
+	run cmd_run --debug echo hello
+
+	# Verify --debug was stripped (not passed to run_sandboxed as part of cmd)
+	refute_output --partial -- "--debug"
+	assert_output --partial "echo hello"
 }
 
-@test "run: --debug is stripped before command parsing" {
+@test "run: --debug is stripped before directory parsing" {
 	run_nixcage run --debug /nonexistent/path -- echo hello
 	assert_failure
-	# --debug should not appear as part of the directory path
+	# --debug should not appear as part of the directory path error
 	refute_output --partial -- "--debug"
 }
 
-@test "run: --debug with dir -- cmd syntax works" {
+@test "run: --debug with dir -- cmd parses correctly" {
+	source "$NIXCAGE_BIN"
+
+	# Mock run_sandboxed to capture arguments
+	run_sandboxed() { echo "project_dir=$1 cmd=${*:2}"; }
+
 	run_nixcage init "$TEST_TEMP_DIR"
-	run_nixcage run --debug "$TEST_TEMP_DIR" -- echo hello
-	refute_output --partial "No nixcage.toml found"
+
+	run cmd_run --debug "$TEST_TEMP_DIR" -- echo hello
+	assert_output --partial "project_dir=$TEST_TEMP_DIR"
+	assert_output --partial "cmd=echo hello"
 }
