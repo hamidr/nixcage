@@ -51,3 +51,24 @@ teardown() {
 	assert_failure
 	assert_output --partial "No nixcage.toml found"
 }
+
+@test "run: --debug flag does not break dispatch" {
+	run_nixcage init "$TEST_TEMP_DIR"
+	cd "$TEST_TEMP_DIR"
+	run_nixcage run --debug echo hello
+	refute_output --partial "No nixcage.toml found"
+	refute_output --partial "Unknown command"
+}
+
+@test "run: --debug is stripped before command parsing" {
+	run_nixcage run --debug /nonexistent/path -- echo hello
+	assert_failure
+	# --debug should not appear as part of the directory path
+	refute_output --partial -- "--debug"
+}
+
+@test "run: --debug with dir -- cmd syntax works" {
+	run_nixcage init "$TEST_TEMP_DIR"
+	run_nixcage run --debug "$TEST_TEMP_DIR" -- echo hello
+	refute_output --partial "No nixcage.toml found"
+}

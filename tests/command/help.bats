@@ -59,3 +59,15 @@ setup() {
 	assert_success
 	assert_output --partial "Usage:"
 }
+
+@test "list-presets: lists claude-code" {
+	run_nixcage list-presets
+	assert_success
+	assert_output --partial "claude-code"
+}
+
+@test "help: mentions list-presets command" {
+	run_nixcage help
+	assert_success
+	assert_output --partial "list-presets"
+}

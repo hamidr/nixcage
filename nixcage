@@ -7,14 +7,15 @@ set -euo pipefail
 NIXCAGE_VERSION="0.1.0"
 NIXCAGE_DIR_NAME=".nixcage"
 NIXCAGE_CONF="nixcage.toml"
+NIXCAGE_DEBUG=false
 
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
 
 log_info() { echo -e "${CYAN}[nixcage]${NC} $*"; }
 log_ok() { echo -e "${GREEN}[nixcage]${NC} $*"; }
@@ -37,7 +38,23 @@ OS="$(detect_os)"
 # ─── Commands ────────────────────────────────────────────────────────────────
 
 cmd_init() {
-	local dir="${1:-.}"
+	local preset=""
+	local dir=""
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--preset) preset="${2:-}"; shift 2 || { log_err "--preset requires a value"; exit 1; } ;;
+		--preset=*) preset="${1#--preset=}"; shift ;;
+		-*) log_err "Unknown option: $1"; exit 1 ;;
+		*) dir="$1"; shift ;;
+		esac
+	done
+	dir="${dir:-.}"
+
+	if [[ -n "$preset" && "$preset" != "claude-code" ]]; then
+		log_err "Unknown preset: '$preset' (see 'nixcage list-presets')"
+		exit 1
+	fi
+
 	local cage_dir="$dir/$NIXCAGE_DIR_NAME"
 
 	if [[ -d "$cage_dir" ]]; then
@@ -51,7 +68,40 @@ cmd_init() {
 	mkdir -p "$cage_dir"
 
 	# ── Generate config ──
-	cat >"$dir/$NIXCAGE_CONF" <<'TOML'
+	if [[ "$preset" == "claude-code" ]]; then
+		cat >"$dir/$NIXCAGE_CONF" <<'TOML'
+# nixcage configuration — claude-code preset
+
+[sandbox]
+level = "standard"
+
+[sandbox.filesystem]
+# Host paths readable inside the cage
+ro_bind = ["~/.ssh", "~/.gitconfig", "~/.config/git"]
+# Host paths writable inside the cage
+rw_bind = ["~/.claude", "~/.claude.json"]
+blacklist = []
+
+[sandbox.network]
+allow = true
+
+[sandbox.resources]
+cpus = 0
+memory = ""
+
+[nix]
+packages = ["nodejs_22", "claude-code"]
+# Claude Code needs host tools on PATH — pure mode breaks this
+pure = false
+store_mode = "readonly"
+
+[cage]
+command = "claude"
+passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY", "SSH_AUTH_SOCK"]
+env = []
+TOML
+	else
+		cat >"$dir/$NIXCAGE_CONF" <<'TOML'
 # nixcage configuration
 
 [sandbox]
@@ -99,6 +149,7 @@ passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY"]
 # Explicit key=value env vars to set inside the cage
 env = []
 TOML
+	fi
 
 	# ── Generate shell.nix ──
 	cat >"$cage_dir/shell.nix" <<'NIX'
@@ -212,6 +263,10 @@ BWRAP_PROFILE
   (subpath "/System")
   (subpath "/Library/Frameworks")
   (subpath "/private/var/run")
+  (literal "/var")
+  (literal "/usr")
+  (literal "/private/etc/localtime")
+  (literal "/private/var/select/sh")
   (literal "/etc")
   (literal "/etc/resolv.conf")
   (subpath "/etc/nix")
@@ -226,6 +281,7 @@ BWRAP_PROFILE
   (subpath "/private/tmp")
   (subpath "/dev/null")
   (subpath "/dev/tty")
+  (regex #"^/dev/ttys[0-9]+$")
 )
 ; No network in strict mode
 SB_STRICT
@@ -255,20 +311,27 @@ SB_STRICT
   (subpath "/System")
   (subpath "/Library/Frameworks")
   (subpath "/private/var/run")
+  (literal "/var")
+  (literal "/usr")
+  (literal "/private/etc/localtime")
+  (literal "/private/var/select/sh")
   (literal "/etc")
   (literal "/etc/resolv.conf")
   (subpath "/etc/nix")
   (subpath "/etc/static")
+  (subpath "/etc/ssl")
   (literal "/private/etc")
   (literal "/private/etc/resolv.conf")
   (subpath "/private/etc/nix")
   (subpath "/private/etc/static")
+  (subpath "/private/etc/ssl")
 )
 (allow file-write*
   (subpath "/tmp")
   (subpath "/private/tmp")
   (subpath "/dev/null")
   (subpath "/dev/tty")
+  (regex #"^/dev/ttys[0-9]+$")
 )
 (allow file-read* file-write*
   (subpath "NIXCAGE_PROJECT_DIR")
@@ -302,21 +365,28 @@ SB_STANDARD
   (subpath "/System")
   (subpath "/Library/Frameworks")
   (subpath "/private/var/run")
+  (literal "/var")
+  (literal "/usr")
+  (literal "/private/etc/localtime")
+  (literal "/private/var/select/sh")
   (subpath "HOME_DIR")
   (literal "/etc")
   (literal "/etc/resolv.conf")
   (subpath "/etc/nix")
   (subpath "/etc/static")
+  (subpath "/etc/ssl")
   (literal "/private/etc")
   (literal "/private/etc/resolv.conf")
   (subpath "/private/etc/nix")
   (subpath "/private/etc/static")
+  (subpath "/private/etc/ssl")
 )
 (allow file-write*
   (subpath "/tmp")
   (subpath "/private/tmp")
   (subpath "/dev/null")
   (subpath "/dev/tty")
+  (regex #"^/dev/ttys[0-9]+$")
   (subpath "NIXCAGE_PROJECT_DIR")
 )
 (allow network-outbound)
@@ -339,19 +409,38 @@ GI
 	log_info "  $dir/.nixcage/             ← sandbox profiles & shell.nix"
 	echo ""
 	log_info "Next steps:"
-	log_info "  1. Edit ${BOLD}$NIXCAGE_CONF${NC} to configure packages, sandbox level, etc."
-	log_info "  2. Run ${BOLD}direnv allow${NC} in the project directory"
-	log_info "  3. Use ${BOLD}nixcage run <cmd>${NC} to run commands in the sandbox"
-	log_info "  4. Or just ${BOLD}nixcage shell${NC} to enter an interactive sandboxed shell"
+	if [[ "$preset" == "claude-code" ]]; then
+		log_info "  1. Run ${BOLD}direnv allow${NC} in the project directory"
+		log_info "  2. Run ${BOLD}nixcage run${NC} to start Claude Code in the sandbox"
+	else
+		log_info "  1. Edit ${BOLD}$NIXCAGE_CONF${NC} to configure packages, sandbox level, etc."
+		log_info "  2. Run ${BOLD}direnv allow${NC} in the project directory"
+		log_info "  3. Use ${BOLD}nixcage run <cmd>${NC} to run commands in the sandbox"
+		log_info "  4. Or just ${BOLD}nixcage shell${NC} to enter an interactive sandboxed shell"
+	fi
 }
 
 cmd_reinit() {
-	local dir="${1:-.}"
+	local args=("$@")
+	# Extract dir from args, skipping --preset and its value
+	local dir=""
+	local skip_next=false
+	for arg in "${args[@]}"; do
+		if $skip_next; then skip_next=false; continue; fi
+		case "$arg" in
+		--preset) skip_next=true; continue ;;
+		--preset=*) continue ;;
+		-*) continue ;;
+		*) dir="$arg"; break ;;
+		esac
+	done
+	dir="${dir:-.}"
+
 	if [[ -d "$dir/$NIXCAGE_DIR_NAME" ]]; then
 		rm -rf "${dir:?}/$NIXCAGE_DIR_NAME"
 		log_info "Removed existing .nixcage directory"
 	fi
-	cmd_init "$dir"
+	cmd_init "${args[@]}"
 }
 
 cmd_destroy() {
@@ -886,6 +975,40 @@ run_linux() {
 	"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
 }
 
+_NIXCAGE_DEBUG_PID=""
+_NIXCAGE_DEBUG_LOG=""
+
+_debug_cleanup() {
+	if [[ -z "$_NIXCAGE_DEBUG_PID" ]]; then
+		return
+	fi
+	local pid="$_NIXCAGE_DEBUG_PID"
+	_NIXCAGE_DEBUG_PID=""
+	kill "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null || true
+	# Extract the operation+path from each denial, deduplicate, and count
+	local details
+	details="$(sed -n 's/.*deny([0-9]*) //p' "$_NIXCAGE_DEBUG_LOG" 2>/dev/null | sort | uniq -c | sort -rn || true)"
+	if [[ -n "$details" ]]; then
+		local unique
+		unique="$(printf '%s\n' "$details" | wc -l | tr -d ' ')"
+		local total
+		total="$(printf '%s\n' "$details" | awk '{s+=$1} END {print s}')"
+		log_warn "Sandbox denials ($unique unique, $total total):"
+		printf '%s\n' "$details" | while IFS= read -r line; do
+			# line format: "  12 file-write-data /dev/dtracehelper"
+			local n
+			n="$(printf '%s' "$line" | awk '{print $1}')"
+			local op_path
+			op_path="$(printf '%s' "$line" | sed 's/^ *[0-9]* //')"
+			printf '  %4sx  %s\n' "$n" "$op_path" >&2
+		done
+	else
+		log_ok "No sandbox denials detected"
+	fi
+	rm -f "$_NIXCAGE_DEBUG_LOG"
+}
+
 run_macos() {
 	local project_dir="$1"
 	shift
@@ -961,8 +1084,24 @@ PROTECT
 	local full_cmd
 	full_cmd="$(build_macos_command "$env_exports" "$project_dir" "$shell_nix" "$CAGE_PURE" CAGE_PASSTHROUGH_ENV CAGE_ENV ${cmd[@]+"${cmd[@]}"})"
 
+	# ── Debug: start streaming sandbox denial log ──
+	if [[ "$NIXCAGE_DEBUG" == "true" ]]; then
+		_NIXCAGE_DEBUG_LOG="$(mktemp)"
+		log stream --predicate 'sender == "Sandbox"' \
+			--style compact >"$_NIXCAGE_DEBUG_LOG" 2>&1 &
+		_NIXCAGE_DEBUG_PID=$!
+		trap _debug_cleanup EXIT
+		sleep 0.3 # let log stream attach
+	fi
+
 	log_info "Entering cage (level=$CAGE_LEVEL, store=$CAGE_STORE_MODE)..."
 	sandbox-exec -f "$profile_resolved" /bin/bash -c "$full_cmd"
+	local exit_code=$?
+
+	_debug_cleanup
+	trap - EXIT
+
+	return "$exit_code"
 }
 
 run_sandboxed() {
@@ -993,6 +1132,18 @@ run_sandboxed() {
 }
 
 cmd_run() {
+	# Extract --debug before normal argument parsing
+	local filtered=()
+	local arg
+	for arg in "$@"; do
+		if [[ "$arg" == "--debug" ]]; then
+			NIXCAGE_DEBUG=true
+		else
+			filtered+=("$arg")
+		fi
+	done
+	set -- "${filtered[@]+"${filtered[@]}"}"
+
 	local project_dir
 	local cmd=()
 
@@ -1029,6 +1180,18 @@ cmd_run() {
 }
 
 cmd_shell() {
+	# Extract --debug before normal argument parsing
+	local filtered=()
+	local arg
+	for arg in "$@"; do
+		if [[ "$arg" == "--debug" ]]; then
+			NIXCAGE_DEBUG=true
+		else
+			filtered+=("$arg")
+		fi
+	done
+	set -- "${filtered[@]+"${filtered[@]}"}"
+
 	local project_dir
 
 	# Support: nixcage shell [dir]
@@ -1138,6 +1301,14 @@ find_cage_root() {
 	exit 1
 }
 
+cmd_list_presets() {
+	echo -e "${BOLD}Available presets:${NC}"
+	echo ""
+	echo -e "  ${BOLD}claude-code${NC}  Claude Code sandbox (nodejs, claude-code, ~/.claude rw)"
+	echo ""
+	echo -e "Usage: nixcage init --preset <name> [dir]"
+}
+
 cmd_help() {
 	cat <<HELP
 ${BOLD}nixcage${NC} v${NIXCAGE_VERSION} — Sandboxed Nix environments
@@ -1146,11 +1317,12 @@ ${BOLD}Usage:${NC}
   nixcage <command> [args...]
 
 ${BOLD}Commands:${NC}
-  init [dir]       Initialize a new cage in a directory (default: current)
-  reinit [dir]     Re-initialize (destroy + init)
+  init [--preset <name>] [dir]   Initialize a new cage
+  reinit [--preset <name>] [dir] Re-initialize (destroy + init)
+  list-presets     List available presets for init
   destroy [dir]    Remove all nixcage files from a directory
-  shell [dir]      Enter an interactive sandboxed shell
-  run [dir --] <cmd...>  Run a command inside the sandbox
+  shell [--debug] [dir]      Enter an interactive sandboxed shell
+  run [--debug] [dir --] <cmd...>  Run a command inside the sandbox
   status           Show cage status and check dependencies
   version          Print version
   help             Show this help
@@ -1182,6 +1354,7 @@ main() {
 	shell) cmd_shell "$@" ;;
 	run) cmd_run "$@" ;;
 	status) cmd_status "$@" ;;
+	list-presets) cmd_list_presets ;;
 	_direnv_hook) cmd_direnv_hook "$@" ;;
 	help | --help | -h) cmd_help ;;
 	version | --version | -v) echo "nixcage $NIXCAGE_VERSION" ;;
