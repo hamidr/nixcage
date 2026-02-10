@@ -32,7 +32,7 @@ Built for running tools like [Claude Code](https://docs.anthropic.com/en/docs/cl
 
 ```bash
 # Flake
-nix profile install github:you/nixcage
+nix profile install github:hamidr/nixcage
 
 # Or clone + install locally
 git clone https://github.com/hamidr/nixcage.git
@@ -53,9 +53,10 @@ nix profile install .
 ## Quick start
 
 ```bash
-# 1. Initialize a project
+# 1. Initialize a project (optionally with a preset)
 cd ~/my-project
-nixcage init
+nixcage init                          # blank config
+nixcage init --preset claude-code     # or use a preset
 
 # 2. Edit the config
 $EDITOR nixcage.toml
@@ -63,8 +64,8 @@ $EDITOR nixcage.toml
 # 3. Allow direnv
 direnv allow
 
-# 4. Run Claude Code sandboxed
-nixcage run npx @anthropic-ai/claude-code
+# 4. Run a command inside the sandbox
+nixcage run claude
 
 # Or enter an interactive sandboxed shell
 nixcage shell
@@ -103,14 +104,44 @@ passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY"]
 
 ## Commands
 
-| Command                 | Description                             |
-| ----------------------- | --------------------------------------- |
-| `nixcage init [dir]`    | Set up a new cage                       |
-| `nixcage reinit [dir]`  | Destroy and re-initialize               |
-| `nixcage destroy [dir]` | Remove all nixcage files                |
-| `nixcage shell`         | Enter interactive sandboxed shell       |
-| `nixcage run <cmd>`     | Run a command inside the sandbox        |
-| `nixcage status`        | Show config, OS, and check dependencies |
+| Command                                  | Description                             |
+| ---------------------------------------- | --------------------------------------- |
+| `nixcage init [--preset <name>] [dir]`   | Set up a new cage                       |
+| `nixcage reinit [--preset <name>] [dir]` | Destroy and re-initialize               |
+| `nixcage destroy [dir]`                  | Remove all nixcage files                |
+| `nixcage shell [--debug] [dir]`          | Enter interactive sandboxed shell       |
+| `nixcage run [--debug] [dir --] <cmd>`   | Run a command inside the sandbox        |
+| `nixcage status`                         | Show config, OS, and check dependencies |
+| `nixcage list-presets`                   | List available presets for init          |
+| `nixcage version`                        | Print version                           |
+
+## Presets
+
+Presets generate a pre-configured `nixcage.toml` tailored for a specific workflow:
+
+```bash
+nixcage init --preset claude-code
+```
+
+| Preset         | Description                                                              |
+| -------------- | ------------------------------------------------------------------------ |
+| `claude-code`  | Standard sandbox, nodejs + claude-code, `~/.claude` writable, impure env |
+
+List available presets with `nixcage list-presets`.
+
+## Debug mode
+
+Pass `--debug` to `shell` or `run` to capture sandbox denials:
+
+```bash
+nixcage shell --debug
+nixcage run --debug -- my-command
+```
+
+- **Linux**: wraps the sandbox with `strace`, capturing failed file/network syscalls (requires `strace` installed)
+- **macOS**: streams `log stream` for Sandbox denial predicates, then summarizes unique denials with counts
+
+This is useful for diagnosing why a command fails inside the cage — the summary shows exactly which paths or operations were blocked.
 
 ## Nix store isolation
 
@@ -158,30 +189,16 @@ How it works: nixcage resolves packages on the host _before_ entering the sandbo
 ## Claude Code example
 
 ```bash
-# Set up a project for Claude Code
+# Set up a project with the claude-code preset
 mkdir ~/ai-project && cd ~/ai-project
-nixcage init
+nixcage init --preset claude-code
 
-# Configure for Claude Code
-cat > nixcage.toml <<'EOF'
-[sandbox]
-level = "standard"
-
-[sandbox.network]
-allow = true
-
-[nix]
-packages = ["nodejs_22", "git"]
-pure = true
-store_mode = "readonly"
-
-[cage]
-passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY"]
-EOF
-
+# Allow direnv and launch
 direnv allow
-nixcage run npx @anthropic-ai/claude-code
+nixcage run claude
 ```
+
+The `claude-code` preset generates a config with nodejs + claude-code packages, `~/.claude` writable, SSH/git configs readable, and `ANTHROPIC_API_KEY` passed through. Customize the generated `nixcage.toml` as needed.
 
 ## Platform differences
 
