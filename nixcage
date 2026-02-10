@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-NIXCAGE_VERSION="0.1.0"
+NIXCAGE_VERSION="0.2.0"
 NIXCAGE_DIR_NAME=".nixcage"
 NIXCAGE_CONF="nixcage.toml"
 NIXCAGE_DEBUG=false

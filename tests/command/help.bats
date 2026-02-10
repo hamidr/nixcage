@@ -45,13 +45,13 @@ setup() {
 @test "version: prints version string" {
 	run_nixcage version
 	assert_success
-	assert_output --partial "nixcage 0.1.0"
+	assert_output --partial "nixcage 0.2.0"
 }
 
 @test "--version: same as version" {
 	run_nixcage --version
 	assert_success
-	assert_output --partial "nixcage 0.1.0"
+	assert_output --partial "nixcage 0.2.0"
 }
 
 @test "no arguments: shows help" {
