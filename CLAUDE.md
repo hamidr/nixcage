@@ -10,7 +10,6 @@ nixcage is a single-file Bash tool that creates sandboxed Nix environments with 
 
 - `nixcage` — the entire tool: a single self-contained Bash script (~860 lines). All commands, config parsing, and sandbox logic live here.
 - `flake.nix` — Nix flake (using flake-parts) that defines the package derivation and dev shell
-- `.githooks/pre-commit` — shared pre-commit hook (shellcheck + bats tests)
 
 ## Development
 
@@ -27,7 +26,7 @@ shellcheck nixcage
 bats --recursive tests/
 ```
 
-There is no build step — the script runs directly. A shared pre-commit hook (`.githooks/pre-commit`) runs both shellcheck and bats before every commit. Entering `nix develop` auto-configures `core.hooksPath` via the dev shell's `shellHook`.
+There is no build step — the script runs directly.
 
 ### Run locally without installing
 

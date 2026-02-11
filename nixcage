@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-NIXCAGE_VERSION="0.3.0"
+NIXCAGE_VERSION="0.4.0"
 NIXCAGE_DIR_NAME=".nixcage"
 NIXCAGE_CONF="nixcage.toml"
 NIXCAGE_DEBUG=false
@@ -22,6 +22,16 @@ log_ok() { echo -e "${GREEN}[nixcage]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[nixcage]${NC} $*"; }
 log_err() { echo -e "${RED}[nixcage]${NC} $*" >&2; }
 
+require_cmd() {
+	local cmd="$1"
+	local hint="$2"
+	if ! command -v "$cmd" &>/dev/null; then
+		log_err "'$cmd' is required but not found."
+		log_err "  $hint"
+		exit 1
+	fi
+}
+
 detect_os() {
 	case "$(uname -s)" in
 	Linux*) echo "linux" ;;
@@ -38,6 +48,9 @@ OS="$(detect_os)"
 # ─── Commands ────────────────────────────────────────────────────────────────
 
 cmd_init() {
+	require_cmd "nix-shell" "Install Nix: https://nixos.org/download"
+	require_cmd "direnv" "Install: nix-env -iA nixpkgs.direnv"
+
 	local preset=""
 	local dir=""
 	while [[ $# -gt 0 ]]; do
@@ -792,13 +805,6 @@ run_linux() {
 	shift
 	local cmd=("$@")
 
-	if ! command -v bwrap &>/dev/null; then
-		log_err "bubblewrap (bwrap) not found. Install it:"
-		log_err "  nix-env -iA nixpkgs.bubblewrap"
-		log_err "  # or: apt install bubblewrap / dnf install bubblewrap"
-		exit 1
-	fi
-
 	# shellcheck source=/dev/null
 	source "$project_dir/$NIXCAGE_DIR_NAME/profiles/sandbox-linux.sh"
 
@@ -975,12 +981,7 @@ run_linux() {
 
 	# ── Debug: wrap with strace to capture access failures ──
 	if [[ "$NIXCAGE_DEBUG" == "true" ]]; then
-		if ! command -v strace &>/dev/null; then
-			log_warn "--debug requires strace (install: nix-env -iA nixpkgs.strace)"
-			log_warn "Continuing without debug logging..."
-			"${prefix[@]}" bwrap "${bwrap_args[@]}" "${env_args[@]}" "${nix_args[@]}"
-			return $?
-		fi
+		require_cmd "strace" "Install: nix-env -iA nixpkgs.strace"
 
 		_NIXCAGE_DEBUG_LOG="$(mktemp)"
 		trap _debug_cleanup_linux EXIT
@@ -1095,12 +1096,6 @@ run_macos() {
 	shift
 	local cmd=("$@")
 
-	if ! command -v sandbox-exec &>/dev/null; then
-		log_err "sandbox-exec not found. It should be built into macOS."
-		log_err "If you are on a non-Apple system, nixcage requires macOS or Linux with bwrap."
-		exit 1
-	fi
-
 	# ── Pre-resolve packages on host ──
 	local pkg_json
 	pkg_json="$(printf '%s\n' "${CAGE_PACKAGES[@]}" | jq -R . | jq -s .)"
@@ -1188,6 +1183,13 @@ PROTECT
 run_sandboxed() {
 	local project_dir="$1"
 	shift
+
+	require_cmd "nix-shell" "Install Nix: https://nixos.org/download"
+	if [[ "$OS" == "linux" ]]; then
+		require_cmd "bwrap" "Install: nix-env -iA nixpkgs.bubblewrap"
+	else
+		require_cmd "sandbox-exec" "Built into macOS (should already exist)"
+	fi
 
 	parse_config "$project_dir/$NIXCAGE_CONF"
 
@@ -1322,6 +1324,7 @@ cmd_status() {
 
 	if [[ "$OS" == "linux" ]]; then
 		check_dep "bwrap" "Install: nix-env -iA nixpkgs.bubblewrap"
+		check_dep "strace" "Install: nix-env -iA nixpkgs.strace"
 	else
 		check_dep "sandbox-exec" "Built into macOS (should already exist)"
 	fi
