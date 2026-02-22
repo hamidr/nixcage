@@ -956,6 +956,16 @@ run_linux() {
 	nix_shell_bin_dir="$(dirname "$nix_shell_path")"
 	bwrap_args+=(--ro-bind "$nix_shell_bin_dir" "$nix_shell_bin_dir")
 
+	# If nix-shell resolved outside /nix/store (e.g., system-packaged nix from
+	# dnf/apt), the binary is dynamically linked against system libraries.
+	# Mount the standard library dirs so the ELF interpreter can be found.
+	if [[ "$nix_shell_path" != /nix/store/* ]]; then
+		local lib_dir
+		for lib_dir in /lib /lib64 /usr/lib /usr/lib64; do
+			[[ -d "$lib_dir" ]] && bwrap_args+=(--ro-bind "$lib_dir" "$lib_dir")
+		done
+	fi
+
 	# Build the nix-shell command to run INSIDE the sandbox
 	# Use full path since bwrap doesn't do PATH lookup
 	local nix_args=("$nix_shell_path" --quiet "$project_dir/$NIXCAGE_DIR_NAME/shell.nix")
