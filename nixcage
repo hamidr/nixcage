@@ -381,8 +381,7 @@ VMCONF
   log_info "Next steps:"
   log_info "  1. nixcage build              (once; first run takes 15+ minutes)"
   log_info "  2. nixcage install-hook       (adds auto-enter hook to shell rc)"
-  log_info "  3. nixcage start              (start the VM)"
-  log_info "  4. nixcage shell              (enter the VM)"
+  log_info "  3. nixcage shell              (starts VM if needed, then enters it)"
 }
 
 cmd_build() {
@@ -396,12 +395,12 @@ cmd_build() {
 
   log_info "Building VM (first build takes 15+ minutes)..."
   (cd "$project_dir/$NIXCAGE_VM_DIR" && \
-    nix build .#nixosConfigurations.vm.config.microvm.declaredRunner --out-link result)
+    nix build .#nixosConfigurations.vm.config.microvm.declaredRunner --out-link result -L)
 
   # Record a hash of the inputs so 'nixcage start' can warn on staleness.
   vm_compute_build_hash "$project_dir" >"$project_dir/$NIXCAGE_VM_DIR/build-hash"
 
-  log_ok "VM built. Run 'nixcage start' to start it."
+  log_ok "VM built. Run 'nixcage shell' to enter the VM."
 }
 
 cmd_start() {
@@ -507,8 +506,7 @@ cmd_run() {
   project_dir="$(find_vm_root)"
 
   if ! vm_is_running "$project_dir"; then
-    log_err "VM not running. Start it with: nixcage start"
-    exit 1
+    cmd_start
   fi
 
   vm_ssh "$project_dir" -- "$@"
@@ -728,6 +726,13 @@ cmd_destroy() {
   if [[ -d "$project_dir/$NIXCAGE_VM_DIR" ]]; then
     rm -rf "${project_dir:?}/$NIXCAGE_VM_DIR"
     removed=true
+  fi
+
+  # Remove the .nixcage-vm/ entry from .gitignore if present.
+  local root_gitignore="$project_dir/.gitignore"
+  if grep -qxF '.nixcage-vm/' "$root_gitignore" 2>/dev/null; then
+    grep -vxF '.nixcage-vm/' "$root_gitignore" >"${root_gitignore}.tmp"
+    mv "${root_gitignore}.tmp" "$root_gitignore"
   fi
 
   if $removed; then
