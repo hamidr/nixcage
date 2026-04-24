@@ -434,7 +434,11 @@ cmd_start() {
   fi
 
   local runner
-  runner="$(readlink -f "$result")"
+  if [[ -x "$result/bin/microvm-run" ]]; then
+    runner="$(readlink -f "$result/bin/microvm-run")"
+  else
+    runner="$(readlink -f "$result")"
+  fi
   if [[ ! -x "$runner" ]]; then
     log_err "VM runner is not executable: $runner"
     exit 1
