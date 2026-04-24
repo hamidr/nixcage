@@ -314,7 +314,7 @@ EOF
         {
           microvm = {
             hypervisor = "${hypervisor}";
-            mem = 2048;
+            mem = 2047;
             vcpu = 2;
             shares = [{
               tag = "workspace";
@@ -398,7 +398,7 @@ cmd_build() {
 
   log_info "Building VM (first build takes 15+ minutes)..."
   (cd "$project_dir/$NIXCAGE_VM_DIR" && \
-    nix build .#nixosConfigurations.vm.config.microvm.declaredRunner --out-link result -L)
+    nix build 'path:.#nixosConfigurations.vm.config.microvm.declaredRunner' --out-link result -L)
 
   # Record a hash of the inputs so 'nixcage start' can warn on staleness.
   vm_compute_build_hash "$project_dir" >"$project_dir/$NIXCAGE_VM_DIR/build-hash"
