@@ -101,13 +101,12 @@ The only file you edit. A standard NixOS module committed to your project:
   microvm.mem  = 4096;
   microvm.vcpu = 4;
 
-  ## Mount extra host paths
-  ## Mount extra host paths
+  ## Mount extra host paths (proto: "virtiofs" on Linux, "9p" on macOS)
   microvm.shares = [{
     tag        = "home-ssh";
     source     = "/home/me/.ssh";
     mountPoint = "/home/nixcage/.ssh";
-    proto      = "virtiofs";
+    proto      = "virtiofs";  # use "9p" on macOS
   }];
 }
 ```
