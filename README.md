@@ -65,6 +65,7 @@ cd nixcage && nix profile install .
 | openssh | Bundled when installed via Nix |
 | cloud-hypervisor | Linux only; bundled via Nix |
 | qemu | macOS only; bundled via Nix |
+| Linux builder (macOS only) | Required to build NixOS VM images on macOS (see below) |
 
 ## Quick start
 
@@ -162,6 +163,34 @@ nixcage build   # builds the VM (subsequent builds are fast -- Nix cache)
 The VM guest is always Linux/NixOS regardless of host OS. macOS-native binaries are
 not available inside the VM. This is the trade-off for uniform behavior across
 platforms.
+
+### macOS: Linux builder setup
+
+`nixcage build` compiles a NixOS system, which requires building `aarch64-linux`
+derivations. macOS cannot do this natively -- you need a Linux builder. This is a
+small background NixOS VM that Nix uses as a remote build machine.
+
+**nix-darwin (recommended):**
+
+Add to your nix-darwin configuration:
+
+```nix
+nix.linux-builder.enable = true;
+```
+
+Then rebuild: `darwin-rebuild switch --flake .`
+
+**Without nix-darwin:**
+
+```bash
+# Start the builder (runs a QEMU VM in the foreground)
+nix run nixpkgs#darwin.linux-builder
+```
+
+Leave it running in a separate terminal while you run `nixcage build`.
+
+Once the builder is available, `nixcage build` works transparently -- Nix
+offloads Linux builds to it automatically.
 
 ## License
 
