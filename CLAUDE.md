@@ -74,10 +74,12 @@ file to `/etc/profile.d/` so every login shell sources it.
 
 **Init** (`cmd_init`) -- generates all per-project files: `nixcage.vm.nix` (user
 config template), `.nixcage-vm/flake.nix` (generated NixOS VM flake), `.nixcage-vm/config`,
-`.nixcage-vm/id_ed25519{,.pub}`, `.nixcage-vm/.gitignore`. The SSH port is selected
-randomly at init time to avoid collisions between concurrent projects. Known AI keys
-(ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENCODE_API_KEY) are auto-detected from the
-host environment and written to `SECRET_VARS=` in the config.
+`.nixcage-vm/id_ed25519{,.pub}`. Also appends `.nixcage-vm/` to the project root
+`.gitignore` (idempotent). The SSH port is selected randomly at init time to avoid
+collisions between concurrent projects. Known AI keys (ANTHROPIC_API_KEY,
+OPENAI_API_KEY, OPENCODE_API_KEY) are auto-detected from the host environment and
+written to `SECRET_VARS=` in the config. `cmd_destroy` reverses the `.gitignore`
+edit when removing nixcage files.
 
 **Build** (`cmd_build`) -- runs `nix build .#nixosConfigurations.vm.config.microvm.declaredRunner`
 from inside `.nixcage-vm/`. The result symlink points to the hypervisor runner
