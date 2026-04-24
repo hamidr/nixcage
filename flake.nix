@@ -1,9 +1,13 @@
 {
-  description = "nixcage — Sandboxed Nix environments with direnv integration";
+  description = "NixOS microVM environments for AI coding agents";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
+    microvm = {
+      url = "github:astro/microvm.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -19,24 +23,18 @@
       perSystem =
         { pkgs, lib, ... }:
         let
-          runtimeDeps =
-            with pkgs;
-            [
-              jq
-              coreutils
-              gnused
-              bash
-              direnv
-            ]
-            ++ lib.optionals pkgs.stdenv.isLinux [
-              bubblewrap
-              strace
-            ];
+          runtimeDeps = with pkgs; [
+            jq
+            coreutils
+            gnused
+            bash
+            openssh
+          ];
         in
         {
           packages.default = pkgs.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "0.4.2";
+            version = "1.0.0";
 
             src = ./.;
 
@@ -52,53 +50,41 @@
             '';
 
             meta = {
-              description = "Sandboxed Nix environments with direnv integration";
+              description = "NixOS microVM environments for AI coding agents";
               license = lib.licenses.gpl3Only;
               platforms = lib.platforms.unix;
             };
           };
 
           devShells.default = pkgs.mkShell {
-            buildInputs =
-              with pkgs;
-              [
-                bash
-                jq
-                shellcheck
-                direnv
-                bats
-                bats.libraries.bats-support
-                bats.libraries.bats-assert
-              ]
-              ++ lib.optionals pkgs.stdenv.isLinux [
-                bubblewrap
-                strace
-              ];
+            buildInputs = with pkgs; [
+              bash
+              jq
+              shellcheck
+              bats
+              bats.libraries.bats-support
+              bats.libraries.bats-assert
+              openssh
+            ];
 
             BATS_LIB_PATH = "${pkgs.bats.libraries.bats-support}/share/bats:${pkgs.bats.libraries.bats-assert}/share/bats";
-
           };
         };
 
       flake.overlays.default = final: _prev: {
         nixcage =
           let
-            runtimeDeps =
-              [
-                final.jq
-                final.coreutils
-                final.gnused
-                final.bash
-                final.direnv
-              ]
-              ++ final.lib.optionals final.stdenv.isLinux [
-                final.bubblewrap
-                final.strace
-              ];
+            runtimeDeps = [
+              final.jq
+              final.coreutils
+              final.gnused
+              final.bash
+              final.openssh
+            ];
           in
           final.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "0.4.2";
+            version = "1.0.0";
 
             src = ./.;
 
@@ -114,11 +100,13 @@
             '';
 
             meta = {
-              description = "Sandboxed Nix environments with direnv integration";
+              description = "NixOS microVM environments for AI coding agents";
               license = final.lib.licenses.gpl3Only;
               platforms = final.lib.platforms.unix;
             };
           };
       };
+
+      flake.nixosModules.base = import ./modules/vm-base.nix;
     };
 }

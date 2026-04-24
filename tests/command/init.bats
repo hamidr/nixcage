@@ -1,203 +1,125 @@
 #!/usr/bin/env bats
-# Command tests for cmd_init (Spec §3.1, §7)
+# Command tests for cmd_init
 
 setup() {
-	load '../test_helper/common'
-	setup_temp_dir
+  load '../test_helper/common'
+  setup_temp_dir
 }
 
 teardown() {
-	teardown_temp_dir
+  teardown_temp_dir
 }
 
-@test "init: creates nixcage.toml" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	[[ -f "$TEST_TEMP_DIR/nixcage.toml" ]]
+@test "init: creates nixcage.vm.nix in target dir" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  [[ -f "$TEST_TEMP_DIR/nixcage.vm.nix" ]]
 }
 
-@test "init: creates .envrc" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	[[ -f "$TEST_TEMP_DIR/.envrc" ]]
+@test "init: creates .nixcage-vm directory" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  [[ -d "$TEST_TEMP_DIR/.nixcage-vm" ]]
 }
 
-@test "init: creates .nixcage directory" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	[[ -d "$TEST_TEMP_DIR/.nixcage" ]]
+@test "init: creates .nixcage-vm/flake.nix" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  [[ -f "$TEST_TEMP_DIR/.nixcage-vm/flake.nix" ]]
 }
 
-@test "init: creates shell.nix" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	[[ -f "$TEST_TEMP_DIR/.nixcage/shell.nix" ]]
+@test "init: creates .nixcage-vm/config with required keys" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  [[ -f "$TEST_TEMP_DIR/.nixcage-vm/config" ]]
+  run grep -q "SSH_PORT=" "$TEST_TEMP_DIR/.nixcage-vm/config"
+  assert_success
+  run grep -q "HYPERVISOR=" "$TEST_TEMP_DIR/.nixcage-vm/config"
+  assert_success
+  run grep -q "SHARE_PROTO=" "$TEST_TEMP_DIR/.nixcage-vm/config"
+  assert_success
+  run grep -q "NIX_SYSTEM=" "$TEST_TEMP_DIR/.nixcage-vm/config"
+  assert_success
 }
 
-@test "init: creates profiles directory" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	[[ -d "$TEST_TEMP_DIR/.nixcage/profiles" ]]
+@test "init: creates ed25519 key pair" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  [[ -f "$TEST_TEMP_DIR/.nixcage-vm/id_ed25519" ]]
+  [[ -f "$TEST_TEMP_DIR/.nixcage-vm/id_ed25519.pub" ]]
 }
 
-@test "init: creates linux sandbox profile" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	[[ -f "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-linux.sh" ]]
+@test "init: creates .nixcage-vm/.gitignore" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  [[ -f "$TEST_TEMP_DIR/.nixcage-vm/.gitignore" ]]
 }
 
-@test "init: creates all three macOS sandbox profiles" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	[[ -f "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-strict.sb" ]]
-	[[ -f "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-standard.sb" ]]
-	[[ -f "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-relaxed.sb" ]]
+@test "init: .gitignore ignores everything except itself" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  run grep -q '^\*$' "$TEST_TEMP_DIR/.nixcage-vm/.gitignore"
+  assert_success
+  run grep -q '!.gitignore' "$TEST_TEMP_DIR/.nixcage-vm/.gitignore"
+  assert_success
 }
 
-@test "init: creates .gitignore in .nixcage" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	[[ -f "$TEST_TEMP_DIR/.nixcage/.gitignore" ]]
+@test "init: flake.nix contains the public key" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  local pub_key
+  pub_key="$(cat "$TEST_TEMP_DIR/.nixcage-vm/id_ed25519.pub")"
+  run grep -qF "$pub_key" "$TEST_TEMP_DIR/.nixcage-vm/flake.nix"
+  assert_success
 }
 
-@test "init: .gitignore ignores resolved profile" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q "sandbox-macos-resolved.sb" "$TEST_TEMP_DIR/.nixcage/.gitignore"
-	assert_success
+@test "init: flake.nix contains the absolute project path" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  run grep -qF "$TEST_TEMP_DIR" "$TEST_TEMP_DIR/.nixcage-vm/flake.nix"
+  assert_success
 }
 
-@test "init: .gitignore ignores store directories" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q "store/" "$TEST_TEMP_DIR/.nixcage/.gitignore"
-	assert_success
-	run grep -q "isolated-store/" "$TEST_TEMP_DIR/.nixcage/.gitignore"
-	assert_success
+@test "init: flake.nix imports nixcage.nixosModules.base" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  run grep -q "nixcage.nixosModules.base" "$TEST_TEMP_DIR/.nixcage-vm/flake.nix"
+  assert_success
 }
 
-@test "init: fails if .nixcage already exists" {
-	mkdir -p "$TEST_TEMP_DIR/.nixcage"
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_failure
-	assert_output --partial "already initialized"
+@test "init: flake.nix imports microvm.nixosModules.microvm" {
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  run grep -q "microvm.nixosModules.microvm" "$TEST_TEMP_DIR/.nixcage-vm/flake.nix"
+  assert_success
+}
+
+@test "init: fails if nixcage.vm.nix already exists" {
+  touch "$TEST_TEMP_DIR/nixcage.vm.nix"
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_failure
+  assert_output --partial "already exists"
+}
+
+@test "init: accepts a directory argument" {
+  local subdir="$TEST_TEMP_DIR/myproject"
+  mkdir -p "$subdir"
+  run_nixcage init "$subdir"
+  assert_success
+  [[ -f "$subdir/nixcage.vm.nix" ]]
+  [[ -d "$subdir/.nixcage-vm" ]]
 }
 
 @test "init: defaults to current directory" {
-	local subdir="$TEST_TEMP_DIR/project"
-	mkdir -p "$subdir"
-	cd "$subdir"
-
-	run_nixcage init
-	assert_success
-	[[ -f "$subdir/nixcage.toml" ]]
-	[[ -d "$subdir/.nixcage" ]]
-}
-
-@test "init: nixcage.toml has correct default values" {
-	run_nixcage init "$TEST_TEMP_DIR"
-
-	# Verify key defaults are in the generated config
-	run grep -q 'level = "standard"' "$TEST_TEMP_DIR/nixcage.toml"
-	assert_success
-	run grep -q 'allow = true' "$TEST_TEMP_DIR/nixcage.toml"
-	assert_success
-	run grep -q 'packages = \["nodejs_22"\]' "$TEST_TEMP_DIR/nixcage.toml"
-	assert_success
-	run grep -q 'pure = true' "$TEST_TEMP_DIR/nixcage.toml"
-	assert_success
-	run grep -q 'store_mode = "readonly"' "$TEST_TEMP_DIR/nixcage.toml"
-	assert_success
-}
-
-@test "init: .envrc evals nixcage _direnv_hook" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q 'eval "$(nixcage _direnv_hook)"' "$TEST_TEMP_DIR/.envrc"
-	assert_success
-}
-
-@test "init: .envrc has fallback for missing nixcage" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q 'use nix .nixcage/shell.nix' "$TEST_TEMP_DIR/.envrc"
-	assert_success
-}
-
-@test "init: shell.nix reads NIXCAGE_PACKAGES_JSON" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q 'NIXCAGE_PACKAGES_JSON' "$TEST_TEMP_DIR/.nixcage/shell.nix"
-	assert_success
-}
-
-@test "init: shell.nix sets NIXCAGE_ACTIVE in shellHook" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q 'NIXCAGE_ACTIVE=1' "$TEST_TEMP_DIR/.nixcage/shell.nix"
-	assert_success
-}
-
-@test "init: macOS standard profile has project dir placeholder" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q 'NIXCAGE_PROJECT_DIR' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-standard.sb"
-	assert_success
-}
-
-@test "init: macOS relaxed profile has home dir placeholder" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q 'HOME_DIR' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-relaxed.sb"
-	assert_success
-}
-
-@test "init: macOS strict profile has no network rules" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep 'allow network' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-strict.sb"
-	assert_failure
-}
-
-@test "init: macOS standard profile has network rules" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q 'allow network-outbound' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-standard.sb"
-	assert_success
-	run grep -q 'allow network-inbound' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-standard.sb"
-	assert_success
-}
-
-@test "init: linux profile defines build_bwrap_args function" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	run grep -q 'build_bwrap_args()' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-linux.sh"
-	assert_success
-}
-
-@test "init: all macOS profiles start with deny default" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	for profile in strict standard relaxed; do
-		run grep -q '(deny default)' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-${profile}.sb"
-		assert_success
-	done
-}
-
-@test "init: all macOS profiles allow process-exec-interpreter" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	for level in strict standard relaxed; do
-		run grep -q '(allow process-exec-interpreter)' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-${level}.sb"
-		assert_success
-	done
-}
-
-@test "init: all macOS profiles allow file-ioctl" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	for level in strict standard relaxed; do
-		run grep -q '(allow file-ioctl)' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-${level}.sb"
-		assert_success
-	done
-}
-
-@test "init: all macOS profiles allow reading root directory" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	for level in strict standard relaxed; do
-		run grep -q '(literal "/")' "$TEST_TEMP_DIR/.nixcage/profiles/sandbox-macos-${level}.sb"
-		assert_success
-	done
+  local subdir="$TEST_TEMP_DIR/project"
+  mkdir -p "$subdir"
+  cd "$subdir"
+  run_nixcage init
+  assert_success
+  [[ -f "$subdir/nixcage.vm.nix" ]]
 }
 
 @test "init: prints success message" {
-	run_nixcage init "$TEST_TEMP_DIR"
-	assert_success
-	assert_output --partial "Initialized!"
+  run_nixcage init "$TEST_TEMP_DIR"
+  assert_success
+  assert_output --partial "Initialized"
 }

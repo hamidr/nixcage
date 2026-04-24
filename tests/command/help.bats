@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Command tests for help & version (Spec §3.1)
+# Command tests for help & version
 
 setup() {
 	load '../test_helper/common'
@@ -25,15 +25,19 @@ setup() {
 	assert_output --partial "Usage:"
 }
 
-@test "help: lists all commands" {
+@test "help: lists v1 commands" {
 	run_nixcage help
 	assert_success
 	assert_output --partial "init"
-	assert_output --partial "reinit"
-	assert_output --partial "destroy"
+	assert_output --partial "build"
+	assert_output --partial "start"
+	assert_output --partial "stop"
 	assert_output --partial "shell"
 	assert_output --partial "run"
+	assert_output --partial "sync"
 	assert_output --partial "status"
+	assert_output --partial "install-hook"
+	assert_output --partial "destroy"
 }
 
 @test "help: shows quick start section" {
@@ -45,29 +49,17 @@ setup() {
 @test "version: prints version string" {
 	run_nixcage version
 	assert_success
-	assert_output --partial "nixcage 0.4.1"
+	assert_output --partial "nixcage 1.0.0"
 }
 
 @test "--version: same as version" {
 	run_nixcage --version
 	assert_success
-	assert_output --partial "nixcage 0.4.1"
+	assert_output --partial "nixcage 1.0.0"
 }
 
 @test "no arguments: shows help" {
 	run_nixcage
 	assert_success
 	assert_output --partial "Usage:"
-}
-
-@test "list-presets: lists claude-code" {
-	run_nixcage list-presets
-	assert_success
-	assert_output --partial "claude-code"
-}
-
-@test "help: mentions list-presets command" {
-	run_nixcage help
-	assert_success
-	assert_output --partial "list-presets"
 }
