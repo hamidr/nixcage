@@ -102,7 +102,7 @@ The only file you edit. A standard NixOS module committed to your project:
   microvm.vcpu = 4;
 
   ## Mount extra host paths
-  ## proto: "virtiofs" on Linux, "9p" on macOS
+  ## Mount extra host paths
   microvm.shares = [{
     tag        = "home-ssh";
     source     = "/home/me/.ssh";
@@ -154,8 +154,8 @@ nixcage build   # builds the VM (subsequent builds are fast -- Nix cache)
 
 | | Linux | macOS |
 |---|---|---|
-| Hypervisor | cloud-hypervisor (KVM) | qemu (TCG / Apple HVF) |
-| Filesystem share | VirtioFS | 9p |
+| Hypervisor | cloud-hypervisor (KVM) | vfkit (Apple Virtualization.framework) |
+| Filesystem share | VirtioFS | VirtioFS |
 | VM boot time | ~500ms | ~2-3s |
 | Guest OS | NixOS (x86_64 or aarch64) | NixOS (aarch64 on Apple Silicon) |
 | macOS-native binaries in VM | no | no |

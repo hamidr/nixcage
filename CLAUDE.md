@@ -102,9 +102,12 @@ the hook code to stdout for manual `eval` installation.
 
 `detect_os()` echoes `"linux"` or `"macos"`; captured at top-level as
 `OS="$(detect_os)"`. `cmd_init` branches on `$OS` to choose `hypervisor`
-(cloud-hypervisor vs. qemu) and `share_proto` (virtiofs vs. 9p). The choice is
-written into `.nixcage-vm/config` and baked into the generated flake. At runtime
-the script is platform-agnostic -- it only manages the VM process and SSH.
+(cloud-hypervisor vs. vfkit). Both platforms use virtiofs for filesystem
+sharing. On macOS, `microvm.vmHostPackages` is set to the Darwin nixpkgs
+so the runner (vfkit) is a macOS-native binary while the guest remains
+aarch64-linux. The choice is written into `.nixcage-vm/config` and baked
+into the generated flake. At runtime the script is platform-agnostic --
+it only manages the VM process and SSH.
 
 ### Generated file layout (per project)
 
