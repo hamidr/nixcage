@@ -310,7 +310,7 @@ EOF
       modules = [
         microvm.nixosModules.microvm
         nixcage.nixosModules.base
-        ../nixcage.vm.nix
+        ./nixcage.vm.nix
         {
           microvm = {
             hypervisor = "${hypervisor}";
@@ -392,6 +392,9 @@ cmd_build() {
     log_err "No .nixcage-vm/flake.nix found. Run 'nixcage init' first."
     exit 1
   fi
+
+  # Copy user config into the flake tree so Nix pure evaluation can see it.
+  cp "$project_dir/nixcage.vm.nix" "$project_dir/$NIXCAGE_VM_DIR/nixcage.vm.nix"
 
   log_info "Building VM (first build takes 15+ minutes)..."
   (cd "$project_dir/$NIXCAGE_VM_DIR" && \

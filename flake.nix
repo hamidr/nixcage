@@ -68,6 +68,10 @@
             ];
 
             BATS_LIB_PATH = "${pkgs.bats.libraries.bats-support}/share/bats:${pkgs.bats.libraries.bats-assert}/share/bats";
+
+            shellHook = ''
+              export PATH="$PWD:$PATH"
+            '';
           };
         };
 

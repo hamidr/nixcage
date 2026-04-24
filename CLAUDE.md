@@ -130,8 +130,8 @@ cloning to generate their own key pair and config.
 - `VM_*` prefix for globals set by `vm_read_config`.
 - `vm_*` prefix for SSH/lifecycle helper functions.
 - `cmd_*` prefix for top-level command handlers.
-- The generated `.nixcage-vm/flake.nix` imports `../nixcage.vm.nix` via relative
-  path -- this is why `nix build` must run from inside `.nixcage-vm/`, not the
-  project root.
+- `cmd_build` copies `nixcage.vm.nix` into `.nixcage-vm/` before each build so
+  that the generated flake can import it as `./nixcage.vm.nix` within its own
+  source tree (Nix pure evaluation forbids escaping the flake directory).
 - `nixcage.vm.nix` doubles as both the user config and the project detection signal
   for `find_vm_root` and the shell hook.
