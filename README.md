@@ -154,7 +154,7 @@ nixcage build   # builds the VM (subsequent builds are fast -- Nix cache)
 
 | | Linux | macOS |
 |---|---|---|
-| Hypervisor | cloud-hypervisor (KVM) | vfkit (Apple Virtualization.framework) |
+| Hypervisor | cloud-hypervisor (KVM) | qemu (Apple HVF) |
 | Filesystem share | VirtioFS | VirtioFS |
 | VM boot time | ~500ms | ~2-3s |
 | Guest OS | NixOS (x86_64 or aarch64) | NixOS (aarch64 on Apple Silicon) |

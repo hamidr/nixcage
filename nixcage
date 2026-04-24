@@ -249,7 +249,7 @@ cmd_init() {
     share_proto="virtiofs"
     host_system=""
   else
-    hypervisor="vfkit"
+    hypervisor="qemu"
     share_proto="virtiofs"
     host_system="$(uname -m)-darwin"
     if [[ "$(uname -m)" == "arm64" ]]; then
