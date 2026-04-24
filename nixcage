@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-NIXCAGE_VERSION="1.0.0"
+NIXCAGE_VERSION="1.1.0"
 NIXCAGE_VM_DIR=".nixcage-vm"
 
 RED=$'\033[0;31m'
@@ -71,18 +71,19 @@ vm_read_config() {
   VM_HYPERVISOR=""
   VM_SHARE_PROTO=""
   VM_NIX_SYSTEM=""
-  while IFS='=' read -r key val || [[ -n "$key" ]]; do
+  local _cfg_key _cfg_val
+  while IFS='=' read -r _cfg_key _cfg_val || [[ -n "$_cfg_key" ]]; do
     # strip inline comments and leading/trailing whitespace
-    val="${val%%#*}"
-    val="${val#"${val%%[! ]*}"}"
-    val="${val%"${val##*[! ]}"}"
-    key="${key#"${key%%[! ]*}"}"
-    case "$key" in
-    SSH_PORT)    VM_SSH_PORT="$val" ;;
-    SECRET_VARS) VM_SECRET_VARS="$val" ;;
-    HYPERVISOR)  VM_HYPERVISOR="$val" ;;
-    SHARE_PROTO) VM_SHARE_PROTO="$val" ;;
-    NIX_SYSTEM)  VM_NIX_SYSTEM="$val" ;;
+    _cfg_val="${_cfg_val%%#*}"
+    _cfg_val="${_cfg_val#"${_cfg_val%%[! ]*}"}"
+    _cfg_val="${_cfg_val%"${_cfg_val##*[! ]}"}"
+    _cfg_key="${_cfg_key#"${_cfg_key%%[! ]*}"}"
+    case "$_cfg_key" in
+    SSH_PORT)    VM_SSH_PORT="$_cfg_val" ;;
+    SECRET_VARS) VM_SECRET_VARS="$_cfg_val" ;;
+    HYPERVISOR)  VM_HYPERVISOR="$_cfg_val" ;;
+    SHARE_PROTO) VM_SHARE_PROTO="$_cfg_val" ;;
+    NIX_SYSTEM)  VM_NIX_SYSTEM="$_cfg_val" ;;
     esac
   done < <(grep -v '^\s*#' "$config_file" || true)
 }
@@ -165,12 +166,26 @@ vm_ssh() {
 }
 
 # Poll until SSH is reachable or the VM process dies.
+# Uses accept-new for host key since known_hosts is empty on first boot;
+# the accepted key is persisted so subsequent connections verify it.
 vm_wait_for_ssh() {
   local project_dir="$1"
-  local deadline=$((SECONDS + 60))
+  local known_hosts="$project_dir/$NIXCAGE_VM_DIR/known_hosts"
+  local key="$project_dir/$NIXCAGE_VM_DIR/id_ed25519"
+  vm_read_config "$project_dir"
+  # Clear stale host keys; the VM generates new SSH host keys on each boot.
+  : >"$known_hosts"
+  local timeout=120
+  [[ "$OS" == "macos" ]] && timeout=300
+  local deadline=$((SECONDS + timeout))
   log_info "Waiting for VM SSH..."
   while [[ $SECONDS -lt $deadline ]]; do
-    if vm_ssh "$project_dir" true 2>/dev/null; then
+    if ssh -p "$VM_SSH_PORT" -i "$key" \
+         -o "UserKnownHostsFile=$known_hosts" \
+         -o "StrictHostKeyChecking=accept-new" \
+         -o "ConnectTimeout=5" \
+         -o "BatchMode=yes" \
+         "nixcage@127.0.0.1" true 2>/dev/null; then
       return 0
     fi
     if ! vm_is_running "$project_dir"; then
@@ -180,17 +195,8 @@ vm_wait_for_ssh() {
     fi
     sleep 2
   done
-  log_err "Timed out waiting for VM SSH (60s)."
+  log_err "Timed out waiting for VM SSH (${timeout}s)."
   exit 1
-}
-
-# Populate the known_hosts file from the live VM.
-vm_bootstrap_known_hosts() {
-  local project_dir="$1"
-  vm_read_config "$project_dir"
-  local known_hosts="$project_dir/$NIXCAGE_VM_DIR/known_hosts"
-  ssh-keyscan -p "$VM_SSH_PORT" -H 127.0.0.1 >"$known_hosts" 2>/dev/null
-  chmod 600 "$known_hosts"
 }
 
 # Push API-key exports into the running VM via SSH pipe so they land in
@@ -228,7 +234,6 @@ vm_compute_build_hash() {
 cmd_init() {
   require_cmd "nix"
   require_cmd "ssh-keygen"
-  require_cmd "ssh-keyscan"
 
   local dir="${1:-.}"
   local project_dir
@@ -466,7 +471,6 @@ cmd_start() {
   echo "$!" >"$pid_file"
 
   vm_wait_for_ssh "$project_dir"
-  vm_bootstrap_known_hosts "$project_dir"
   vm_inject_secrets "$project_dir"
 
   log_ok "VM ready. Use 'nixcage shell' to enter or 'nixcage stop' to stop."
