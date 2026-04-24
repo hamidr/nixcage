@@ -49,18 +49,20 @@ teardown() {
   [[ -f "$TEST_TEMP_DIR/.nixcage-vm/id_ed25519.pub" ]]
 }
 
-@test "init: creates .nixcage-vm/.gitignore" {
+@test "init: adds .nixcage-vm/ to root .gitignore" {
   run_nixcage init "$TEST_TEMP_DIR"
   assert_success
-  [[ -f "$TEST_TEMP_DIR/.nixcage-vm/.gitignore" ]]
+  grep -qxF '.nixcage-vm/' "$TEST_TEMP_DIR/.gitignore"
 }
 
-@test "init: .gitignore ignores everything except itself" {
+@test "init: root .gitignore update is idempotent" {
+  # Pre-seed .gitignore with the line to simulate a second init scenario.
+  echo '.nixcage-vm/' >"$TEST_TEMP_DIR/.gitignore"
   run_nixcage init "$TEST_TEMP_DIR"
-  run grep -q '^\*$' "$TEST_TEMP_DIR/.nixcage-vm/.gitignore"
   assert_success
-  run grep -q '!.gitignore' "$TEST_TEMP_DIR/.nixcage-vm/.gitignore"
-  assert_success
+  local count
+  count="$(grep -cxF '.nixcage-vm/' "$TEST_TEMP_DIR/.gitignore")"
+  [[ "$count" -eq 1 ]]
 }
 
 @test "init: flake.nix contains the public key" {

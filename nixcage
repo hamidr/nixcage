@@ -281,12 +281,12 @@ SHARE_PROTO=${share_proto}
 NIX_SYSTEM=${nix_system}
 EOF
 
-  # Ignore everything inside .nixcage-vm/ except the .gitignore itself so
-  # collaborators can see the ignore rules after cloning.
-  cat >"$project_dir/$NIXCAGE_VM_DIR/.gitignore" <<'GI'
-*
-!.gitignore
-GI
+  # Add .nixcage-vm/ to the project root .gitignore so generated state never
+  # lands in source control. Idempotent -- skips if the line already exists.
+  local root_gitignore="$project_dir/.gitignore"
+  if ! grep -qxF '.nixcage-vm/' "$root_gitignore" 2>/dev/null; then
+    printf '\n.nixcage-vm/\n' >>"$root_gitignore"
+  fi
 
   # Write the generated VM flake that wires microvm.nix + base module + user config.
   cat >"$project_dir/$NIXCAGE_VM_DIR/flake.nix" <<FLAKE
