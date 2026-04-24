@@ -1,227 +1,167 @@
 # nixcage
 
-Sandboxed Nix environments with direnv auto-activation. Cross-platform: **bwrap** on Linux, **sandbox-exec** on macOS.
-
-Built for running tools like [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in isolated project directories.
+NixOS microVM environments for AI coding agents. Enter a project directory and your
+terminal switches into a full NixOS VM -- isolated at the kernel level, with
+claude-code and opencode pre-installed, driven entirely by a Nix flake you control.
 
 ## How it works
 
 ```
-┌─────────────────────────────────────────────────┐
-│  You cd into a project directory                │
-│       ↓                                         │
-│  direnv detects .envrc → runs nixcage hook      │
-│       ↓                                         │
-│  nixcage reads nixcage.toml config              │
-│       ↓                                         │
-│  You run: nixcage run <cmd>                     │
-│       ↓                                         │
-│  ┌─── Linux ───────┐  ┌─── macOS ────────────┐  │
-│  │ bwrap           │  │ sandbox-exec         │  │
-│  │ + namespaces    │  │ + Seatbelt profiles  │  │
-│  │ + cgroups (opt) │  │                      │  │
-│  └────────┬────────┘  └────────┬─────────────┘  │
-│           ↓                     ↓               │
-│         nix-shell --pure (packages from config) │
-│           ↓                                     │
-│         Your command runs in the sandbox        │
-└─────────────────────────────────────────────────┘
+cd myproject
+     |
+     v
+shell hook detects nixcage.vm.nix
+     |
+     v
+nixcage shell
+     |
+     +-- VM already running? -----> SSH in (~50ms)
+     |
+     +-- not running? -----------> nixcage start
+                                        |
+                                        v
+                              fork hypervisor process
+                              (cloud-hypervisor on Linux,
+                               qemu on macOS)
+                                        |
+                                   boots NixOS VM
+                                        |
+                              +----[VM boundary]-----+
+                              |                      |
+                              |  /workspace          |  <- your project dir
+                              |  /nix/store (ro)     |  <- shared host store
+                              |  claude-code         |
+                              |  opencode            |
+                              |  + your packages     |
+                              |                      |
+                              +----------------------+
+                                        |
+                                   SSH session opens
+                                   drops into /workspace
 ```
+
+The host `/nix/store` is shared read-only across all VMs -- packages built once are
+reused everywhere. Only `/workspace` (your project directory) crosses the VM
+boundary as a live read-write mount.
 
 ## Install
 
 ```bash
-# Flake
 nix profile install github:hamidr/nixcage
-
-# Or clone + install locally
-git clone https://github.com/hamidr/nixcage.git
-cd nixcage
-nix profile install .
 ```
 
-### Dependencies
+Or from a local clone:
 
-| Tool             | Required   | Install                                                                        |
-| ---------------- | ---------- | ------------------------------------------------------------------------------ |
-| **Nix**          | ✅         | `sh <(curl -L https://nixos.org/nix/install)`                                  |
-| **direnv**       | ✅         | `nix-env -iA nixpkgs.direnv` + [shell hook](https://direnv.net/docs/hook.html) |
-| **jq**           | ✅         | Bundled when installed via Nix; otherwise `nix-env -iA nixpkgs.jq`             |
-| **bubblewrap**   | Linux only | Bundled when installed via Nix; otherwise `nix-env -iA nixpkgs.bubblewrap`     |
-| **sandbox-exec** | macOS only | Built-in (ships with macOS)                                                    |
+```bash
+git clone https://github.com/hamidr/nixcage.git
+cd nixcage && nix profile install .
+```
+
+## Requirements
+
+| Tool | Notes |
+|---|---|
+| Nix (flakes enabled) | `sh <(curl -L https://nixos.org/nix/install)` |
+| openssh | Bundled when installed via Nix |
+| cloud-hypervisor | Linux only; bundled via Nix |
+| qemu | macOS only; bundled via Nix |
 
 ## Quick start
 
 ```bash
-# 1. Initialize a project (optionally with a preset)
-cd ~/my-project
-nixcage init                          # blank config
-nixcage init --preset claude-code     # or use a preset
+cd ~/myproject
 
-# 2. Edit the config
-$EDITOR nixcage.toml
+nixcage init               # generates nixcage.vm.nix + .nixcage-vm/
+nixcage build              # builds the VM image (~15 min first run)
+nixcage install-hook       # adds auto-enter hook to ~/.zshrc or ~/.bashrc
 
-# 3. Allow direnv
-direnv allow
+# reload your shell, then:
+cd ~/myproject             # hook fires, VM starts, SSH session opens
+myproject $ claude         # claude-code is pre-installed
+myproject $ exit           # back on host; VM keeps running
 
-# 4. Run a command inside the sandbox
-nixcage run claude
-
-# Or enter an interactive sandboxed shell
-nixcage shell
+nixcage stop               # shut down the VM
 ```
 
-## Configuration — `nixcage.toml`
+## Configuration -- `nixcage.vm.nix`
 
-```toml
-[sandbox]
-# "strict"   — no network, tmpfs home, minimal access
-# "standard" — project dir writable, network allowed
-# "relaxed"  — home readable, project writable, network allowed
-level = "standard"
+The only file you edit. A standard NixOS module committed to your project:
 
-[sandbox.filesystem]
-ro_bind = ["/data/models"]       # extra read-only paths
-rw_bind = ["/tmp/shared"]        # extra read-write paths
-blacklist = ["/home/user/.ssh"]   # paths to hide (~ is expanded)
+```nix
+{ pkgs, ... }: {
+  ## Add project packages
+  environment.systemPackages = with pkgs; [
+    python3
+    rustup
+    postgresql
+  ];
 
-[sandbox.network]
-allow = true
+  ## Adjust resources (defaults: 2 GB RAM, 2 vCPUs)
+  microvm.mem  = 4096;
+  microvm.vcpu = 4;
 
-[sandbox.resources]
-cpus = 4       # max CPU cores (Linux only, via systemd-run)
-memory = "4G"  # max RAM (Linux only)
-
-[nix]
-packages = ["nodejs_22"]
-pure = true
-store_mode = "readonly"   # shared | readonly | copy | isolated
-
-[cage]
-command = ""                     # default command (empty = shell)
-passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY"]
+  ## Mount extra host paths
+  ## proto: "virtiofs" on Linux, "9p" on macOS
+  microvm.shares = [{
+    tag        = "home-ssh";
+    source     = "/home/me/.ssh";
+    mountPoint = "/home/nixcage/.ssh";
+    proto      = "virtiofs";
+  }];
+}
 ```
+
+AI tools (claude-code, opencode), SSH, the nixcage user, and the `/workspace` mount
+are all provided by the base layer -- you do not declare them.
 
 ## Commands
 
-| Command                                  | Description                             |
-| ---------------------------------------- | --------------------------------------- |
-| `nixcage init [--preset <name>] [dir]`   | Set up a new cage                       |
-| `nixcage reinit [--preset <name>] [dir]` | Destroy and re-initialize               |
-| `nixcage destroy [dir]`                  | Remove all nixcage files                |
-| `nixcage shell [--debug] [dir]`          | Enter interactive sandboxed shell       |
-| `nixcage run [--debug] [dir --] <cmd>`   | Run a command inside the sandbox        |
-| `nixcage status`                         | Show config, OS, and check dependencies |
-| `nixcage list-presets`                   | List available presets for init          |
-| `nixcage version`                        | Print version                           |
+| Command | Description |
+|---|---|
+| `nixcage init [dir]` | Generate `nixcage.vm.nix` and `.nixcage-vm/` |
+| `nixcage build` | Build the VM image (run once after init or after flake updates) |
+| `nixcage start` | Start the VM in the background |
+| `nixcage stop` | Stop the VM |
+| `nixcage shell` | Enter an interactive VM shell (auto-starts if needed) |
+| `nixcage run <cmd>` | Run a single command in the VM |
+| `nixcage sync` | Rebuild and restart if `nixcage.vm.nix` changed |
+| `nixcage logs` | Tail the hypervisor log |
+| `nixcage status` | Show built / running / SSH-reachable state |
+| `nixcage install-hook` | Add auto-enter hook to `~/.zshrc` or `~/.bashrc` |
+| `nixcage destroy [dir]` | Remove all nixcage files |
 
-## Presets
+## Secrets
 
-Presets generate a pre-configured `nixcage.toml` tailored for a specific workflow:
+`nixcage init` scans the host environment for known AI keys
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENCODE_API_KEY`) and records their
+names in `.nixcage-vm/config`. When the VM starts, their values are piped into
+`/run/nixcage-secrets` (tmpfs -- never flushed to disk) via SSH and made available
+to every login shell. Values never enter the Nix store.
 
-```bash
-nixcage init --preset claude-code
-```
+To change which keys are injected, edit `SECRET_VARS=` in `.nixcage-vm/config`.
 
-| Preset         | Description                                                              |
-| -------------- | ------------------------------------------------------------------------ |
-| `claude-code`  | Standard sandbox, nodejs + claude-code, `~/.claude` writable, impure env |
+## After a fresh clone
 
-List available presets with `nixcage list-presets`.
-
-## Debug mode
-
-Pass `--debug` to `shell` or `run` to capture sandbox denials:
-
-```bash
-nixcage shell --debug
-nixcage run --debug -- my-command
-```
-
-- **Linux**: wraps the sandbox with `strace`, capturing failed file/network syscalls (requires `strace` installed)
-- **macOS**: streams `log stream` for Sandbox denial predicates, then summarizes unique denials with counts
-
-This is useful for diagnosing why a command fails inside the cage — the summary shows exactly which paths or operations were blocked.
-
-## Nix store isolation
-
-By default, `nix-shell` reads and writes your host's `/nix/store`. nixcage gives you control over this via `store_mode` in `nixcage.toml`:
-
-| Mode       | Reads host store?    | Writes host store? | Speed             | Isolation      | Platform   |
-| ---------- | -------------------- | ------------------ | ----------------- | -------------- | ---------- |
-| `shared`   | ✅                   | ✅                 | Fastest           | None           | All        |
-| `readonly` | ✅ (for cached pkgs) | ❌                 | Fast              | Good — default | All        |
-| `copy`     | First run only       | ❌ (local copy)    | Medium            | Strong         | Linux only |
-| `isolated` | ❌                   | ❌                 | Slowest first run | Complete       | Linux only |
-
-```toml
-[nix]
-store_mode = "readonly"   # recommended balance
-```
-
-How it works: nixcage resolves packages on the host _before_ entering the sandbox, then mounts the store read-only (or a copy) inside the cage. The sandboxed process can use cached packages but can't install new ones or pollute your store.
-
-> **Note:** `copy` and `isolated` modes require Linux (bwrap bind mounts). On macOS, they fall back to `readonly` with a warning.
-
-## Sandbox levels explained
-
-### `strict`
-
-- Filesystem: only `/nix/store` (read-only), `/tmp` (tmpfs), project dir (not mounted)
-- Network: **disabled**
-- Home: tmpfs (empty)
-- Use case: auditing untrusted code
-
-### `standard` (default)
-
-- Filesystem: `/nix/store` (ro), project dir (read-write)
-- Network: **enabled**
-- Home: tmpfs (empty)
-- Use case: running Claude Code on a project
-
-### `relaxed`
-
-- Filesystem: `/nix/store` (ro), home (read-only), project dir (read-write)
-- Network: **enabled**
-- Home: your real home, but read-only
-- Use case: tools that need to read ~/.config, ~/.gitconfig, etc.
-
-## Claude Code example
+`.nixcage-vm/` is fully gitignored. Each collaborator runs:
 
 ```bash
-# Set up a project with the claude-code preset
-mkdir ~/ai-project && cd ~/ai-project
-nixcage init --preset claude-code
-
-# Allow direnv and launch
-direnv allow
-nixcage run claude
+nixcage init    # generates a new key pair and selects a free SSH port
+nixcage build   # builds the VM (subsequent builds are fast -- Nix cache)
 ```
 
-The `claude-code` preset generates a config with nodejs + claude-code packages, `~/.claude` writable, SSH/git configs readable, and `ANTHROPIC_API_KEY` passed through. Customize the generated `nixcage.toml` as needed.
+## Platform notes
 
-## Platform differences
+| | Linux | macOS |
+|---|---|---|
+| Hypervisor | cloud-hypervisor (KVM) | qemu (TCG / Apple HVF) |
+| Filesystem share | VirtioFS | 9p |
+| VM boot time | ~500ms | ~2-3s |
+| Guest OS | NixOS (x86_64 or aarch64) | NixOS (aarch64 on Apple Silicon) |
+| macOS-native binaries in VM | no | no |
 
-| Feature              | Linux                      | macOS                            |
-| -------------------- | -------------------------- | -------------------------------- |
-| Sandbox engine       | bubblewrap (bwrap)         | sandbox-exec (Seatbelt)          |
-| PID isolation        | ✅ namespaces              | ❌ not available                 |
-| Network isolation    | ✅ `--unshare-net`         | ✅ sandbox profile               |
-| Filesystem isolation | ✅ bind mounts             | ✅ Seatbelt rules                |
-| Resource limits      | ✅ cgroups via systemd-run | ❌ not available                 |
-| Store modes          | All four modes             | `shared` and `readonly` only     |
-
-## How it integrates with direnv
-
-When you `cd` into a nixcage project:
-
-1. direnv sees `.envrc`
-2. `.envrc` calls `nixcage _direnv_hook`
-3. The hook exports `NIXCAGE_ACTIVE=1`, `NIXCAGE_ROOT`, etc.
-4. It creates `cage` and `cagerun` shell aliases
-5. You use `nixcage run` or `nixcage shell` to enter the sandbox
-
-Note: **direnv itself does not sandbox anything** — it just auto-loads the environment. The actual isolation happens when you invoke `nixcage run` or `nixcage shell`.
+The VM guest is always Linux/NixOS regardless of host OS. macOS-native binaries are
+not available inside the VM. This is the trade-off for uniform behavior across
+platforms.
 
 ## License
 
