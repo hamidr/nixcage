@@ -250,7 +250,7 @@ cmd_init() {
     host_system=""
   else
     hypervisor="qemu"
-    share_proto="virtiofs"
+    share_proto="9p"
     host_system="$(uname -m)-darwin"
     if [[ "$(uname -m)" == "arm64" ]]; then
       host_system="aarch64-darwin"
