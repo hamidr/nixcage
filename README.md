@@ -132,9 +132,9 @@ are all provided by the base layer -- you do not declare them.
 
 ## Secrets
 
-`nixcage init` scans the host environment for known AI keys
-(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENCODE_API_KEY`) and records their
-names in `.nixcage-vm/config`. When the VM starts, their values are piped into
+`nixcage init` scans the host environment for known AI/dev keys
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENCODE_API_KEY`, `GITHUB_TOKEN`)
+and records their names in `.nixcage-vm/config`. When the VM starts, their values are piped into
 `/run/nixcage-secrets` (tmpfs -- never flushed to disk) via SSH and made available
 to every login shell. Values never enter the Nix store.
 
