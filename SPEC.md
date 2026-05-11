@@ -1,31 +1,50 @@
 # nixcage Specification
 
-Version: 0.1.0
+Version: 1.1.0
 
 ## 1. Purpose
 
-nixcage creates sandboxed, reproducible development environments for individual project directories. It combines Nix (for declarative package management) with OS-level sandboxing (for filesystem/network isolation) and direnv (for automatic environment activation). The primary use case is running untrusted or semi-trusted tools (e.g., AI coding assistants) with controlled access to the host system.
+nixcage boots a NixOS microVM per project directory and auto-enters it when the
+user `cd`s into the directory. It uses [microvm.nix](https://github.com/astro/microvm.nix)
+as the VM backend (cloud-hypervisor on Linux, QEMU on macOS). The primary use
+case is running AI coding agents (claude-code, opencode) in full VM-level
+isolation with reproducible, Nix-managed environments.
+
+There is no process-level sandboxing. The VM boundary is the only isolation
+primitive. If you need bwrap/Seatbelt-style sandboxing, use a different tool.
 
 ## 2. Requirements
 
 ### 2.1 Host prerequisites
 
-| Dependency     | Required on | Purpose                                      |
-| -------------- | ----------- | -------------------------------------------- |
-| Nix            | All         | Package resolution, `nix-shell`, `nix-store` |
-| direnv         | All         | Automatic environment loading via `.envrc`   |
-| jq             | All         | JSON construction for package lists          |
-| bubblewrap     | Linux       | Sandbox execution (`bwrap`)                  |
-| sandbox-exec   | macOS       | Sandbox execution (Seatbelt/SBPL profiles)   |
-| coreutils, sed | All         | File manipulation (bundled via Nix wrapper)  |
-| systemd-run    | Linux (opt) | cgroup-based CPU/memory limits               |
+| Dependency        | Required on | Purpose                                          |
+| ----------------- | ----------- | ------------------------------------------------ |
+| Nix (with flakes) | All         | Build the VM image                               |
+| ssh, ssh-keygen   | All         | VM control plane                                 |
+| python3 or perl   | All         | Free-port selection at `init` time               |
+| KVM               | Linux       | cloud-hypervisor acceleration                    |
+| Hypervisor.framework | macOS    | QEMU acceleration                                |
+| bash, coreutils, grep, sed, awk, sha256sum | All | Script runtime                  |
+
+The tool itself is a single Bash script. The Nix flake provides a `devShell`
+with `bash`, `jq`, `shellcheck`, `bats`, and `openssh` for development.
 
 ### 2.2 Supported platforms
 
-- Linux x86_64 / aarch64 (any distribution with Nix installed)
-- macOS x86_64 / aarch64 (Darwin, with Seatbelt available)
+- Linux x86_64 / aarch64 (KVM required)
+- macOS aarch64 / x86_64 (Hypervisor.framework required)
 
-Other Unix systems are rejected at startup by `detect_os()`.
+`detect_os()` rejects all other systems at startup.
+
+The host architecture is auto-detected by `detect_nix_system()`:
+
+| `uname -m`        | Guest system     |
+| ----------------- | ---------------- |
+| `x86_64`          | `x86_64-linux`   |
+| `arm64`/`aarch64` | `aarch64-linux`  |
+
+The guest is always Linux, regardless of host. On macOS hosts, the VM runner
+itself is a Darwin-native binary (set via `microvm.vmHostPackages`).
 
 ## 3. CLI interface
 
@@ -35,391 +54,347 @@ nixcage <command> [args...]
 
 ### 3.1 Commands
 
-| Command                | Description                                                                                        |
-| ---------------------- | -------------------------------------------------------------------------------------------------- |
-| `init [dir]`           | Generate all project files in `dir` (default: `.`). Fails if `.nixcage/` already exists.           |
-| `reinit [dir]`         | Remove `.nixcage/` then run `init`. Overwrites `nixcage.toml` and `.envrc`.                        |
-| `destroy [dir]`        | Remove `.nixcage/`, `nixcage.toml`, and `.envrc`.                                                  |
-| `shell`                | Enter the sandbox interactively. Uses `cage.command` from config if set, otherwise drops to shell. |
-| `run <cmd...>`         | Run a single command inside the sandbox. Arguments are joined and passed to `nix-shell --run`.     |
-| `status`               | Print current config values, detected OS, and check all dependency binaries.                       |
-| `_direnv_hook`         | (Internal) Output shell code for `.envrc` to eval. Exports `NIXCAGE_*` vars, defines aliases.      |
-| `help`, `--help`, `-h` | Print usage summary.                                                                               |
-| `version`, `--version`, `-v` | Print `nixcage <version>`.                                                                   |
+| Command                | Description                                                                 |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `init [dir]`           | Generate all per-project files in `dir` (default: `.`). Fails if `nixcage.vm.nix` already exists. |
+| `build`                | Build the VM runner via `nix build`. First build takes 15+ minutes.         |
+| `start`                | Launch the VM runner in the background, wait for SSH, inject secrets.       |
+| `stop`                 | SIGTERM the VM (10s grace), then SIGKILL if needed. Removes the pid file.   |
+| `shell`                | SSH into the VM. Starts the VM first if not already running.                |
+| `run <cmd...>`         | Run a command inside the VM via SSH. Starts the VM first if needed.         |
+| `sync`                 | Compare config hash to last build; rebuild and restart if stale, else no-op.|
+| `logs`                 | `tail -f` the VM stdout/stderr log.                                         |
+| `status`               | Print project path, nix system, hypervisor, share proto, ssh port, build/run state. |
+| `install-hook [--remove]` | Append (or remove) the cd auto-enter hook in `~/.zshrc` or `~/.bashrc`.  |
+| `destroy [dir]`        | Stop the VM, remove `nixcage.vm.nix` and `.nixcage-vm/`, prune `.gitignore` entry. |
+| `_vm_hook [zsh\|bash]` | (Internal) Emit hook code to stdout for manual `eval` installation.         |
+| `version`, `--version`, `-v` | Print `nixcage <version>`.                                            |
+| `help`, `--help`, `-h` | Print usage summary.                                                        |
 
 ### 3.2 Project root discovery
 
-`find_cage_root()` walks from `$PWD` upward looking for `nixcage.toml`. If not found, the process exits with an error. This applies to `shell`, `run`, and `status`. For `_direnv_hook`, the command gracefully degrades by outputting an `echo` warning instead of exiting, since its output is `eval`'d by direnv and a hard exit would break the shell.
+`find_vm_root()` walks from `$PWD` upward looking for `nixcage.vm.nix`. If not
+found, the process exits with an error. This applies to `build`, `start`,
+`stop`, `shell`, `run`, `sync`, `logs`, and `status`. `init` and `destroy`
+operate on an explicit `[dir]` argument (default `.`).
 
 ### 3.3 Exit codes
 
-| Code | Meaning                                                                           |
-| ---- | --------------------------------------------------------------------------------- |
-| 0    | Success                                                                           |
-| 1    | Any error (missing config, unsupported OS, dependency not found, sandbox failure) |
+| Code | Meaning                                                                  |
+| ---- | ------------------------------------------------------------------------ |
+| 0    | Success                                                                  |
+| 1    | Any error (missing config, unsupported OS, VM build failure, SSH timeout, etc.) |
 
-The script runs under `set -euo pipefail`. Any unhandled non-zero exit or unbound variable terminates the process.
+The script runs under `set -euo pipefail`. Any unhandled non-zero exit or
+unbound variable terminates the process.
 
-## 4. Configuration
-
-### 4.1 File format
-
-`nixcage.toml` at the project root. Parsed by a minimal built-in TOML parser with these limitations:
-
-- Supports flat `[section]` headers and dot-separated nested sections (e.g., `[sandbox.filesystem]`)
-- Supports string scalars (quoted or unquoted), booleans (`true`/`false` unquoted), integers, and simple single-line arrays
-- Does **not** support nested tables, inline tables, multi-line arrays, or multi-line strings
-- Full-line comments (`# ...`) are skipped; inline comments after quoted or unquoted scalar values are stripped. A `#` inside a quoted value is preserved (e.g., `command = "echo #tag"` keeps the `#`). Inline comments inside array values are not supported.
-- Keys must match `[a-z_]+`
-
-### 4.2 Configuration keys
-
-All parsed values are stored in `CAGE_*` global shell variables.
-
-#### `[sandbox]`
-
-| Key     | Type   | Default      | Values                                | Description                              |
-| ------- | ------ | ------------ | ------------------------------------- | ---------------------------------------- |
-| `level` | string | `"standard"` | `"strict"`, `"standard"`, `"relaxed"` | Sandbox isolation preset (see Section 5) |
-
-#### `[sandbox.filesystem]`
-
-| Key         | Type     | Default | Description                                            |
-| ----------- | -------- | ------- | ------------------------------------------------------ |
-| `ro_bind`   | string[] | `[]`    | Extra host paths mounted read-only inside the cage     |
-| `rw_bind`   | string[] | `[]`    | Extra host paths mounted read-write inside the cage    |
-| `blacklist` | string[] | `[]`    | Host paths hidden (replaced with empty tmpfs on Linux) |
-
-All paths support `~` prefix, which is expanded to `$HOME` at runtime. `ro_bind`/`rw_bind` paths must exist on the host or they are silently skipped (on both platforms). `blacklist` paths are mounted as tmpfs unconditionally on Linux.
-
-On Linux, `ro_bind`/`rw_bind` are implemented as bwrap `--ro-bind`/`--bind` arguments.
-
-On macOS, `ro_bind` paths are added as `(allow file-read* (subpath ...))` rules to the Seatbelt profile. `rw_bind` paths are added as `(allow file-read* file-write* (subpath ...))`. `blacklist` is not supported on macOS (Seatbelt cannot selectively deny a subpath that a parent rule already allows); a warning is logged if blacklist paths are configured.
-
-#### `[sandbox.network]`
-
-| Key     | Type | Default | Description                                                                 |
-| ------- | ---- | ------- | --------------------------------------------------------------------------- |
-| `allow` | bool | `true`  | Enable/disable network access. When `false`, overrides the level's default. |
-
-On Linux, `allow = false` removes `--share-net` from bwrap args and adds `--unshare-net`.
-
-On macOS, `allow = false` strips all `(allow network-outbound)` and `(allow network-inbound)` lines from the resolved Seatbelt profile, causing network operations to fall through to `(deny default)`.
-
-#### `[sandbox.resources]`
-
-| Key      | Type   | Default | Description                                                     |
-| -------- | ------ | ------- | --------------------------------------------------------------- |
-| `cpus`   | int    | `0`     | Max CPU cores. `0` = unlimited. Linux only (via `systemd-run`). |
-| `memory` | string | `""`    | Max memory (e.g., `"4G"`). Empty = unlimited. Linux only.       |
-
-Resource limits require `systemd-run` on the host. If `systemd-run` is not available, limits are silently ignored. On macOS, these settings have no effect and a warning is logged if non-default values are configured.
-
-Implementation: when either value is non-default and `systemd-run` exists, the bwrap invocation is prefixed with `systemd-run --user --scope -q -p CPUQuota=<N>00% -p MemoryMax=<M>`.
-
-#### `[nix]`
-
-| Key          | Type     | Default         | Description                                  |
-| ------------ | -------- | --------------- | -------------------------------------------- |
-| `packages`   | string[] | `["nodejs_22"]` | Nix package attribute names from `<nixpkgs>` |
-| `pure`       | bool     | `true`          | Pass `--pure` to `nix-shell`                 |
-| `store_mode` | string   | `"readonly"`    | Nix store isolation strategy (see Section 6) |
-
-Package names are serialized to JSON via `jq`, exported as `NIXCAGE_PACKAGES_JSON`, and consumed by the generated `shell.nix` which resolves `pkgs.${name}` for each entry.
-
-#### `[cage]`
-
-| Key               | Type     | Default                                 | Description                                                     |
-| ----------------- | -------- | --------------------------------------- | --------------------------------------------------------------- |
-| `command`         | string   | `""`                                    | Default command for `nixcage shell`. Empty = interactive shell. |
-| `passthrough_env` | string[] | `["TERM", "LANG", "ANTHROPIC_API_KEY"]` | Host environment variables forwarded into the sandbox.          |
-
-On Linux, passthrough is implemented via `bwrap --setenv <VAR> <VALUE>` for each variable that is non-empty on the host.
-
-On macOS, passthrough is implemented by prepending `export VAR='<escaped_value>';` to the `bash -c` command string. Single quotes in values are escaped using the `'\''` idiom to prevent injection.
-
-## 5. Sandbox levels
-
-### 5.1 Level matrix
-
-| Aspect       | `strict`                                                             | `standard`    | `relaxed`             |
-| ------------ | -------------------------------------------------------------------- | ------------- | --------------------- |
-| `/nix/store` | Read-only                                                            | Read-only     | Read-only             |
-| Project dir  | Not mounted                                                          | Read-write    | Read-write            |
-| Home (`~`)   | tmpfs (empty)                                                        | tmpfs (empty) | Read-only (real home) |
-| `/tmp`       | tmpfs                                                                | tmpfs         | tmpfs                 |
-| Network      | Disabled                                                             | Enabled       | Enabled               |
-| System paths | `/etc/resolv.conf`, `/etc/ssl`, `/etc/static`*, `/etc/nix`, `/proc`, `/dev` (all ro) | Same          | Same                  |
-
-### 5.2 Linux implementation (bwrap)
-
-The generated `sandbox-linux.sh` profile defines `build_bwrap_args()` which constructs the bwrap argument array:
-
-- **All levels**: `--unshare-pid --unshare-uts --unshare-ipc --die-with-parent`, `/nix/store` (ro-bind), system paths (`/etc/resolv.conf`, `/etc/ssl`, `/etc/static`\*, `/etc/nix`), `--proc /proc --dev /dev --tmpfs /tmp`. \*`/etc/static` is NixOS-specific and only mounted if present.
-- **strict**: `--tmpfs /home --unshare-net`
-- **standard**: `--tmpfs /home --share-net --bind <project_dir> <project_dir>`
-- **relaxed**: `--ro-bind $HOME $HOME --share-net --bind <project_dir> <project_dir>`
-- **All levels**: `--chdir <project_dir>`
-
-After `build_bwrap_args()`, the runner applies store mode modifications, extra binds, blacklist, network override, env passthrough, resource limits, and finally invokes bwrap with the nix-shell command.
-
-### 5.3 macOS implementation (sandbox-exec)
-
-Three Seatbelt profiles are generated at init time as `.sb` files. Each starts with `(version 1) (deny default)` and explicitly allows required operations.
-
-Common rules across all profiles:
-
-- `process-exec`, `process-fork`, `signal`, `sysctl-read`, `mach-lookup`, `ipc-posix*`
-- `file-read*` on: `/nix`, `/dev`, `/private/tmp`, `/usr/lib`, `/usr/share`, `/System`, `/Library/Frameworks`, `/private/var/run`, `/etc/resolv.conf`, `/private/etc/resolv.conf`
-- `file-write*` on: `/private/tmp`, `/dev/null`, `/dev/tty`
-
-Level-specific additions:
-
-- **strict**: No network rules. No project dir access.
-- **standard**: `file-read* file-write*` on `NIXCAGE_PROJECT_DIR`. `network-outbound`, `network-inbound`.
-- **relaxed**: `file-read*` on `HOME_DIR`. `file-read* file-write*` on `NIXCAGE_PROJECT_DIR`. `network-outbound`, `network-inbound`.
-
-Placeholder resolution: before invocation, `sed` replaces literal strings `NIXCAGE_PROJECT_DIR` and `HOME_DIR` with actual absolute paths. The resolved profile is written to `sandbox-macos-resolved.sb` (gitignored).
-
-The sandbox is entered via: `sandbox-exec -f <resolved_profile> /bin/bash -c "<env_exports> cd '<project_dir>' && <nix_cmd>"`
-
-## 6. Nix store isolation modes
-
-All modes first resolve the nix environment on the host (`nix-shell --run "true"`) to ensure all packages exist in `/nix/store`. On Linux, the derivation path is obtained via `nix-instantiate` for use by `copy` and `isolated` store modes. On macOS, this step is skipped since those modes fall back to `readonly`.
-
-### 6.1 `shared`
-
-- **Linux**: `/nix/store` is ro-bind mounted (from `build_bwrap_args`). The nix daemon socket (`/nix/var/nix/daemon-socket/socket`) is bind-mounted read-write, allowing `nix-env` or `nix-build` inside the cage.
-- **macOS**: No additional rules. The default profile already allows `file-read*` on `/nix`.
-
-### 6.2 `readonly` (default)
-
-- **Linux**: `/nix/store` is ro-bind mounted. `/nix/var` is overlaid with tmpfs, blocking daemon communication. New package installation inside the cage fails.
-- **macOS**: Appends `(deny file-write* (subpath "/nix"))` to the resolved profile.
-
-### 6.3 `copy` (Linux only)
-
-1. Creates `.nixcage/store/` under the project directory.
-2. Calls `copy_store_closure()` which runs `nix-store -qR <drv_path>` to enumerate the full runtime closure, then `cp -a` each store path into the local store (skipping already-copied paths).
-3. Removes the default `/nix/store` ro-bind from bwrap args.
-4. Adds `--ro-bind <local_store>/nix/store /nix/store` and `--tmpfs /nix/var`.
-
-On macOS, this mode logs a warning and falls back to `readonly`.
-
-### 6.4 `isolated` (Linux only)
-
-1. Creates `.nixcage/isolated-store/` under the project directory.
-2. On first run only (when `isolated-store/nix/store` does not exist), copies the full closure using the same `copy_store_closure()` mechanism.
-3. Replaces the bwrap `/nix/store` bind with the isolated store, same as `copy`.
-
-The difference from `copy`: `isolated` only populates on first run and does not update on subsequent runs, providing a frozen snapshot. `copy` re-evaluates and copies missing paths each run.
-
-On macOS, this mode logs a warning and falls back to `readonly`.
-
-## 7. Generated files
-
-`nixcage init [dir]` creates the following file tree:
+## 4. Per-project file layout
 
 ```
-<dir>/
-  nixcage.toml                          # User-editable configuration
-  .envrc                                # direnv hook (evals nixcage _direnv_hook)
-  .nixcage/
-    .gitignore                          # Ignores resolved profiles, store dirs, logs
-    shell.nix                           # Nix expression consuming NIXCAGE_PACKAGES_JSON
-    profiles/
-      sandbox-linux.sh                  # build_bwrap_args() function
-      sandbox-macos-strict.sb           # Seatbelt SBPL template (strict)
-      sandbox-macos-standard.sb         # Seatbelt SBPL template (standard)
-      sandbox-macos-relaxed.sb          # Seatbelt SBPL template (relaxed)
-      sandbox-macos-resolved.sb         # (runtime, gitignored) Resolved profile with actual paths
+<project>/
+  nixcage.vm.nix              # User-editable NixOS module (committed)
+  .gitignore                  # Updated by init: appends ".nixcage-vm/" once
+  .nixcage-vm/                # Generated state (gitignored)
+    flake.nix                 # Generated VM flake (microvm + base + user config)
+    flake.lock                # Created by 'nixcage build'
+    config                    # SSH_PORT, SECRET_VARS, HYPERVISOR, SHARE_PROTO, NIX_SYSTEM
+    id_ed25519                # SSH private key (per-project)
+    id_ed25519.pub            # SSH public key (baked into VM via authorizedKeys)
+    known_hosts               # Populated by ssh-keyscan after first boot
+    nixcage.vm.nix            # Copy of project's nixcage.vm.nix (refreshed each build)
+    result -> /nix/store/...  # VM runner symlink (after build)
+    build-hash                # sha256 of nixcage.vm.nix + flake.lock at last build
+    vm.pid                    # Hypervisor process PID (while running; removed on stop)
+    vm.log                    # Hypervisor stdout+stderr (persists across runs)
 ```
 
-Runtime directories created on demand:
+`nixcage.vm.nix` is the presence signal for a nixcage project. Its existence is
+what `find_vm_root()` and the shell hook detect.
 
-- `.nixcage/store/nix/store/...` (by `copy` store mode)
-- `.nixcage/isolated-store/nix/store/...` (by `isolated` store mode)
+### 4.1 `.nixcage-vm/config`
 
-### 7.1 `shell.nix`
+Flat `key=value` file, `#` comments allowed. Read by `vm_read_config()` into
+`VM_*` globals.
 
-```nix
-{ pkgs ? import <nixpkgs> {} }:
-let
-  extraPackages = builtins.fromJSON (builtins.getEnv "NIXCAGE_PACKAGES_JSON");
-  resolvedPkgs = map (name: pkgs.${name} or (throw "Unknown package: ${name}")) extraPackages;
-in pkgs.mkShell {
-  buildInputs = resolvedPkgs;
-  shellHook = ''
-    export NIXCAGE_ACTIVE=1
-    export NIXCAGE_ROOT="$(pwd)"
-  '';
-}
+| Key           | Value                                                              |
+| ------------- | ------------------------------------------------------------------ |
+| `SSH_PORT`    | Random free TCP port chosen at init time (host-side forwarded port)|
+| `SECRET_VARS` | Comma-separated list of env-var names to inject (no values stored) |
+| `HYPERVISOR`  | `cloud-hypervisor` (Linux) or `qemu` (macOS)                       |
+| `SHARE_PROTO` | `virtiofs` (Linux) or `9p` (macOS)                                 |
+| `NIX_SYSTEM`  | `x86_64-linux` or `aarch64-linux`                                  |
+
+This file is regenerated by `nixcage init`. It is gitignored because it contains
+host-specific values (port number) and is not portable across hosts.
+
+### 4.2 `nixcage.vm.nix`
+
+User-facing NixOS module. The init template is a stub with commented examples
+showing how to add packages, adjust VM resources, and mount extra host paths.
+Users own this file; nixcage never overwrites it after init.
+
+This module is composed with `microvm.nixosModules.microvm` and
+`nixcage.nixosModules.base` in the generated flake.
+
+### 4.3 Generated VM flake (`.nixcage-vm/flake.nix`)
+
+Generated by `cmd_init`. Pinned inputs:
+
+- `nixpkgs` -> `github:NixOS/nixpkgs/nixos-unstable`
+- `microvm` -> `github:astro/microvm.nix` (follows `nixpkgs`)
+- `nixcage` -> `github:hamidr/nixcage` (follows `nixpkgs`)
+
+Single output: `nixosConfigurations.vm`, composed from:
+
+1. `microvm.nixosModules.microvm`
+2. `nixcage.nixosModules.base` (the `vm-base.nix` module)
+3. `./nixcage.vm.nix` (the user's module; refreshed on every build)
+4. An inline module that sets `microvm.{hypervisor, mem, vcpu, shares, interfaces, forwardPorts}` and `users.users.nixcage.openssh.authorizedKeys.keys`.
+
+Defaults: 2047 MB RAM, 2 vCPUs, `/workspace` share pointing at the project
+directory, user-mode networking with SSH port forward `$SSH_PORT:22`.
+
+On macOS the inline module also sets
+`microvm.vmHostPackages = nixpkgs.legacyPackages.<aarch64|x86_64>-darwin` so the
+runner script is a Darwin-native binary while the guest remains Linux.
+
+## 5. Base NixOS module (`modules/vm-base.nix`)
+
+Exported as `nixosModules.base` from the top-level flake. Applied to every
+nixcage VM. Provides:
+
+- `claude-code`, `git`, `nodejs_22`, `jq`, `curl`, `bash`, `openssh` in
+  `environment.systemPackages`. `opencode` is added if present in nixpkgs.
+- `services.openssh` with `PasswordAuthentication = false` and
+  `PermitRootLogin = "no"`.
+- `users.users.nixcage`: normal user, in `wheel`, bash login shell. The
+  per-project SSH public key is added by the generated flake, not here.
+- `security.sudo.wheelNeedsPassword = false` (the `nixcage` user has passwordless sudo).
+- `systemd.services.nixcage-secrets`: oneshot, copies `/run/nixcage-secrets` (if
+  present) to `/etc/profile.d/nixcage-secrets.sh`. Restarted by `nixcage start`
+  after secrets are injected.
+- `environment.loginShellInit`: `cd /workspace` when the login shell starts in `$HOME`.
+- `networking.hostName = "nixcage-vm"`, `system.stateVersion = "24.11"`.
+
+The `/workspace` mount itself is declared by the generated per-project flake
+(not here) because the share protocol differs per host.
+
+## 6. Build, start, sync
+
+### 6.1 Build (`nixcage build`)
+
+1. Copy `nixcage.vm.nix` into `.nixcage-vm/nixcage.vm.nix` so Nix pure
+   evaluation can see it from inside the flake tree.
+2. Run `nix build 'path:.#nixosConfigurations.vm.config.microvm.declaredRunner' --out-link result -L` from inside `.nixcage-vm/`.
+3. Compute `sha256sum nixcage.vm.nix flake.lock | sha256sum` (hash of the
+   concatenated per-file digests) and write it to `.nixcage-vm/build-hash`.
+
+The `result` symlink points at the hypervisor runner script.
+
+### 6.2 Start (`nixcage start`)
+
+1. Verify `result` exists, else error.
+2. Compare current config hash to `build-hash`; warn (not block) if stale.
+3. Resolve runner: prefer `result/bin/microvm-run` if executable, else `result` itself.
+4. Launch runner in background: `"$runner" >vm.log 2>&1 &`. Save `$!` to `vm.pid`.
+5. `vm_wait_for_ssh()`: poll `ssh ... true` every 2s until success. Timeout
+   120s on Linux, 300s on macOS. If the runner process dies first, abort with
+   pointer to `vm.log`.
+   - `known_hosts` is truncated before polling because the VM regenerates host
+     keys each boot. `StrictHostKeyChecking=accept-new` accepts and persists
+     the new host key on first successful connection.
+6. `vm_inject_secrets()`: see Section 7.
+
+### 6.3 Stop (`nixcage stop`)
+
+`kill $pid`, wait up to 10s, then `kill -9`. Remove `vm.pid`.
+
+### 6.4 Sync (`nixcage sync`)
+
+Compute current `vm_compute_build_hash` and compare to `build-hash`. If equal:
+no-op. If different: `cmd_build`; if VM was running, `cmd_stop` then `cmd_start`.
+
+`sync` does not flag the case where `result` is missing entirely; that is what
+`start` checks.
+
+## 7. Secrets injection
+
+At init time, `vm_detect_ai_keys()` scans the host environment for these
+variable names and records the ones currently set:
+
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `OPENCODE_API_KEY`
+- `GITHUB_TOKEN`
+
+The comma-separated list of names (not values) is written to `SECRET_VARS=` in
+`.nixcage-vm/config`. The list can be edited by hand to add or remove names.
+
+At `start` time, `vm_inject_secrets()`:
+
+1. Reads `SECRET_VARS` from config.
+2. For each name with a non-empty value on the host, builds an
+   `export VAR='<value>'` line (single-quote escaped via `'\''`).
+3. Pipes the result via SSH into the VM:
+   `sudo tee /run/nixcage-secrets >/dev/null && sudo chmod 600 /run/nixcage-secrets && sudo systemctl restart nixcage-secrets`.
+4. The `nixcage-secrets` systemd service then copies the tmpfs file to
+   `/etc/profile.d/nixcage-secrets.sh` (mode 0600) so every login shell sources it.
+
+`/run` is tmpfs, so the source file never reaches the guest disk. The
+`/etc/profile.d/` copy is persistent within the running VM but lives on
+microvm.nix's writable overlay, which is itself ephemeral if the VM is
+configured for stateless runs.
+
+## 8. SSH transport
+
+All control-plane communication uses SSH on `127.0.0.1:$SSH_PORT` with the
+per-project ed25519 key. `vm_ssh()` always passes:
+
+- `-p $VM_SSH_PORT`
+- `-i .nixcage-vm/id_ed25519`
+- `-o UserKnownHostsFile=.nixcage-vm/known_hosts`
+- `-o StrictHostKeyChecking=yes`
+- `-o ConnectTimeout=5`
+- `-o BatchMode=yes`
+
+Login user is always `nixcage`. The host key is accepted on first connection
+(`accept-new`) by `vm_wait_for_ssh()` and verified strictly thereafter.
+
+## 9. Shell hook (auto-enter)
+
+`nixcage install-hook` appends a delimited block to the user's shell rc file
+(`~/.zshrc` for zsh, `~/.bashrc` for bash). The block is bounded by
+`# nixcage-hook-begin` and `# nixcage-hook-end` so `--remove` can excise it
+cleanly. Re-running `install-hook` is idempotent.
+
+### 9.1 zsh hook
+
+Uses `chpwd` via `add-zsh-hook`. Fires on every directory change.
+
+### 9.2 bash hook
+
+Uses `PROMPT_COMMAND`. Tracks the last `$PWD` to fire only on directory change.
+
+### 9.3 Hook logic (both shells)
+
 ```
-
-Package names are read from the `NIXCAGE_PACKAGES_JSON` environment variable (a JSON array of strings). Each name is resolved as a top-level attribute of `pkgs`. If a name does not exist, evaluation fails with `throw`.
-
-### 7.2 `.envrc`
-
-```bash
-if command -v nixcage &>/dev/null; then
-  eval "$(nixcage _direnv_hook)"
-else
-  echo "[nixcage] Warning: nixcage not found in PATH. Falling back to plain nix-shell."
-  use nix .nixcage/shell.nix
+if [[ -f "$PWD/nixcage.vm.nix" ]] && [[ -z "${NIXCAGE_VM_ACTIVE:-}" ]]; then
+  export NIXCAGE_VM_ACTIVE=1
+  nixcage shell
+  unset NIXCAGE_VM_ACTIVE
 fi
 ```
 
-Fallback: if `nixcage` is not installed, direnv loads `shell.nix` directly without sandboxing.
+`NIXCAGE_VM_ACTIVE` is a re-entry guard. Without it, exiting the VM SSH session
+would land back in the host shell which would immediately re-invoke
+`nixcage shell` again.
 
-## 8. direnv integration
+### 9.4 Manual installation
 
-`nixcage _direnv_hook` outputs shell code that is `eval`'d by the `.envrc`:
+`nixcage _vm_hook [zsh|bash]` emits the hook body to stdout. Users who manage
+their dotfiles externally can `eval "$(nixcage _vm_hook zsh)"` instead of
+letting nixcage edit their rc file.
 
-```bash
-export NIXCAGE_ACTIVE=1
-export NIXCAGE_ROOT="<project_dir>"
-export NIXCAGE_LEVEL="<level>"
-export NIXCAGE_OS="<linux|macos>"
+## 10. Destroy
 
-cage() { nixcage "$@"; }
-cagerun() { nixcage run "$@"; }
+`nixcage destroy [dir]`:
 
-echo "[nixcage] Cage active: level=<level> os=<os>"
-echo "[nixcage] Use 'nixcage run <cmd>' or 'nixcage shell' to enter the sandbox"
-```
+1. If the VM is running, `cmd_stop`.
+2. Remove `nixcage.vm.nix` and the entire `.nixcage-vm/` directory.
+3. Remove the `.nixcage-vm/` line from `.gitignore` if it is present as an
+   exact match. Other gitignore content is left untouched.
 
-The hook does **not** enter the sandbox. It only sets metadata variables and convenience aliases. Actual sandboxing occurs when `nixcage run` or `nixcage shell` is invoked.
+The `--keep-config` and `--keep-keys` style flags do not exist; destroy is
+all-or-nothing.
 
-## 9. Execution flow
+## 11. Security model
 
-### 9.1 `nixcage run <cmd>`
+### 11.1 Threat model
 
-1. `find_cage_root()` locates `nixcage.toml` by walking up from `$PWD`.
-2. `parse_config()` reads the TOML file into `CAGE_*` globals.
-3. Validate `CAGE_LEVEL` is one of `strict`, `standard`, `relaxed`. Exit with error if invalid.
-4. If no command arguments are provided and `CAGE_COMMAND` is non-empty, it is used as the default command.
-5. `run_sandboxed()` dispatches to `run_linux()` or `run_macos()` based on `$OS`.
+nixcage limits the blast radius of tools that may:
 
-#### 9.1.1 Linux flow (`run_linux`)
+- Read files outside the project directory (`~/.ssh`, `~/.aws`, browser profiles)
+- Write to arbitrary host locations
+- Make unexpected outbound connections from the host's network identity
+- Consume host resources
 
-1. Verify `bwrap` is available.
-2. Source `sandbox-linux.sh` to define `build_bwrap_args()`.
-3. Serialize `CAGE_PACKAGES` to JSON.
-4. Pre-resolve: `NIXCAGE_PACKAGES_JSON=<json> nix-shell <shell.nix> --run "true"` to populate `/nix/store`.
-5. Obtain derivation path: `NIXCAGE_PACKAGES_JSON=<json> nix-instantiate <shell.nix>`.
-6. Build bwrap argument array via `build_bwrap_args()`.
-7. Apply store mode modifications.
-8. Append extra ro/rw binds (with tilde expansion, existence check).
-9. Append blacklist paths as tmpfs mounts (with tilde expansion).
-10. Apply network override if `allow = false`.
-11. Build env passthrough args.
-12. Optionally wrap with `systemd-run` for resource limits.
-13. Build nix-shell args (with `--pure` if configured, `--run` if command given).
-14. Execute: `[systemd-run ...] bwrap <bwrap_args> <env_args> nix-shell <shell.nix> [--pure] [--run <cmd>]`.
+The VM boundary is enforced by the hypervisor (cloud-hypervisor or QEMU/HVF).
+The guest sees only `/workspace` (the project directory) plus whatever extra
+host paths the user explicitly adds to `microvm.shares` in `nixcage.vm.nix`.
 
-#### 9.1.2 macOS flow (`run_macos`)
+### 11.2 Boundaries
 
-1. Verify `sandbox-exec` is available.
-2. Select Seatbelt profile template based on `CAGE_LEVEL`.
-3. Serialize `CAGE_PACKAGES` to JSON.
-4. Pre-resolve nix environment (same as Linux).
-5. Apply store mode (only `shared` and `readonly` are effective; `copy`/`isolated` fall back with warning).
-6. Resolve placeholder strings in the `.sb` template via `sed`, write to `sandbox-macos-resolved.sb`.
-7. Append store mode deny rules if applicable.
-8. Append extra ro/rw bind paths as Seatbelt rules (with tilde expansion, existence check).
-9. Build env export string with single-quote escaping.
-10. Apply network override if `allow = false` (strip `(allow network-*)` lines via `sed`).
-11. Build nix-shell command string with proper quoting.
-12. Execute: `sandbox-exec -f <resolved_profile> /bin/bash -c "<env_exports> cd '<project_dir>' && nix-shell '<shell.nix>' [--pure] [--run '<cmd>']"`.
+| Boundary       | Mechanism                                                                  |
+| -------------- | -------------------------------------------------------------------------- |
+| Filesystem     | Only declared `microvm.shares` are visible to the guest                    |
+| Process        | Hypervisor-level isolation (separate kernel)                               |
+| Network        | User-mode networking; outbound only (no host listen sockets except SSH forward) |
+| Resources      | `microvm.mem`, `microvm.vcpu` cap RAM and CPU                              |
+| Secrets        | Injected via tmpfs over SSH; values never written to host disk by nixcage  |
 
-### 9.2 `nixcage shell`
+### 11.3 Known limitations
 
-Identical to `nixcage run` but with no command arguments. If `cage.command` is set in the config, that command is used. Otherwise, `nix-shell` opens an interactive shell.
+- **Trust in microvm.nix and the hypervisor.** A guest escape in
+  cloud-hypervisor/QEMU/HVF defeats the boundary.
+- **`/workspace` is read-write.** A malicious tool inside the VM can corrupt or
+  exfiltrate anything in the project directory. nixcage does not protect the
+  project against itself.
+- **No network egress filtering.** If the user wants no outbound traffic from
+  the VM, they must add `networking.firewall` rules to `nixcage.vm.nix`.
+- **Extra shares are user-declared.** If the user adds `~/.ssh` as a share to
+  let `git` push, that ring is broken on purpose.
+- **`nixcage` user has passwordless sudo inside the VM.** This is for
+  convenience inside the guest, not a defense.
+- **No user namespace, seccomp, or capability filtering on the host.** nixcage
+  does not call bwrap, sandbox-exec, or firejail. Its only host-side primitive
+  is "don't share filesystems we didn't ask to share."
 
-## 10. Security model
+## 12. Packaging
 
-### 10.1 Threat model
-
-nixcage is designed to limit the blast radius of tools that may:
-
-- Read files outside the project directory (e.g., `~/.ssh`, `~/.aws`)
-- Write to arbitrary locations
-- Make unexpected network connections
-- Consume excessive system resources
-
-It is **not** designed to contain a determined adversary with root-level exploits. The sandbox relies on kernel-level isolation (Linux namespaces, macOS Seatbelt) which have known limitations.
-
-### 10.2 Security boundaries
-
-| Boundary          | Linux                            | macOS                                     |
-| ----------------- | -------------------------------- | ----------------------------------------- |
-| Filesystem        | Namespace + bind mounts          | Seatbelt `file-read*`/`file-write*` rules |
-| Process isolation | PID namespace                    | Not available                             |
-| Network           | Network namespace                | Seatbelt `network-*` rules                |
-| IPC               | IPC namespace                    | Allowed (`mach-lookup`, `ipc-posix*`)     |
-| Resource limits   | cgroups via systemd-run          | Not available                             |
-| User namespace    | Not used (runs as invoking user) | N/A                                       |
-
-### 10.3 Injection prevention
-
-- macOS env passthrough escapes single quotes in variable values using the `'\''` idiom (via `escape_sq()`)
-- macOS project directory path is single-quoted in the `bash -c` command string
-- macOS nix-shell path and `--run` arguments are single-quoted and escaped
-- Linux uses `bwrap --setenv` which does not go through shell interpretation
-
-### 10.4 Limitations
-
-- **macOS Seatbelt is deprecated.** Apple has not removed it but does not document or guarantee its behavior. Future macOS versions may change or remove it.
-- **macOS `mach-lookup` is broadly allowed.** This permits inter-process communication via Mach ports, which is necessary for most macOS processes to function but weakens isolation.
-- **No user namespace isolation.** Processes inside the cage run as the invoking user. If the sandbox is escaped, the attacker has the user's full privileges.
-- **`blacklist` on macOS is ineffective.** Seatbelt cannot selectively deny a subpath when a parent path is allowed.
-- **TOML parser is minimal.** Complex TOML features (nested tables, multi-line values) are not supported.
-
-## 11. Packaging
-
-### 11.1 Flake (`flake.nix`)
+### 12.1 Flake (`flake.nix`)
 
 Uses [flake-parts](https://flake.parts/) for per-system outputs.
 
-- `packages.default`: `mkDerivation` that copies `nixcage` into `$out/bin` and wraps it with runtime deps (`jq`, `coreutils`, `gnused`, `bash`, and `bubblewrap` on Linux) via `wrapProgram`.
-- `devShells.default`: provides `bash`, `jq`, `shellcheck`, `direnv`, `bats`, and (on Linux) `bubblewrap`.
+- `packages.default`: `mkDerivation` that installs the `nixcage` script into
+  `$out/bin` and `wrapProgram`s it with `PATH` prefixed by `jq`, `coreutils`,
+  `gnused`, `bash`, `openssh`. `nix`, `ssh-keygen`, and `python3`/`perl` are
+  expected to come from the host environment, not the wrapper.
+- `nixosModules.base`: re-exports `modules/vm-base.nix`.
+- `overlays.default`: exposes `pkgs.nixcage` for downstream nixpkgs overlays.
+- `devShells.default`: `bash`, `jq`, `shellcheck`, `bats` (with
+  `bats-support` and `bats-assert`), `openssh`. `BATS_LIB_PATH` is exported
+  so the test helpers resolve without further setup.
 
-Nixpkgs input tracks `nixos-unstable`.
+Supported `systems`: `x86_64-linux`, `aarch64-linux`, `x86_64-darwin`,
+`aarch64-darwin`. Nixpkgs input tracks `nixos-unstable`.
 
-## 12. Environment variables
+## 13. Environment variables
 
-### 12.1 Set by nixcage
+### 13.1 Set by nixcage
 
-| Variable                | Set where                    | Value                         |
-| ----------------------- | ---------------------------- | ----------------------------- |
-| `NIXCAGE_ACTIVE`        | direnv hook + inside sandbox | `1`                           |
-| `NIXCAGE_ROOT`          | direnv hook + inside sandbox | Absolute path to project root |
-| `NIXCAGE_PACKAGES_JSON` | Inside sandbox               | JSON array of package names   |
-| `NIXCAGE_LEVEL`         | direnv hook only             | Current sandbox level string  |
-| `NIXCAGE_OS`            | direnv hook only             | `linux` or `macos`            |
+| Variable             | Scope            | Value                                       |
+| -------------------- | ---------------- | ------------------------------------------- |
+| `NIXCAGE_VM_ACTIVE`  | Host shell hook  | `1` while inside a `nixcage shell` session  |
+| Each `SECRET_VARS` entry | Inside VM    | Forwarded value, sourced by login shells    |
 
-### 12.2 Read by nixcage
+### 13.2 Read by nixcage
 
-| Variable                        | Used by          | Purpose                                          |
-| ------------------------------- | ---------------- | ------------------------------------------------ |
-| `HOME`                          | Runner, profiles | Home directory for relaxed mode, tilde expansion |
-| `PWD`                           | `find_cage_root` | Starting directory for upward search             |
-| Each entry in `passthrough_env` | Runner           | Forwarded into the sandbox if non-empty on host  |
+| Variable                            | Used by             | Purpose                                    |
+| ----------------------------------- | ------------------- | ------------------------------------------ |
+| `PWD`                               | `find_vm_root`      | Walk-up search start                       |
+| `HOME`                              | `cmd_install_hook`  | Locate `~/.zshrc` / `~/.bashrc`            |
+| `SHELL`                             | `cmd_install_hook`  | Pick zsh vs bash hook block                |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENCODE_API_KEY`, `GITHUB_TOKEN` | `vm_detect_ai_keys` (init), `vm_inject_secrets` (start) | Auto-detect and forward |
+| Each name in `SECRET_VARS`          | `vm_inject_secrets` | Read value from host env, push to VM       |
 
-## 13. Platform compatibility matrix
+## 14. Platform differences
 
-| Feature                   | Linux           | macOS                  |
-| ------------------------- | --------------- | ---------------------- |
-| Sandbox engine            | bwrap           | sandbox-exec           |
-| PID namespace             | Yes             | No                     |
-| UTS namespace             | Yes             | No                     |
-| IPC namespace             | Yes             | No                     |
-| Network namespace         | Yes             | Seatbelt rules         |
-| Filesystem bind mounts    | Yes             | No (path-based ACL)    |
-| Resource limits (CPU/mem) | systemd-run     | Not available          |
-| Store mode: `shared`      | Yes             | Yes                    |
-| Store mode: `readonly`    | Yes             | Yes                    |
-| Store mode: `copy`        | Yes             | Falls back to readonly |
-| Store mode: `isolated`    | Yes             | Falls back to readonly |
-| `blacklist` paths         | tmpfs overlay   | Not effective          |
-| `network.allow = false`   | `--unshare-net` | Strip allow rules      |
+| Feature           | Linux              | macOS                              |
+| ----------------- | ------------------ | ---------------------------------- |
+| Hypervisor        | cloud-hypervisor   | qemu                               |
+| Filesystem share  | virtiofs           | 9p (virtiofsd is Linux-only)       |
+| VM runner binary  | Linux              | Darwin-native (`vmHostPackages`)   |
+| SSH wait timeout  | 120s               | 300s (slower QEMU boot)            |
+| Guest system      | Linux              | Linux                              |
+
+All other behavior is identical across platforms.
