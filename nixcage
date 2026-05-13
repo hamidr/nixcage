@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-NIXCAGE_VERSION="1.1.1"
+NIXCAGE_VERSION="1.2.0"
 NIXCAGE_VM_DIR=".nixcage-vm"
 
 RED=$'\033[0;31m'
@@ -479,21 +479,40 @@ VMCONF
 cmd_build() {
   local project_dir
   project_dir="$(find_vm_root)"
+  local vm_dir="$project_dir/$NIXCAGE_VM_DIR"
 
-  if [[ ! -f "$project_dir/$NIXCAGE_VM_DIR/flake.nix" ]]; then
+  if [[ ! -f "$vm_dir/flake.nix" ]]; then
     log_err "No .nixcage-vm/flake.nix found. Run 'nixcage init' first."
     exit 1
   fi
 
   # Copy user config into the flake tree so Nix pure evaluation can see it.
-  cp "$project_dir/nixcage.vm.nix" "$project_dir/$NIXCAGE_VM_DIR/nixcage.vm.nix"
+  cp "$project_dir/nixcage.vm.nix" "$vm_dir/nixcage.vm.nix"
+
+  # Build from a clean staging copy of the flake inputs. The vm_dir also
+  # holds runtime state (qemu/virtiofsd sockets, pid files, logs) because
+  # qemu and virtiofsd share a CWD to communicate via relative socket paths.
+  # Nix's path: input copies the whole directory tree into the store, and
+  # unix sockets aren't representable there -- builds would fail with
+  # "unsupported type". Staging the flake inputs avoids that.
+  local build_dir
+  build_dir="$(mktemp -d -t nixcage-build.XXXXXX)"
+  cp "$vm_dir/flake.nix"      "$build_dir/flake.nix"
+  cp "$vm_dir/nixcage.vm.nix" "$build_dir/nixcage.vm.nix"
+  [[ -f "$vm_dir/flake.lock" ]] && cp "$vm_dir/flake.lock" "$build_dir/flake.lock"
 
   log_info "Building VM (first build takes 15+ minutes)..."
-  (cd "$project_dir/$NIXCAGE_VM_DIR" && \
-    nix build 'path:.#nixosConfigurations.vm.config.microvm.declaredRunner' --out-link result -L)
+  (cd "$build_dir" && \
+    nix build 'path:.#nixosConfigurations.vm.config.microvm.declaredRunner' \
+      --out-link "$vm_dir/result" -L)
+
+  # Persist any flake.lock created or updated by this build.
+  [[ -f "$build_dir/flake.lock" ]] && cp "$build_dir/flake.lock" "$vm_dir/flake.lock"
+
+  rm -rf "$build_dir"
 
   # Record a hash of the inputs so 'nixcage start' can warn on staleness.
-  vm_compute_build_hash "$project_dir" >"$project_dir/$NIXCAGE_VM_DIR/build-hash"
+  vm_compute_build_hash "$project_dir" >"$vm_dir/build-hash"
 
   log_ok "VM built. Run 'nixcage shell' to enter the VM."
 }
