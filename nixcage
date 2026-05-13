@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-NIXCAGE_VERSION="1.1.0"
+NIXCAGE_VERSION="1.1.1"
 NIXCAGE_VM_DIR=".nixcage-vm"
 
 RED=$'\033[0;31m'
