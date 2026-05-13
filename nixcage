@@ -92,6 +92,77 @@ vm_pid_file() {
   echo "$1/$NIXCAGE_VM_DIR/vm.pid"
 }
 
+vm_virtiofsd_pid_file() {
+  echo "$1/$NIXCAGE_VM_DIR/virtiofsd.pid"
+}
+
+# Launch the virtiofsd processes that back the VM's virtiofs shares.
+#
+# microvm.nix generates result/bin/virtiofsd-run as a supervisord wrapper
+# whose config sets `user=root` in [supervisord], so it refuses to start
+# as a normal user ("Can't drop privilege as nonroot user"). We bypass
+# supervisord and exec each `command=` from the [program:...] sections
+# directly, recording PIDs so cmd_stop can clean them up.
+#
+# Both virtiofsd and qemu use a *relative* socket path
+# (nixcage-vm-virtiofs-<tag>.sock), so they must share a CWD. Callers must
+# `cd` to $NIXCAGE_VM_DIR before invoking this and before launching the VM.
+vm_start_virtiofsd() {
+  local project_dir="$1"
+  local result="$2"
+  local wrapper="$result/bin/virtiofsd-run"
+
+  [[ -x "$wrapper" ]] || return 0
+
+  local conf
+  conf="$(grep -oE -- '--configuration[[:space:]]+\S+' "$wrapper" | awk '{print $2}')"
+  if [[ -z "$conf" || ! -r "$conf" ]]; then
+    log_err "virtiofsd-run wrapper references unreadable supervisord config: $conf"
+    exit 1
+  fi
+
+  local pid_file
+  pid_file="$(vm_virtiofsd_pid_file "$project_dir")"
+  : >"$pid_file"
+  local log_file="$project_dir/$NIXCAGE_VM_DIR/virtiofsd.log"
+
+  # Extract command= lines from [program:...] sections only (skip eventlistener).
+  local in_program=0 line cmd
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\[program: ]]; then
+      in_program=1
+      continue
+    elif [[ "$line" =~ ^\[ ]]; then
+      in_program=0
+      continue
+    fi
+    if [[ "$in_program" -eq 1 && "$line" =~ ^command= ]]; then
+      cmd="${line#command=}"
+      # microvm.nix hardcodes --socket-group=kvm; chgrp fails when the
+      # invoking user isn't in the kvm group. The flag is purely a
+      # convenience for socket ownership; strip it so virtiofsd starts.
+      bash <(sed 's/--socket-group=[^[:space:]]*//g' "$cmd") \
+        >>"$log_file" 2>&1 &
+      echo "$!" >>"$pid_file"
+    fi
+  done <"$conf"
+}
+
+vm_stop_virtiofsd() {
+  local project_dir="$1"
+  local pid_file
+  pid_file="$(vm_virtiofsd_pid_file "$project_dir")"
+  [[ -f "$pid_file" ]] || return 0
+  local pid
+  while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done <"$pid_file"
+  rm -f "$pid_file"
+  # Clean leftover virtiofs sockets (relative to NIXCAGE_VM_DIR).
+  rm -f "$project_dir/$NIXCAGE_VM_DIR"/nixcage-vm-virtiofs-*.sock
+}
+
 # Returns 0 if the VM process recorded in the pid file is alive.
 vm_is_running() {
   local project_dir="$1"
@@ -250,7 +321,10 @@ cmd_init() {
 
   local hypervisor share_proto host_system
   if [[ "$OS" == "linux" ]]; then
-    hypervisor="cloud-hypervisor"
+    # qemu (not cloud-hypervisor): microvm.nix asserts forwardPorts only
+    # works with qemu + a user-mode interface. We rely on forwardPorts for
+    # SSH, so we must use qemu.
+    hypervisor="qemu"
     share_proto="virtiofs"
     host_system=""
   else
@@ -332,8 +406,8 @@ EOF
           microvm = {${vm_host_pkgs_line:+
 $vm_host_pkgs_line}
             hypervisor = "${hypervisor}";
-            mem = 2047;
-            vcpu = 2;
+            mem = nixpkgs.lib.mkDefault 2047;
+            vcpu = nixpkgs.lib.mkDefault 2;
             shares = [{
               tag = "workspace";
               source = "${project_dir}";
@@ -433,6 +507,9 @@ cmd_start() {
     return 0
   fi
 
+  # Clear any stale virtiofsd processes/sockets from a previous failed start.
+  vm_stop_virtiofsd "$project_dir"
+
   local result="$project_dir/$NIXCAGE_VM_DIR/result"
   if [[ ! -L "$result" && ! -e "$result" ]]; then
     log_err "VM not built. Run 'nixcage build' first."
@@ -466,11 +543,25 @@ cmd_start() {
   local pid_file
   pid_file="$(vm_pid_file "$project_dir")"
 
+  # virtiofsd and qemu communicate over a relative socket path, so both
+  # must run from the same directory. Co-locate them under NIXCAGE_VM_DIR
+  # so the socket doesn't litter the project root.
   log_info "Starting VM..."
-  "$runner" >"$log_file" 2>&1 &
-  echo "$!" >"$pid_file"
+  (
+    cd "$project_dir/$NIXCAGE_VM_DIR"
+    vm_start_virtiofsd "$project_dir" "$result"
+    "$runner" >"$log_file" 2>&1 &
+    echo "$!" >"$pid_file"
+  )
 
+  # vm_wait_for_ssh calls `exit 1` on failure, which would orphan
+  # virtiofsd. An EXIT trap cleans up only when ssh did not succeed.
+  _nixcage_start_ok=0
+  trap '[[ $_nixcage_start_ok -eq 1 ]] || vm_stop_virtiofsd "$project_dir"' EXIT
   vm_wait_for_ssh "$project_dir"
+  _nixcage_start_ok=1
+  trap - EXIT
+
   vm_inject_secrets "$project_dir"
 
   log_ok "VM ready. Use 'nixcage shell' to enter or 'nixcage stop' to stop."
@@ -505,6 +596,7 @@ cmd_stop() {
   fi
 
   rm -f "$pid_file"
+  vm_stop_virtiofsd "$project_dir"
   log_ok "VM stopped."
 }
 
