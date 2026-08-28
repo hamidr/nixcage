@@ -1,7 +1,7 @@
 ---
 id: ADR-002
 title: One shared VM with per-project containers; plain flake devShell as the interface
-status: proposed
+status: implementing
 date: 2026-08-28
 status_date: 2026-08-28
 summary: Replace per-project microVMs with one shared VM running imperative nspawn containers driven by plain devShells

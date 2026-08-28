@@ -1,5 +1,5 @@
 {
-  description = "NixOS microVM environments for AI coding agents";
+  description = "One shared NixOS microVM with per-project containers for AI coding agents";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -34,7 +34,7 @@
         {
           packages.default = pkgs.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "1.2.0";
+            version = "2.0.0";
 
             src = ./.;
 
@@ -50,7 +50,7 @@
             '';
 
             meta = {
-              description = "NixOS microVM environments for AI coding agents";
+              description = "One shared NixOS microVM with per-project containers for AI coding agents";
               license = lib.licenses.gpl3Only;
               platforms = lib.platforms.unix;
             };
@@ -88,7 +88,7 @@
           in
           final.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "1.2.0";
+            version = "2.0.0";
 
             src = ./.;
 
@@ -104,13 +104,18 @@
             '';
 
             meta = {
-              description = "NixOS microVM environments for AI coding agents";
+              description = "One shared NixOS microVM with per-project containers for AI coding agents";
               license = final.lib.licenses.gpl3Only;
               platforms = final.lib.platforms.unix;
             };
           };
       };
 
-      flake.nixosModules.base = import ./modules/vm-base.nix;
+      flake.nixosModules.nixcage = import ./modules/nixcage.nix;
+
+      flake.templates.config = {
+        path = ./templates/config;
+        description = "nixcage shared VM configuration flake";
+      };
     };
 }

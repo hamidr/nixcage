@@ -1,48 +1,44 @@
 # nixcage
 
-NixOS microVM environments for AI coding agents. Enter a project directory and your
-terminal switches into a full NixOS VM -- isolated at the kernel level, with
-claude-code and opencode pre-installed, driven entirely by a Nix flake you control.
+One shared NixOS microVM, one container per project. Any flake directory with a
+`devShells.default` becomes an isolated environment for AI coding agents -- no
+nixcage files in the project, VM-level isolation from the host, and a container
+boundary between projects.
 
 ## How it works
 
 ```
-cd myproject
+nixcage enter                 (from any flake dir under a workspace root)
+     |
+     +-- VM not running? --> boot the shared VM (qemu, microvm.nix)
      |
      v
-shell hook detects nixcage.vm.nix
+SSH into the VM
      |
      v
-nixcage shell
-     |
-     +-- VM already running? -----> SSH in (~50ms)
-     |
-     +-- not running? -----------> nixcage start
-                                        |
-                                        v
-                              fork hypervisor process
-                              (cloud-hypervisor on Linux,
-                               qemu on macOS)
-                                        |
-                                   boots NixOS VM
-                                        |
-                              +----[VM boundary]-----+
-                              |                      |
-                              |  /workspace          |  <- your project dir
-                              |  /nix/store (ro)     |  <- shared host store
-                              |  claude-code         |
-                              |  opencode            |
-                              |  + your packages     |
-                              |                      |
-                              +----------------------+
-                                        |
-                                   SSH session opens
-                                   drops into /workspace
++---------------[VM boundary]----------------+
+|                                            |
+|  /nix/store        VM-owned, never the     |
+|                    host store              |
+|  ~/Src             workspace roots,        |
+|                    mounted once            |
+|                                            |
+|  +------[container: this project]-------+  |
+|  |                                      |  |
+|  |  /workspace  <- only this project    |  |
+|  |  /root       <- persistent home      |  |
+|  |  /nix/store  <- read-only bind       |  |
+|  |                                      |  |
+|  |  nix develop   (your devShell)       |  |
+|  +--------------------------------------+  |
+|                                            |
++--------------------------------------------+
 ```
 
-The host `/nix/store` is shared read-only across all VMs -- packages built once are
-reused everywhere. Only `/workspace` (your project directory) crosses the VM
-boundary as a live read-write mount.
+The VM boots once and serves every project. Each `nixcage enter` runs
+`nix develop` inside a systemd-nspawn container that sees only its own project
+directory, its own persistent home, and the VM's Nix store read-only. The first
+enter per project builds the devShell inside the VM; later enters hit the cache.
 
 ## Install
 
@@ -50,146 +46,110 @@ boundary as a live read-write mount.
 nix profile install github:hamidr/nixcage
 ```
 
-Or from a local clone:
+## Configuration
+
+The VM is configured by a Nix flake you own. Create it from the template:
 
 ```bash
-git clone https://github.com/hamidr/nixcage.git
-cd nixcage && nix profile install .
+nix flake new -t github:hamidr/nixcage ~/.config/nixcage
 ```
 
-## Requirements
-
-| Tool | Notes |
-|---|---|
-| Nix (flakes enabled) | `sh <(curl -L https://nixos.org/nix/install)` |
-| openssh | Bundled when installed via Nix |
-| cloud-hypervisor | Linux only; bundled via Nix |
-| qemu | macOS only; bundled via Nix |
-| Linux builder (macOS only) | Required to build NixOS VM images on macOS (see below) |
-
-## Quick start
-
-```bash
-cd ~/myproject
-
-nixcage init               # generates nixcage.vm.nix + .nixcage-vm/
-nixcage build              # builds the VM image (~15 min first run)
-nixcage install-hook       # adds auto-enter hook to ~/.zshrc or ~/.bashrc
-
-# reload your shell, then:
-cd ~/myproject             # hook fires, VM starts, SSH session opens
-myproject $ claude         # claude-code is pre-installed
-myproject $ exit           # back on host; VM keeps running
-
-nixcage stop               # shut down the VM
-```
-
-## Configuration -- `nixcage.vm.nix`
-
-The only file you edit. A standard NixOS module committed to your project:
+Edit it like any NixOS configuration. The nixcage options:
 
 ```nix
-{ pkgs, ... }: {
-  ## Add project packages
-  environment.systemPackages = with pkgs; [
-    python3
-    rustup
-    postgresql
-  ];
+nixcage = {
+  ## Only flake directories under these roots can be entered.
+  workspaceRoots = [ "/home/me/Src" ];
 
-  ## Adjust resources (defaults: 2 GB RAM, 2 vCPUs)
-  microvm.mem  = 4096;
-  microvm.vcpu = 4;
+  ## The key printed by 'nixcage status' on first run.
+  authorizedKeys = [ "ssh-ed25519 AAAA..." ];
 
-  ## Mount extra host paths (proto: "virtiofs" on Linux, "9p" on macOS)
-  microvm.shares = [{
-    tag        = "home-ssh";
-    source     = "/home/me/.ssh";
-    mountPoint = "/home/nixcage/.ssh";
-    proto      = "virtiofs";  # use "9p" on macOS
-  }];
-}
+  ## macOS hosts need 9p (virtiofsd is Linux-only).
+  # shareProto = "9p";
+
+  ## Environment variables injected into every container session,
+  ## resolved from sops secrets inside the VM.
+  # secretEnv.ANTHROPIC_API_KEY = "anthropic";
+
+  # vm = { cpus = 8; mem = 8192; diskSize = 40960; };
+};
 ```
 
-AI tools (claude-code, opencode), SSH, the nixcage user, and the `/workspace` mount
-are all provided by the base layer -- you do not declare them.
+Anything else NixOS supports is fair game -- it is your VM. Apply changes with
+`nixcage rebuild` (this restarts the VM and interrupts running sessions).
+
+The CLI finds the flake at `~/.config/nixcage`; override with
+`--flake <ref>` or `NIXCAGE_FLAKE`.
+
+## Projects
+
+A project is any flake directory under a workspace root. There is no
+`nixcage init` and no nixcage file in the repo -- `devShells.default` is the
+entire interface. Want claude-code in a project? Put it in that project's
+devShell (see `examples/project/`). nixcage installs nothing into containers.
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `nixcage init [dir]` | Generate `nixcage.vm.nix` and `.nixcage-vm/` |
-| `nixcage build` | Build the VM image (run once after init or after flake updates) |
-| `nixcage start` | Start the VM in the background |
-| `nixcage stop` | Stop the VM |
-| `nixcage shell` | Enter an interactive VM shell (auto-starts if needed) |
-| `nixcage run <cmd>` | Run a single command in the VM |
-| `nixcage sync` | Rebuild and restart if `nixcage.vm.nix` changed |
-| `nixcage logs` | Tail the hypervisor log |
-| `nixcage status` | Show built / running / SSH-reachable state |
-| `nixcage install-hook` | Add auto-enter hook to `~/.zshrc` or `~/.bashrc` |
-| `nixcage destroy [dir]` | Remove all nixcage files |
+| `nixcage enter [-- cmd]` | Enter this project's container (auto-starts the VM); with a command, run it non-interactively |
+| `nixcage down` | Stop the VM |
+| `nixcage rebuild` | Rebuild from the config flake and restart the VM |
+| `nixcage rm [name]` | Delete a project's container and persistent home |
+| `nixcage status` | VM state, containers, age public key |
 
 ## Secrets
 
-`nixcage init` scans the host environment for known AI/dev keys
-(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENCODE_API_KEY`, `GITHUB_TOKEN`)
-and records their names in `.nixcage-vm/config`. When the VM starts, their values are piped into
-`/run/nixcage-secrets` (tmpfs -- never flushed to disk) via SSH and made available
-to every login shell. Values never enter the Nix store.
+Secrets go through [sops-nix](https://github.com/Mic92/sops-nix), declared in
+your config flake; the host environment is never read.
 
-To change which keys are injected, edit `SECRET_VARS=` in `.nixcage-vm/config`.
+1. Boot the VM once; an age key is generated on its data volume and never
+   leaves it. `nixcage status` prints the public key.
+2. Add that key to `.sops.yaml` next to your config flake and encrypt a
+   `secrets.yaml` with `sops`.
+3. Declare the secret and its mapping in the config flake:
 
-## After a fresh clone
-
-`.nixcage-vm/` is fully gitignored. Each collaborator runs:
-
-```bash
-nixcage init    # generates a new key pair and selects a free SSH port
-nixcage build   # builds the VM (subsequent builds are fast -- Nix cache)
+```nix
+sops.defaultSopsFile = ./secrets.yaml;
+sops.secrets.anthropic = { };
+nixcage.secretEnv.ANTHROPIC_API_KEY = "anthropic";
 ```
+
+4. `nixcage rebuild`. Every container session now has the variable set.
+
+Interactive logins work too: container homes persist, so `claude login` done
+once inside a container survives restarts.
 
 ## Platform notes
 
 | | Linux | macOS |
 |---|---|---|
-| Hypervisor | cloud-hypervisor (KVM) | qemu (Apple HVF) |
+| Hypervisor | qemu (KVM) | qemu (Apple HVF) |
 | Filesystem share | VirtioFS | 9p |
-| VM boot time | ~500ms | ~2-3s |
 | Guest OS | NixOS (x86_64 or aarch64) | NixOS (aarch64 on Apple Silicon) |
-| macOS-native binaries in VM | no | no |
 
-The VM guest is always Linux/NixOS regardless of host OS. macOS-native binaries are
-not available inside the VM. This is the trade-off for uniform behavior across
-platforms.
+The guest is always Linux; macOS-native binaries do not exist inside the VM.
 
 ### macOS: Linux builder setup
 
-`nixcage build` compiles a NixOS system, which requires building `aarch64-linux`
-derivations. macOS cannot do this natively -- you need a Linux builder. This is a
-small background NixOS VM that Nix uses as a remote build machine.
-
-**nix-darwin (recommended):**
-
-Add to your nix-darwin configuration:
+`nixcage rebuild` compiles a NixOS system, which requires building
+`aarch64-linux` derivations. macOS needs a Linux builder for that:
 
 ```nix
+## nix-darwin
 nix.linux-builder.enable = true;
 ```
 
-Then rebuild: `darwin-rebuild switch --flake .`
+or, without nix-darwin, keep `nix run nixpkgs#darwin.linux-builder` running in
+another terminal during the build.
 
-**Without nix-darwin:**
+## Migrating from 1.x
 
-```bash
-# Start the builder (runs a QEMU VM in the foreground)
-nix run nixpkgs#darwin.linux-builder
-```
-
-Leave it running in a separate terminal while you run `nixcage build`.
-
-Once the builder is available, `nixcage build` works transparently -- Nix
-offloads Linux builds to it automatically.
+1.x gave every project its own VM configured by `nixcage.vm.nix`. That model is
+gone. In each old project: stop the VM, delete `nixcage.vm.nix` and
+`.nixcage-vm/`, and drop the `.nixcage-vm/` line from `.gitignore`. Remove the
+shell hook block from your `~/.zshrc` / `~/.bashrc` -- 2.x has no hook. Then
+set up the config flake as above.
 
 ## License
 

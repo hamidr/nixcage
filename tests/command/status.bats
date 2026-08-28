@@ -1,34 +1,33 @@
 #!/usr/bin/env bats
-# Command tests for cmd_status
+# status reports without requiring a built or running VM
+
+load ../test_helper/common
 
 setup() {
-	load '../test_helper/common'
 	setup_temp_dir
-	run_nixcage init "$TEST_TEMP_DIR"
 }
 
 teardown() {
 	teardown_temp_dir
 }
 
-@test "status: shows project path" {
-	cd "$TEST_TEMP_DIR"
+@test "status with no state reports not built and not running" {
 	run_nixcage status
-	assert_success
-	assert_output --partial "Project:"
-	assert_output --partial "$TEST_TEMP_DIR"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Built:        no"* ]]
+	[[ "$output" == *"Running:      no"* ]]
 }
 
-@test "status: shows Built: no when result symlink absent" {
-	cd "$TEST_TEMP_DIR"
+@test "status shows cached port and roots when built" {
+	write_cache 23456 "/home/me/Src"
+	touch "$XDG_STATE_HOME/nixcage/result"
 	run_nixcage status
-	assert_success
-	assert_output --partial "Built:      no"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *23456* ]]
+	[[ "$output" == *"/home/me/Src"* ]]
 }
 
-@test "status: shows Running: no when pid file absent" {
-	cd "$TEST_TEMP_DIR"
+@test "status names the config flake in use" {
 	run_nixcage status
-	assert_success
-	assert_output --partial "Running:    no"
+	[[ "$output" == *"$NIXCAGE_FLAKE"* ]]
 }

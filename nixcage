@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# nixcage -- NixOS microVM environments for AI coding agents
+# nixcage -- one shared NixOS microVM with per-project containers
 
 set -euo pipefail
 
-NIXCAGE_VERSION="1.2.0"
-NIXCAGE_VM_DIR=".nixcage-vm"
+NIXCAGE_VERSION="2.0.0"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -41,195 +40,74 @@ detect_os() {
 
 OS="$(detect_os)"
 
-# Walk up from $PWD looking for nixcage.vm.nix; echo the directory that owns it.
-# Exits with an error when not found so callers can rely on the return value.
-find_vm_root() {
-  local dir="$PWD"
-  while [[ "$dir" != "/" ]]; do
-    if [[ -f "$dir/nixcage.vm.nix" ]]; then
-      echo "$dir"
-      return
-    fi
-    dir="$(dirname "$dir")"
-  done
-  log_err "No nixcage.vm.nix found (searched up from $PWD)"
-  log_err "Run 'nixcage init' to create one."
-  exit 1
+# The config flake is user-owned; the CLI never writes into it.
+NIXCAGE_FLAKE="${NIXCAGE_FLAKE:-$HOME/.config/nixcage}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nixcage"
+
+# All values the CLI needs from the config flake, cached at build time so
+# 'enter' does not pay a nix eval on every invocation.
+CACHE_FILE="$STATE_DIR/cache"
+VM_ATTR="nixosConfigurations.nixcage.config"
+
+check_flake() {
+  # A path flake must contain flake.nix; other refs (git urls) are taken
+  # as-is and nix reports their errors.
+  if [[ "$NIXCAGE_FLAKE" == /* && ! -f "$NIXCAGE_FLAKE/flake.nix" ]]; then
+    log_err "No config flake at $NIXCAGE_FLAKE"
+    log_err "Create one with: nix flake new -t github:hamidr/nixcage ~/.config/nixcage"
+    log_err "Or point --flake / NIXCAGE_FLAKE at an existing one."
+    exit 1
+  fi
 }
 
-# Read .nixcage-vm/config (key=value, # comments) into VM_* variables.
-vm_read_config() {
-  local project_dir="$1"
-  local config_file="$project_dir/$NIXCAGE_VM_DIR/config"
-  if [[ ! -f "$config_file" ]]; then
-    log_err "VM config not found: $config_file"
-    log_err "Run 'nixcage init' to regenerate."
+# Read the build-time cache (SSH_PORT, WORKSPACE_ROOTS) into globals.
+vm_read_cache() {
+  if [[ ! -f "$CACHE_FILE" ]]; then
+    log_err "VM has not been built yet. Run 'nixcage rebuild' first."
     exit 1
   fi
   VM_SSH_PORT=""
-  VM_SECRET_VARS=""
-  VM_HYPERVISOR=""
-  VM_SHARE_PROTO=""
-  VM_NIX_SYSTEM=""
-  local _cfg_key _cfg_val
-  while IFS='=' read -r _cfg_key _cfg_val || [[ -n "$_cfg_key" ]]; do
-    # strip inline comments and leading/trailing whitespace
-    _cfg_val="${_cfg_val%%#*}"
-    _cfg_val="${_cfg_val#"${_cfg_val%%[! ]*}"}"
-    _cfg_val="${_cfg_val%"${_cfg_val##*[! ]}"}"
-    _cfg_key="${_cfg_key#"${_cfg_key%%[! ]*}"}"
-    case "$_cfg_key" in
-    SSH_PORT)    VM_SSH_PORT="$_cfg_val" ;;
-    SECRET_VARS) VM_SECRET_VARS="$_cfg_val" ;;
-    HYPERVISOR)  VM_HYPERVISOR="$_cfg_val" ;;
-    SHARE_PROTO) VM_SHARE_PROTO="$_cfg_val" ;;
-    NIX_SYSTEM)  VM_NIX_SYSTEM="$_cfg_val" ;;
+  VM_WORKSPACE_ROOTS=""
+  local key val
+  while IFS='=' read -r key val || [[ -n "$key" ]]; do
+    case "$key" in
+    SSH_PORT)        VM_SSH_PORT="$val" ;;
+    WORKSPACE_ROOTS) VM_WORKSPACE_ROOTS="$val" ;;
     esac
-  done < <(grep -v '^\s*#' "$config_file" || true)
+  done <"$CACHE_FILE"
 }
 
-vm_pid_file() {
-  echo "$1/$NIXCAGE_VM_DIR/vm.pid"
-}
+vm_pid_file() { echo "$STATE_DIR/vm.pid"; }
+vm_virtiofsd_pid_file() { echo "$STATE_DIR/virtiofsd.pid"; }
 
-vm_virtiofsd_pid_file() {
-  echo "$1/$NIXCAGE_VM_DIR/virtiofsd.pid"
-}
-
-# Launch the virtiofsd processes that back the VM's virtiofs shares.
-#
-# microvm.nix generates result/bin/virtiofsd-run as a supervisord wrapper
-# whose config sets `user=root` in [supervisord], so it refuses to start
-# as a normal user ("Can't drop privilege as nonroot user"). We bypass
-# supervisord and exec each `command=` from the [program:...] sections
-# directly, recording PIDs so cmd_stop can clean them up.
-#
-# Both virtiofsd and qemu use a *relative* socket path
-# (nixcage-vm-virtiofs-<tag>.sock), so they must share a CWD. Callers must
-# `cd` to $NIXCAGE_VM_DIR before invoking this and before launching the VM.
-vm_start_virtiofsd() {
-  local project_dir="$1"
-  local result="$2"
-  local wrapper="$result/bin/virtiofsd-run"
-
-  [[ -x "$wrapper" ]] || return 0
-
-  local conf
-  conf="$(grep -oE -- '--configuration[[:space:]]+\S+' "$wrapper" | awk '{print $2}')"
-  if [[ -z "$conf" || ! -r "$conf" ]]; then
-    log_err "virtiofsd-run wrapper references unreadable supervisord config: $conf"
-    exit 1
-  fi
-
-  local pid_file
-  pid_file="$(vm_virtiofsd_pid_file "$project_dir")"
-  : >"$pid_file"
-  local log_file="$project_dir/$NIXCAGE_VM_DIR/virtiofsd.log"
-
-  # Extract command= lines from [program:...] sections only (skip eventlistener).
-  local in_program=0 line cmd
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^\[program: ]]; then
-      in_program=1
-      continue
-    elif [[ "$line" =~ ^\[ ]]; then
-      in_program=0
-      continue
-    fi
-    if [[ "$in_program" -eq 1 && "$line" =~ ^command= ]]; then
-      cmd="${line#command=}"
-      # microvm.nix hardcodes --socket-group=kvm; chgrp fails when the
-      # invoking user isn't in the kvm group. The flag is purely a
-      # convenience for socket ownership; strip it so virtiofsd starts.
-      bash <(sed 's/--socket-group=[^[:space:]]*//g' "$cmd") \
-        >>"$log_file" 2>&1 &
-      echo "$!" >>"$pid_file"
-    fi
-  done <"$conf"
-}
-
-vm_stop_virtiofsd() {
-  local project_dir="$1"
-  local pid_file
-  pid_file="$(vm_virtiofsd_pid_file "$project_dir")"
-  [[ -f "$pid_file" ]] || return 0
-  local pid
-  while read -r pid; do
-    [[ -n "$pid" ]] || continue
-    kill "$pid" 2>/dev/null || true
-  done <"$pid_file"
-  rm -f "$pid_file"
-  # Clean leftover virtiofs sockets (relative to NIXCAGE_VM_DIR).
-  rm -f "$project_dir/$NIXCAGE_VM_DIR"/nixcage-vm-virtiofs-*.sock
-}
-
-# Returns 0 if the VM process recorded in the pid file is alive.
 vm_is_running() {
-  local project_dir="$1"
   local pid_file
-  pid_file="$(vm_pid_file "$project_dir")"
+  pid_file="$(vm_pid_file)"
   [[ -f "$pid_file" ]] || return 1
   local pid
   pid="$(cat "$pid_file")"
   [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
 }
 
-# Find a free TCP port. Tries python3 first, falls back to perl.
-vm_free_port() {
-  if command -v python3 &>/dev/null; then
-    python3 -c "
-import socket
-s = socket.socket()
-s.bind(('', 0))
-print(s.getsockname()[1])
-s.close()
-"
-  elif command -v perl &>/dev/null; then
-    perl -e '
-use Socket;
-socket(S, PF_INET, SOCK_STREAM, getprotobyname("tcp"));
-bind(S, sockaddr_in(0, INADDR_ANY));
-my $port = (sockaddr_in(getsockname(S)))[0];
-close(S);
-print "$port\n";
-'
-  else
-    log_err "python3 or perl is required to find a free port"
-    exit 1
-  fi
+# Generate the host keypair lazily on first use; the public key must be
+# listed in nixcage.authorizedKeys in the config flake.
+ensure_ssh_key() {
+  local key="$STATE_DIR/id_ed25519"
+  [[ -f "$key" ]] && return 0
+  require_cmd "ssh-keygen"
+  mkdir -p "$STATE_DIR"
+  ssh-keygen -t ed25519 -f "$key" -N "" -C "nixcage@$(hostname)" -q
+  log_ok "Generated SSH keypair at $key"
+  log_warn "Add this public key to nixcage.authorizedKeys in your config flake:"
+  echo
+  cat "$key.pub"
+  echo
 }
 
-# Scan host environment for known AI-tool keys; echo space-separated list of
-# those that are currently set.
-vm_detect_ai_keys() {
-  local found=()
-  local var
-  for var in ANTHROPIC_API_KEY OPENAI_API_KEY OPENCODE_API_KEY GITHUB_TOKEN; do
-    [[ -n "${!var:-}" ]] && found+=("$var")
-  done
-  echo "${found[*]:-}"
-}
-
-# Map uname -m to a NixOS system string.
-detect_nix_system() {
-  case "$(uname -m)" in
-  x86_64)          echo "x86_64-linux" ;;
-  arm64 | aarch64) echo "aarch64-linux" ;;
-  *)
-    log_err "Unsupported machine architecture: $(uname -m)"
-    exit 1
-    ;;
-  esac
-}
-
-# Wrap ssh so every call uses the project-local key and known_hosts file.
 vm_ssh() {
-  local project_dir="$1"; shift
-  local known_hosts="$project_dir/$NIXCAGE_VM_DIR/known_hosts"
-  local key="$project_dir/$NIXCAGE_VM_DIR/id_ed25519"
-  vm_read_config "$project_dir"
-  ssh -p "$VM_SSH_PORT" -i "$key" \
-    -o "UserKnownHostsFile=$known_hosts" \
+  vm_read_cache
+  ssh -p "$VM_SSH_PORT" -i "$STATE_DIR/id_ed25519" \
+    -o "UserKnownHostsFile=$STATE_DIR/known_hosts" \
     -o "StrictHostKeyChecking=yes" \
     -o "ConnectTimeout=5" \
     -o "BatchMode=yes" \
@@ -237,14 +115,12 @@ vm_ssh() {
 }
 
 # Poll until SSH is reachable or the VM process dies.
-# Uses accept-new for host key since known_hosts is empty on first boot;
-# the accepted key is persisted so subsequent connections verify it.
+# Uses accept-new since the VM generates fresh host keys each boot; the
+# known_hosts file is cleared on every start.
 vm_wait_for_ssh() {
-  local project_dir="$1"
-  local known_hosts="$project_dir/$NIXCAGE_VM_DIR/known_hosts"
-  local key="$project_dir/$NIXCAGE_VM_DIR/id_ed25519"
-  vm_read_config "$project_dir"
-  # Clear stale host keys; the VM generates new SSH host keys on each boot.
+  vm_read_cache
+  local known_hosts="$STATE_DIR/known_hosts"
+  local key="$STATE_DIR/id_ed25519"
   : >"$known_hosts"
   local timeout=120
   [[ "$OS" == "macos" ]] && timeout=300
@@ -259,9 +135,9 @@ vm_wait_for_ssh() {
          "nixcage@127.0.0.1" true 2>/dev/null; then
       return 0
     fi
-    if ! vm_is_running "$project_dir"; then
+    if ! vm_is_running; then
       log_err "VM process died before SSH became reachable."
-      log_err "Check $project_dir/$NIXCAGE_VM_DIR/vm.log for details."
+      log_err "Check $STATE_DIR/vm.log for details."
       exit 1
     fi
     sleep 2
@@ -270,282 +146,100 @@ vm_wait_for_ssh() {
   exit 1
 }
 
-# Push API-key exports into the running VM via SSH pipe so they land in
-# /run (tmpfs) and are never flushed to disk.
-vm_inject_secrets() {
-  local project_dir="$1"
-  vm_read_config "$project_dir"
-  [[ -z "$VM_SECRET_VARS" ]] && return 0
-  local secrets=""
-  local var
-  # VM_SECRET_VARS is comma-separated
-  IFS=',' read -ra _vars <<< "$VM_SECRET_VARS"
-  for var in "${_vars[@]}"; do
-    var="${var#"${var%%[! ]*}"}"  # trim leading space
-    [[ -n "${!var:-}" ]] && secrets+="export ${var}='${!var//\'/\'\\\'\'}'
-"
-  done
-  unset _vars
-  [[ -z "$secrets" ]] && return 0
-  printf '%s' "$secrets" | vm_ssh "$project_dir" \
-    "sudo tee /run/nixcage-secrets >/dev/null && sudo chmod 600 /run/nixcage-secrets && sudo systemctl restart nixcage-secrets"
-  log_info "Secrets injected."
-}
+# Launch the virtiofsd processes backing the VM's virtiofs shares.
+#
+# microvm.nix generates result/bin/virtiofsd-run as a supervisord wrapper
+# whose config sets `user=root`, so it refuses to start as a normal user.
+# We bypass supervisord and exec each `command=` from the [program:...]
+# sections directly, recording PIDs for cleanup.
+#
+# virtiofsd and qemu use a *relative* socket path, so both must share a
+# CWD. Callers must cd to $STATE_DIR before invoking this and before
+# launching the VM.
+vm_start_virtiofsd() {
+  local result="$1"
+  local wrapper="$result/bin/virtiofsd-run"
 
-# Compute a hash that covers the user's VM config and the locked inputs.
-# Written to .nixcage-vm/build-hash after every successful build.
-vm_compute_build_hash() {
-  local project_dir="$1"
-  sha256sum \
-    "$project_dir/nixcage.vm.nix" \
-    "$project_dir/$NIXCAGE_VM_DIR/flake.lock" \
-    2>/dev/null | sha256sum | awk '{print $1}'
-}
+  [[ -x "$wrapper" ]] || return 0
 
-cmd_init() {
-  require_cmd "nix"
-  require_cmd "ssh-keygen"
-
-  local dir="${1:-.}"
-  local project_dir
-  project_dir="$(cd "$dir" && pwd)"
-
-  if [[ -f "$project_dir/nixcage.vm.nix" ]]; then
-    log_warn "nixcage.vm.nix already exists in $project_dir"
-    log_warn "Remove it first, or run 'nixcage destroy' before re-initializing."
+  local conf
+  conf="$(grep -oE -- '--configuration[[:space:]]+\S+' "$wrapper" | awk '{print $2}')"
+  if [[ -z "$conf" || ! -r "$conf" ]]; then
+    log_err "virtiofsd-run wrapper references unreadable supervisord config: $conf"
     exit 1
   fi
 
-  local nix_system
-  nix_system="$(detect_nix_system)"
+  local pid_file
+  pid_file="$(vm_virtiofsd_pid_file)"
+  : >"$pid_file"
+  local log_file="$STATE_DIR/virtiofsd.log"
 
-  local hypervisor share_proto host_system
-  if [[ "$OS" == "linux" ]]; then
-    # qemu (not cloud-hypervisor): microvm.nix asserts forwardPorts only
-    # works with qemu + a user-mode interface. We rely on forwardPorts for
-    # SSH, so we must use qemu.
-    hypervisor="qemu"
-    share_proto="virtiofs"
-    host_system=""
-  else
-    hypervisor="qemu"
-    share_proto="9p"
-    host_system="$(uname -m)-darwin"
-    if [[ "$(uname -m)" == "arm64" ]]; then
-      host_system="aarch64-darwin"
+  # Extract command= lines from [program:...] sections only.
+  local in_program=0 line cmd
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\[program: ]]; then
+      in_program=1
+      continue
+    elif [[ "$line" =~ ^\[ ]]; then
+      in_program=0
+      continue
     fi
-  fi
+    if [[ "$in_program" -eq 1 && "$line" =~ ^command= ]]; then
+      cmd="${line#command=}"
+      # microvm.nix hardcodes --socket-group=kvm; chgrp fails when the
+      # invoking user isn't in the kvm group. Strip it so virtiofsd starts.
+      bash <(sed 's/--socket-group=[^[:space:]]*//g' "$cmd") \
+        >>"$log_file" 2>&1 &
+      echo "$!" >>"$pid_file"
+    fi
+  done <"$conf"
+}
 
-  mkdir -p "$project_dir/$NIXCAGE_VM_DIR"
+vm_stop_virtiofsd() {
+  local pid_file
+  pid_file="$(vm_virtiofsd_pid_file)"
+  [[ -f "$pid_file" ]] || return 0
+  local pid
+  while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done <"$pid_file"
+  rm -f "$pid_file"
+  rm -f "$STATE_DIR"/nixcage-virtiofs-*.sock "$STATE_DIR"/*-virtiofs-*.sock
+}
 
-  # Generate a project-specific ed25519 key pair; private key is gitignored.
-  ssh-keygen -t ed25519 \
-    -f "$project_dir/$NIXCAGE_VM_DIR/id_ed25519" \
-    -N "" \
-    -C "nixcage-vm-$(basename "$project_dir")" \
-    -q
+vm_build() {
+  require_cmd "nix"
+  check_flake
+  mkdir -p "$STATE_DIR"
 
-  local pub_key
-  pub_key="$(cat "$project_dir/$NIXCAGE_VM_DIR/id_ed25519.pub")"
+  log_info "Building VM from $NIXCAGE_FLAKE (first build takes a while)..."
+  nix build "$NIXCAGE_FLAKE#$VM_ATTR.microvm.declaredRunner" \
+    --out-link "$STATE_DIR/result" -L
 
-  local ssh_port
-  ssh_port="$(vm_free_port)"
-
-  local detected_keys
-  detected_keys="$(vm_detect_ai_keys)"
-  local secret_vars="${detected_keys// /,}"
-
-  # Write per-project runtime state; gitignored so keys and ports never land
-  # in source control.
-  cat >"$project_dir/$NIXCAGE_VM_DIR/config" <<EOF
-SSH_PORT=${ssh_port}
-SECRET_VARS=${secret_vars}
-HYPERVISOR=${hypervisor}
-SHARE_PROTO=${share_proto}
-NIX_SYSTEM=${nix_system}
+  # Cache the config values the CLI needs at runtime so 'enter' stays free
+  # of nix eval calls. The cache is regenerated on every rebuild.
+  local port roots
+  port="$(nix eval --raw "$NIXCAGE_FLAKE#$VM_ATTR.nixcage.sshPort" --apply toString)"
+  roots="$(nix eval --json "$NIXCAGE_FLAKE#$VM_ATTR.nixcage.workspaceRoots" | jq -r 'join(":")')"
+  cat >"$CACHE_FILE" <<EOF
+SSH_PORT=$port
+WORKSPACE_ROOTS=$roots
 EOF
 
-  # Add .nixcage-vm/ to the project root .gitignore so generated state never
-  # lands in source control. Idempotent -- skips if the line already exists.
-  local root_gitignore="$project_dir/.gitignore"
-  if ! grep -qxF '.nixcage-vm/' "$root_gitignore" 2>/dev/null; then
-    printf '\n.nixcage-vm/\n' >>"$root_gitignore"
-  fi
-
-  # On macOS the runner must be a Darwin-native binary, so vmHostPackages
-  # needs to point at the Darwin nixpkgs.
-  local vm_host_pkgs_line=""
-  if [[ -n "$host_system" ]]; then
-    vm_host_pkgs_line="            vmHostPackages = nixpkgs.legacyPackages.${host_system};"
-  fi
-
-  # Write the generated VM flake that wires microvm.nix + base module + user config.
-  cat >"$project_dir/$NIXCAGE_VM_DIR/flake.nix" <<FLAKE
-## Auto-generated by nixcage init -- re-run 'nixcage init' to regenerate
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixcage = {
-      url = "github:hamidr/nixcage";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    microvm = {
-      url = "github:astro/microvm.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-  };
-
-  outputs = { self, nixpkgs, nixcage, microvm, ... }: {
-    nixosConfigurations.vm = nixpkgs.lib.nixosSystem {
-      system = "${nix_system}";
-      modules = [
-        microvm.nixosModules.microvm
-        nixcage.nixosModules.base
-        ./nixcage.vm.nix
-        {
-          microvm = {${vm_host_pkgs_line:+
-$vm_host_pkgs_line}
-            hypervisor = "${hypervisor}";
-            mem = nixpkgs.lib.mkDefault 2047;
-            vcpu = nixpkgs.lib.mkDefault 2;
-            shares = [{
-              tag = "workspace";
-              source = "${project_dir}";
-              mountPoint = "/workspace";
-              proto = "${share_proto}";
-            }];
-            interfaces = [{
-              type = "user";
-              id = "nixcage0";
-              mac = "02:00:00:00:00:01";
-            }];
-            forwardPorts = [{
-              from = "host";
-              host.port = ${ssh_port};
-              guest.port = 22;
-            }];
-          };
-          users.users.nixcage.openssh.authorizedKeys.keys = [
-            "${pub_key}"
-          ];
-        }
-      ];
-    };
-  };
-}
-FLAKE
-
-  # Write the user-facing config template committed to the project repo.
-  cat >"$project_dir/nixcage.vm.nix" <<'VMCONF'
-## nixcage VM configuration -- edit to customize your environment.
-## Run 'nixcage sync' after changes.
-{ pkgs, ... }: {
-
-  ## Add project-specific packages
-  # environment.systemPackages = with pkgs; [
-  #   python3
-  #   rustup
-  #   postgresql
-  # ];
-
-  ## Adjust VM resources (defaults: 2 GB RAM, 2 vCPUs)
-  # microvm.mem = 4096;
-  # microvm.vcpu = 4;
-
-  ## Mount extra host paths (proto: "virtiofs" on Linux, "9p" on macOS)
-  # microvm.shares = [{
-  #   tag = "home-ssh";
-  #   source = "/home/me/.ssh";
-  #   mountPoint = "/home/nixcage/.ssh";
-  #   proto = "virtiofs";  # use "9p" on macOS
-  # }];
-}
-VMCONF
-
-  log_ok "Initialized nixcage VM project in $project_dir"
-  log_info ""
-  log_info "  VM config:    nixcage.vm.nix     <- edit to add packages, resources"
-  log_info "  SSH port:     $ssh_port"
-  if [[ -n "$secret_vars" ]]; then
-    log_info "  Secrets:      $secret_vars"
-  fi
-  log_info ""
-  log_info "Next steps:"
-  log_info "  1. nixcage build              (once; first run takes 15+ minutes)"
-  log_info "  2. nixcage install-hook       (adds auto-enter hook to shell rc)"
-  log_info "  3. nixcage shell              (starts VM if needed, then enters it)"
+  log_ok "VM built."
 }
 
-cmd_build() {
-  local project_dir
-  project_dir="$(find_vm_root)"
-  local vm_dir="$project_dir/$NIXCAGE_VM_DIR"
+vm_start() {
+  ensure_ssh_key
 
-  if [[ ! -f "$vm_dir/flake.nix" ]]; then
-    log_err "No .nixcage-vm/flake.nix found. Run 'nixcage init' first."
-    exit 1
+  local result="$STATE_DIR/result"
+  if [[ ! -e "$result" ]]; then
+    vm_build
   fi
 
-  # Copy user config into the flake tree so Nix pure evaluation can see it.
-  cp "$project_dir/nixcage.vm.nix" "$vm_dir/nixcage.vm.nix"
-
-  # Build from a clean staging copy of the flake inputs. The vm_dir also
-  # holds runtime state (qemu/virtiofsd sockets, pid files, logs) because
-  # qemu and virtiofsd share a CWD to communicate via relative socket paths.
-  # Nix's path: input copies the whole directory tree into the store, and
-  # unix sockets aren't representable there -- builds would fail with
-  # "unsupported type". Staging the flake inputs avoids that.
-  local build_dir
-  build_dir="$(mktemp -d -t nixcage-build.XXXXXX)"
-  cp "$vm_dir/flake.nix"      "$build_dir/flake.nix"
-  cp "$vm_dir/nixcage.vm.nix" "$build_dir/nixcage.vm.nix"
-  [[ -f "$vm_dir/flake.lock" ]] && cp "$vm_dir/flake.lock" "$build_dir/flake.lock"
-
-  log_info "Building VM (first build takes 15+ minutes)..."
-  (cd "$build_dir" && \
-    nix build 'path:.#nixosConfigurations.vm.config.microvm.declaredRunner' \
-      --out-link "$vm_dir/result" -L)
-
-  # Persist any flake.lock created or updated by this build.
-  [[ -f "$build_dir/flake.lock" ]] && cp "$build_dir/flake.lock" "$vm_dir/flake.lock"
-
-  rm -rf "$build_dir"
-
-  # Record a hash of the inputs so 'nixcage start' can warn on staleness.
-  vm_compute_build_hash "$project_dir" >"$vm_dir/build-hash"
-
-  log_ok "VM built. Run 'nixcage shell' to enter the VM."
-}
-
-cmd_start() {
-  local project_dir
-  project_dir="$(find_vm_root)"
-
-  if vm_is_running "$project_dir"; then
-    log_warn "VM is already running."
-    return 0
-  fi
-
-  # Clear any stale virtiofsd processes/sockets from a previous failed start.
-  vm_stop_virtiofsd "$project_dir"
-
-  local result="$project_dir/$NIXCAGE_VM_DIR/result"
-  if [[ ! -L "$result" && ! -e "$result" ]]; then
-    log_err "VM not built. Run 'nixcage build' first."
-    exit 1
-  fi
-
-  # Warn (don't block) when nixcage.vm.nix changed since the last build.
-  local build_hash_file="$project_dir/$NIXCAGE_VM_DIR/build-hash"
-  if [[ -f "$build_hash_file" ]]; then
-    local current_hash
-    current_hash="$(vm_compute_build_hash "$project_dir")"
-    local stored_hash
-    stored_hash="$(cat "$build_hash_file")"
-    if [[ "$current_hash" != "$stored_hash" ]]; then
-      log_warn "nixcage.vm.nix changed since last build -- run 'nixcage sync' to apply"
-    fi
-  fi
+  # Clear stale virtiofsd processes/sockets from a previous failed start.
+  vm_stop_virtiofsd
 
   local runner
   if [[ -x "$result/bin/microvm-run" ]]; then
@@ -558,47 +252,104 @@ cmd_start() {
     exit 1
   fi
 
-  local log_file="$project_dir/$NIXCAGE_VM_DIR/vm.log"
+  local log_file="$STATE_DIR/vm.log"
   local pid_file
-  pid_file="$(vm_pid_file "$project_dir")"
+  pid_file="$(vm_pid_file)"
 
-  # virtiofsd and qemu communicate over a relative socket path, so both
-  # must run from the same directory. Co-locate them under NIXCAGE_VM_DIR
-  # so the socket doesn't litter the project root.
   log_info "Starting VM..."
   (
-    cd "$project_dir/$NIXCAGE_VM_DIR"
-    vm_start_virtiofsd "$project_dir" "$result"
+    cd "$STATE_DIR"
+    vm_start_virtiofsd "$result"
     "$runner" >"$log_file" 2>&1 &
     echo "$!" >"$pid_file"
   )
 
-  # vm_wait_for_ssh calls `exit 1` on failure, which would orphan
-  # virtiofsd. An EXIT trap cleans up only when ssh did not succeed.
+  # vm_wait_for_ssh exits on failure, which would orphan virtiofsd. An
+  # EXIT trap cleans up only when ssh did not succeed.
   _nixcage_start_ok=0
-  trap '[[ $_nixcage_start_ok -eq 1 ]] || vm_stop_virtiofsd "$project_dir"' EXIT
-  vm_wait_for_ssh "$project_dir"
+  trap '[[ $_nixcage_start_ok -eq 1 ]] || vm_stop_virtiofsd' EXIT
+  vm_wait_for_ssh
   _nixcage_start_ok=1
   trap - EXIT
 
-  vm_inject_secrets "$project_dir"
-
-  log_ok "VM ready. Use 'nixcage shell' to enter or 'nixcage stop' to stop."
+  log_ok "VM ready."
 }
 
-cmd_stop() {
-  local project_dir
-  project_dir="$(find_vm_root)"
+ensure_vm() {
+  vm_is_running || vm_start
+}
 
-  if ! vm_is_running "$project_dir"; then
+# Derive a stable container name from the project path: sanitized basename
+# plus a short hash so distinct paths with equal basenames never collide.
+container_name_for() {
+  local project_dir="$1"
+  local base hash
+  base="$(basename "$project_dir" | tr -cs 'a-zA-Z0-9' '-')"
+  base="${base#-}"
+  base="${base%-}"
+  hash="$(printf '%s' "$project_dir" | sha256sum | awk '{print substr($1, 1, 8)}')"
+  echo "${base:-project}-${hash}"
+}
+
+# Verify the path sits under a configured workspace root; the roots are
+# mounted at identical paths inside the VM, so the same path is valid on
+# both sides.
+check_workspace_root() {
+  local project_dir="$1"
+  vm_read_cache
+  local root
+  IFS=':' read -ra _roots <<<"$VM_WORKSPACE_ROOTS"
+  for root in "${_roots[@]}"; do
+    [[ -n "$root" ]] || continue
+    if [[ "$project_dir" == "$root" || "$project_dir" == "$root"/* ]]; then
+      return 0
+    fi
+  done
+  log_err "$project_dir is not under any workspace root ($VM_WORKSPACE_ROOTS)."
+  log_err "Add the root to nixcage.workspaceRoots in your config flake and run 'nixcage rebuild'."
+  exit 1
+}
+
+cmd_enter() {
+  local project_dir="$PWD"
+
+  if [[ ! -f "$project_dir/flake.nix" ]]; then
+    log_err "No flake.nix in $project_dir -- a nixcage project is any flake directory."
+    exit 1
+  fi
+
+  check_workspace_root "$project_dir"
+  ensure_vm
+
+  local name
+  name="$(container_name_for "$project_dir")"
+
+  # Accept both 'enter -- cmd...' and 'enter cmd...'.
+  [[ "${1:-}" == "--" ]] && shift
+
+  local remote=(sudo nixcage-container enter "$name" "$project_dir")
+  local arg
+  for arg in "$@"; do
+    remote+=("$(printf '%q' "$arg")")
+  done
+
+  if [[ $# -eq 0 ]]; then
+    log_info "Entering container $name..."
+    vm_ssh -t -- "${remote[@]}"
+  else
+    vm_ssh -- "${remote[@]}"
+  fi
+}
+
+cmd_down() {
+  if ! vm_is_running; then
     log_warn "VM is not running."
+    vm_stop_virtiofsd
     return 0
   fi
 
-  local pid_file
-  pid_file="$(vm_pid_file "$project_dir")"
   local pid
-  pid="$(cat "$pid_file")"
+  pid="$(cat "$(vm_pid_file)")"
 
   log_info "Stopping VM (pid $pid)..."
   kill "$pid" 2>/dev/null || true
@@ -614,315 +365,125 @@ cmd_stop() {
     kill -9 "$pid" 2>/dev/null || true
   fi
 
-  rm -f "$pid_file"
-  vm_stop_virtiofsd "$project_dir"
+  rm -f "$(vm_pid_file)"
+  vm_stop_virtiofsd
   log_ok "VM stopped."
 }
 
-cmd_shell() {
-  local project_dir
-  project_dir="$(find_vm_root)"
-
-  if ! vm_is_running "$project_dir"; then
-    cmd_start
+cmd_rebuild() {
+  vm_build
+  if vm_is_running; then
+    log_warn "Restarting VM -- all container sessions will be interrupted."
+    cmd_down
+    vm_start
   fi
-
-  log_info "Entering VM..."
-  vm_ssh "$project_dir"
 }
 
-cmd_run() {
-  if [[ $# -eq 0 ]]; then
-    log_err "Usage: nixcage run <command> [args...]"
-    exit 1
-  fi
-
-  local project_dir
-  project_dir="$(find_vm_root)"
-
-  if ! vm_is_running "$project_dir"; then
-    cmd_start
-  fi
-
-  vm_ssh "$project_dir" -- "$@"
-}
-
-cmd_sync() {
-  local project_dir
-  project_dir="$(find_vm_root)"
-
-  local build_hash_file="$project_dir/$NIXCAGE_VM_DIR/build-hash"
-  local current_hash
-  current_hash="$(vm_compute_build_hash "$project_dir")"
-
-  if [[ -f "$build_hash_file" ]]; then
-    local stored_hash
-    stored_hash="$(cat "$build_hash_file")"
-    if [[ "$current_hash" == "$stored_hash" ]]; then
-      log_ok "VM is up to date. Nothing to do."
-      return 0
+cmd_rm() {
+  local name
+  if [[ $# -gt 0 ]]; then
+    name="$1"
+  else
+    if [[ ! -f "$PWD/flake.nix" ]]; then
+      log_err "Usage: nixcage rm [name]  (run without a name from inside a project)"
+      exit 1
     fi
+    name="$(container_name_for "$PWD")"
   fi
 
-  log_info "Changes detected. Rebuilding..."
-  cmd_build
+  ensure_vm
 
-  if vm_is_running "$project_dir"; then
-    cmd_stop
-    cmd_start
-  fi
-}
-
-cmd_logs() {
-  local project_dir
-  project_dir="$(find_vm_root)"
-
-  local log_file="$project_dir/$NIXCAGE_VM_DIR/vm.log"
-  if [[ ! -f "$log_file" ]]; then
-    log_err "No VM log found. Has the VM been started?"
-    exit 1
+  log_warn "This deletes container '$name' and its persistent home."
+  read -rp "Continue? [y/N] " answer
+  if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+    log_info "Aborted."
+    return 0
   fi
 
-  tail -f "$log_file"
+  vm_ssh -- sudo nixcage-container rm "$name"
+  log_ok "Removed container $name."
 }
 
 cmd_status() {
-  local project_dir
-  project_dir="$(find_vm_root)" 2>/dev/null || {
-    log_warn "Not inside a nixcage VM project."
-    exit 1
-  }
-
-  vm_read_config "$project_dir"
+  echo "${BOLD}nixcage status${NC}"
+  echo "  Config flake: $NIXCAGE_FLAKE"
 
   local built="no"
-  [[ -e "$project_dir/$NIXCAGE_VM_DIR/result" ]] && built="yes"
+  [[ -e "$STATE_DIR/result" ]] && built="yes"
+  echo "  Built:        $built"
 
-  local running="no"
-  local pid=""
-  if vm_is_running "$project_dir"; then
+  local running="no" pid=""
+  if vm_is_running; then
     running="yes"
-    pid="$(cat "$(vm_pid_file "$project_dir")")"
+    pid="$(cat "$(vm_pid_file)")"
+  fi
+  echo "  Running:      $running${pid:+ (pid $pid)}"
+
+  if [[ -f "$CACHE_FILE" ]]; then
+    vm_read_cache
+    echo "  SSH port:     $VM_SSH_PORT"
+    echo "  Roots:        $VM_WORKSPACE_ROOTS"
   fi
 
-  local ssh_reachable="no"
   if [[ "$running" == "yes" ]]; then
-    vm_ssh "$project_dir" true 2>/dev/null && ssh_reachable="yes" || true
-  fi
-
-  local stale=""
-  if [[ "$built" == "yes" ]]; then
-    local build_hash_file="$project_dir/$NIXCAGE_VM_DIR/build-hash"
-    if [[ -f "$build_hash_file" ]]; then
-      local current_hash stored_hash
-      current_hash="$(vm_compute_build_hash "$project_dir")"
-      stored_hash="$(cat "$build_hash_file")"
-      [[ "$current_hash" != "$stored_hash" ]] && stale=" (stale -- run 'nixcage sync')"
+    local ssh_reachable="no"
+    vm_ssh true 2>/dev/null && ssh_reachable="yes" || true
+    echo "  SSH:          $ssh_reachable"
+    if [[ "$ssh_reachable" == "yes" ]]; then
+      echo "  Containers:"
+      vm_ssh -- sudo nixcage-container list 2>/dev/null | sed 's/^/    /' || true
+      local age_pub
+      age_pub="$(vm_ssh -- sudo age-keygen -y /var/lib/nixcage/age.key 2>/dev/null || true)"
+      [[ -n "$age_pub" ]] && echo "  Age key:      $age_pub"
     fi
-  fi
-
-  echo "${BOLD}nixcage status${NC}"
-  echo "  Project:    $project_dir"
-  echo "  Nix system: ${VM_NIX_SYSTEM:-unknown}"
-  echo "  Hypervisor: ${VM_HYPERVISOR:-unknown}"
-  echo "  Share:      ${VM_SHARE_PROTO:-unknown}"
-  echo "  SSH port:   ${VM_SSH_PORT:-unknown}"
-  echo "  Built:      ${built}${stale}"
-  echo "  Running:    $running${pid:+ (pid $pid)}"
-  echo "  SSH:        $ssh_reachable"
-}
-
-cmd_install_hook() {
-  local remove=false
-  for arg in "$@"; do
-    [[ "$arg" == "--remove" ]] && remove=true
-  done
-
-  local shell_name
-  shell_name="$(basename "$SHELL")"
-
-  local rc_file hook_block
-  # shellcheck disable=SC2016
-  case "$shell_name" in
-  zsh)
-    rc_file="$HOME/.zshrc"
-    # shellcheck disable=SC2016
-    hook_block='# nixcage-hook-begin
-_nixcage_chpwd() {
-  [[ -f "$PWD/nixcage.vm.nix" ]] || return
-  [[ -n "${NIXCAGE_VM_ACTIVE:-}" ]] && return
-  export NIXCAGE_VM_ACTIVE=1
-  nixcage shell
-  unset NIXCAGE_VM_ACTIVE
-}
-autoload -U add-zsh-hook
-add-zsh-hook chpwd _nixcage_chpwd
-# nixcage-hook-end'
-    ;;
-  bash)
-    rc_file="$HOME/.bashrc"
-    # shellcheck disable=SC2016
-    hook_block='# nixcage-hook-begin
-_nixcage_last_dir=""
-_nixcage_prompt() {
-  [[ "$PWD" == "$_nixcage_last_dir" ]] && return
-  _nixcage_last_dir="$PWD"
-  [[ -f "$PWD/nixcage.vm.nix" ]] || return
-  [[ -n "${NIXCAGE_VM_ACTIVE:-}" ]] && return
-  export NIXCAGE_VM_ACTIVE=1
-  nixcage shell
-  unset NIXCAGE_VM_ACTIVE
-}
-PROMPT_COMMAND="_nixcage_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
-# nixcage-hook-end'
-    ;;
-  *)
-    log_err "Unsupported shell: $shell_name (only zsh and bash are supported)"
-    exit 1
-    ;;
-  esac
-
-  if $remove; then
-    if ! grep -q '# nixcage-hook-begin' "$rc_file" 2>/dev/null; then
-      log_warn "No nixcage hook found in $rc_file"
-      return 0
-    fi
-    # Portable in-place deletion using a temp file
-    sed '/# nixcage-hook-begin/,/# nixcage-hook-end/d' "$rc_file" >"${rc_file}.tmp"
-    mv "${rc_file}.tmp" "$rc_file"
-    log_ok "Removed nixcage hook from $rc_file"
-    return 0
-  fi
-
-  if grep -q '# nixcage-hook-begin' "$rc_file" 2>/dev/null; then
-    log_ok "nixcage hook already present in $rc_file"
-    return 0
-  fi
-
-  printf '\n%s\n' "$hook_block" >>"$rc_file"
-  log_ok "Added nixcage hook to $rc_file"
-  log_info "Restart your shell or run: source $rc_file"
-}
-
-# Echo hook code to stdout for manual eval-based installation.
-cmd_vm_hook() {
-  local shell_name="${1:-$(basename "$SHELL")}"
-  case "$shell_name" in
-  zsh)
-    cat <<'HOOK'
-_nixcage_chpwd() {
-  [[ -f "$PWD/nixcage.vm.nix" ]] || return
-  [[ -n "${NIXCAGE_VM_ACTIVE:-}" ]] && return
-  export NIXCAGE_VM_ACTIVE=1
-  nixcage shell
-  unset NIXCAGE_VM_ACTIVE
-}
-autoload -U add-zsh-hook
-add-zsh-hook chpwd _nixcage_chpwd
-HOOK
-    ;;
-  bash)
-    cat <<'HOOK'
-_nixcage_last_dir=""
-_nixcage_prompt() {
-  [[ "$PWD" == "$_nixcage_last_dir" ]] && return
-  _nixcage_last_dir="$PWD"
-  [[ -f "$PWD/nixcage.vm.nix" ]] || return
-  [[ -n "${NIXCAGE_VM_ACTIVE:-}" ]] && return
-  export NIXCAGE_VM_ACTIVE=1
-  nixcage shell
-  unset NIXCAGE_VM_ACTIVE
-}
-PROMPT_COMMAND="_nixcage_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
-HOOK
-    ;;
-  *)
-    log_err "Unsupported shell: $shell_name (zsh or bash)"
-    exit 1
-    ;;
-  esac
-}
-
-cmd_destroy() {
-  local dir="${1:-.}"
-  local project_dir
-  project_dir="$(cd "$dir" && pwd)"
-
-  if vm_is_running "$project_dir" 2>/dev/null; then
-    log_info "Stopping VM before destroy..."
-    (cd "$project_dir" && cmd_stop)
-  fi
-
-  local removed=false
-  if [[ -f "$project_dir/nixcage.vm.nix" ]]; then
-    rm -f "$project_dir/nixcage.vm.nix"
-    removed=true
-  fi
-  if [[ -d "$project_dir/$NIXCAGE_VM_DIR" ]]; then
-    rm -rf "${project_dir:?}/$NIXCAGE_VM_DIR"
-    removed=true
-  fi
-
-  # Remove the .nixcage-vm/ entry from .gitignore if present.
-  local root_gitignore="$project_dir/.gitignore"
-  if grep -qxF '.nixcage-vm/' "$root_gitignore" 2>/dev/null; then
-    grep -vxF '.nixcage-vm/' "$root_gitignore" >"${root_gitignore}.tmp"
-    mv "${root_gitignore}.tmp" "$root_gitignore"
-  fi
-
-  if $removed; then
-    log_ok "Removed all nixcage files from $project_dir"
-  else
-    log_warn "No nixcage files found in $project_dir"
   fi
 }
 
 cmd_help() {
   cat <<HELP
-${BOLD}nixcage${NC} v${NIXCAGE_VERSION} -- NixOS microVM environments for AI coding agents
+${BOLD}nixcage${NC} v${NIXCAGE_VERSION} -- one shared NixOS microVM with per-project containers
 
 ${BOLD}Usage:${NC}
-  nixcage <command> [args...]
+  nixcage [--flake <ref>] <command> [args...]
 
 ${BOLD}Commands:${NC}
-  init [dir]        Initialize a new VM project
-  build             Build the VM image (run once after init)
-  start             Start the VM in the background
-  stop              Stop the VM
-  shell             Enter an interactive VM shell (starts if needed)
-  run <cmd...>      Run a command inside the VM
-  sync              Rebuild and restart if configuration changed
-  logs              Tail the VM log
-  status            Show VM state
-  install-hook      Add the cd auto-enter hook to your shell rc file
-  destroy [dir]     Remove all nixcage files
-  version           Print version
-  help              Show this help
+  enter [-- cmd...]  Enter this project's container (starts the VM if needed)
+  down               Stop the VM
+  rebuild            Rebuild the VM from the config flake and restart it
+  rm [name]          Delete a project container and its persistent home
+  status             Show VM state, containers, and the age public key
+  version            Print version
+  help               Show this help
 
-${BOLD}Quick start:${NC}
-  nixcage init
-  nixcage build                  # once; ~15 min first run
-  nixcage install-hook           # adds hook to ~/.zshrc or ~/.bashrc
-  cd .                           # trigger the hook
+${BOLD}Configuration:${NC}
+  The VM is configured by a flake you own (default: ~/.config/nixcage,
+  override with --flake or NIXCAGE_FLAKE). Create one with:
+
+    nix flake new -t github:hamidr/nixcage ~/.config/nixcage
+
+  A project is any flake directory with devShells.default under one of
+  your nixcage.workspaceRoots. No nixcage files exist in projects.
 HELP
 }
 
 main() {
+  if [[ "${1:-}" == "--flake" ]]; then
+    if [[ -z "${2:-}" ]]; then
+      log_err "--flake requires an argument"
+      exit 1
+    fi
+    NIXCAGE_FLAKE="$2"
+    shift 2
+  fi
+
   local command="${1:-help}"
   shift || true
   case "$command" in
-  init)         cmd_init "$@" ;;
-  build)        cmd_build "$@" ;;
-  start)        cmd_start "$@" ;;
-  stop)         cmd_stop "$@" ;;
-  shell)        cmd_shell "$@" ;;
-  run)          cmd_run "$@" ;;
-  sync)         cmd_sync "$@" ;;
-  logs)         cmd_logs "$@" ;;
-  status)       cmd_status "$@" ;;
-  install-hook) cmd_install_hook "$@" ;;
-  destroy)      cmd_destroy "$@" ;;
-  _vm_hook)     cmd_vm_hook "$@" ;;
+  enter)   cmd_enter "$@" ;;
+  down)    cmd_down "$@" ;;
+  rebuild) cmd_rebuild "$@" ;;
+  rm)      cmd_rm "$@" ;;
+  status)  cmd_status "$@" ;;
   version | --version | -v) echo "nixcage $NIXCAGE_VERSION" ;;
   help | --help | -h) cmd_help ;;
   *)

@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
-# Command tests for CLI dispatch and top-level routing
+# Top-level CLI dispatch: help, version, flake selection, unknown commands
+
+load ../test_helper/common
 
 setup() {
-	load '../test_helper/common'
 	setup_temp_dir
 }
 
@@ -10,69 +11,43 @@ teardown() {
 	teardown_temp_dir
 }
 
-@test "help: exits 0" {
+@test "no arguments shows help" {
+	run_nixcage
+	[ "$status" -eq 0 ]
+	[[ "$output" == *Usage:* ]]
+}
+
+@test "help lists exactly the five commands" {
 	run_nixcage help
-	assert_success
+	[ "$status" -eq 0 ]
+	for cmd in enter down rebuild rm status; do
+		[[ "$output" == *"$cmd"* ]]
+	done
+	[[ "$output" != *install-hook* ]]
+	[[ "$output" != *init* ]]
+	[[ "$output" != *sync* ]]
 }
 
-@test "--help: exits 0" {
-	run_nixcage --help
-	assert_success
-}
-
-@test "version: prints nixcage 1.0.0" {
+@test "version prints the version" {
 	run_nixcage version
-	assert_success
-	assert_output "nixcage 1.0.0"
+	[ "$status" -eq 0 ]
+	[[ "$output" == "nixcage "* ]]
 }
 
-@test "--version: prints nixcage 1.0.0" {
-	run_nixcage --version
-	assert_success
-	assert_output "nixcage 1.0.0"
+@test "unknown command fails with help" {
+	run_nixcage frobnicate
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"Unknown command"* ]]
 }
 
-@test "unknown-command: exits 1" {
-	run_nixcage unknown-command
-	assert_failure
+@test "--flake without an argument fails" {
+	run_nixcage --flake
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"--flake requires"* ]]
 }
 
-@test "unknown-command: prints error message" {
-	run_nixcage unknown-command
-	assert_failure
-	assert_output --partial "Unknown command"
-}
-
-@test "build: exits 1 outside VM project" {
-	cd "$TEST_TEMP_DIR"
-	run_nixcage build
-	assert_failure
-	assert_output --partial "nixcage.vm.nix"
-}
-
-@test "start: exits 1 outside VM project" {
-	cd "$TEST_TEMP_DIR"
-	run_nixcage start
-	assert_failure
-	assert_output --partial "nixcage.vm.nix"
-}
-
-@test "shell: exits 1 outside VM project" {
-	cd "$TEST_TEMP_DIR"
-	run_nixcage shell
-	assert_failure
-	assert_output --partial "nixcage.vm.nix"
-}
-
-@test "run: exits 1 outside VM project" {
-	cd "$TEST_TEMP_DIR"
-	run_nixcage run foo
-	assert_failure
-	assert_output --partial "nixcage.vm.nix"
-}
-
-@test "status: exits 1 outside VM project" {
-	cd "$TEST_TEMP_DIR"
-	run_nixcage status
-	assert_failure
+@test "rebuild with a missing path flake fails with template guidance" {
+	run_nixcage --flake "$TEST_TEMP_DIR/nonexistent" rebuild
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"flake new"* ]]
 }

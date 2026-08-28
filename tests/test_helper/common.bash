@@ -16,16 +16,17 @@ if [[ -n "${BATS_LIB_PATH:-}" ]]; then
 	unset _lib_dirs _dir
 fi
 
-# Create a fresh temp directory for each test
+# Isolate every test from the real user state and config.
 setup_temp_dir() {
 	TEST_TEMP_DIR="$(mktemp -d)"
 	export TEST_TEMP_DIR
+	export XDG_STATE_HOME="$TEST_TEMP_DIR/state"
+	export NIXCAGE_FLAKE="$TEST_TEMP_DIR/config"
+	mkdir -p "$XDG_STATE_HOME/nixcage" "$NIXCAGE_FLAKE"
 }
 
-# Clean up temp directory after each test
 teardown_temp_dir() {
 	if [[ -n "${TEST_TEMP_DIR:-}" && -d "$TEST_TEMP_DIR" ]]; then
-		# Nix store files are read-only; make them writable before deleting
 		chmod -R u+w "$TEST_TEMP_DIR" 2>/dev/null || true
 		rm -rf "$TEST_TEMP_DIR"
 	fi
@@ -41,33 +42,12 @@ run_nixcage() {
 	run bash "$NIXCAGE_BIN" "$@"
 }
 
-# Create a minimal nixcage.toml for testing
-create_test_config() {
-	local dir="${1:-.}"
-	cat >"$dir/nixcage.toml" <<'TOML'
-[sandbox]
-level = "standard"
-
-[sandbox.filesystem]
-ro_bind = []
-rw_bind = []
-blacklist = []
-
-[sandbox.network]
-allow = true
-
-[sandbox.resources]
-cpus = 0
-memory = ""
-
-[nix]
-packages = ["nodejs_22"]
-pure = true
-store_mode = "readonly"
-
-[cage]
-command = ""
-passthrough_env = ["TERM", "LANG", "ANTHROPIC_API_KEY"]
-env = []
-TOML
+# Write the build-time cache the CLI reads at runtime.
+write_cache() {
+	local port="${1:-22022}"
+	local roots="${2:-$TEST_TEMP_DIR/src}"
+	cat >"$XDG_STATE_HOME/nixcage/cache" <<EOF
+SSH_PORT=$port
+WORKSPACE_ROOTS=$roots
+EOF
 }
