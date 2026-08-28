@@ -69,7 +69,6 @@
             ## ('nixcage status' prints the public key for .sops.yaml).
             ## The key never leaves the VM's data volume.
             sops.age.keyFile = "/var/lib/nixcage/age.key";
-            sops.age.generateKey = true;
             # sops.defaultSopsFile = ./secrets.yaml;
             # sops.secrets.anthropic = { };
           }

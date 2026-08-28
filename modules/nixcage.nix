@@ -35,7 +35,9 @@ let
     ];
     text = ''
       STATE_DIR=/var/lib/nixcage
-      PROFILE=/etc/nixcage/profile
+      ## Resolve the /etc symlink to its store path: the container has its
+      ## own /etc, but the store bind makes store paths valid inside.
+      PROFILE="$(readlink -f /etc/nixcage/profile)"
       SECRET_ENV=/etc/nixcage/secret-env
 
       die() { echo "nixcage-container: $*" >&2; exit 1; }
@@ -61,7 +63,9 @@ let
       ## takes an exclusive lock on its directory tree.
       make_rootfs() {
         local root="$1"
-        mkdir -p "$root"/{etc,tmp,root,workspace,nix,proc,sys,dev,run,var/empty}
+        ## nspawn refuses a rootfs without /usr ("doesn't look like it has
+        ## an OS tree").
+        mkdir -p "$root"/{etc,usr,tmp,root,workspace,nix,proc,sys,dev,run,var/empty}
         chmod 1777 "$root/tmp"
         echo 'NAME=nixcage' >"$root/etc/os-release"
         cp /etc/resolv.conf "$root/etc/resolv.conf" 2>/dev/null || true
@@ -91,7 +95,9 @@ let
 
         local rootfs="$cdir/session-$$"
         make_rootfs "$rootfs"
-        trap 'rm -rf "$rootfs"' EXIT
+        ## Expand now: locals are out of scope when the EXIT trap fires.
+        # shellcheck disable=SC2064
+        trap "rm -rf '$rootfs'" EXIT
 
         local shell_cmd
         if [ "$#" -gt 0 ]; then
@@ -118,6 +124,7 @@ let
           --setenv=HOME=/root \
           --setenv=PATH="$PROFILE/bin" \
           --setenv=NIX_REMOTE=daemon \
+          --setenv=NIX_CONFIG='experimental-features = nix-command flakes' \
           --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt" \
           --setenv=TERM="''${TERM:-xterm}" \
           "''${env_args[@]}" \
@@ -271,6 +278,25 @@ in
     environment.etc."nixcage/secret-env".text = lib.concatStrings (
       lib.mapAttrsToList (var: secret: "${var}=${secret}\n") cfg.secretEnv
     );
+
+    ## Generate the age identity on the data volume at first boot so the
+    ## user can read the public key (nixcage status) before declaring any
+    ## sops secret. sops-nix's own generateKey only runs once secrets
+    ## exist, which is too late for that bootstrap.
+    systemd.services.nixcage-age-key = {
+      description = "Generate the nixcage age identity";
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        if [ ! -f /var/lib/nixcage/age.key ]; then
+          umask 077
+          ${pkgs.age}/bin/age-keygen -o /var/lib/nixcage/age.key
+        fi
+      '';
+    };
 
     nix.settings.experimental-features = [
       "nix-command"

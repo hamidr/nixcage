@@ -145,8 +145,10 @@ computed on the host (`container_name_for`).
 
 sops-nix only; the host environment is never read. The config flake imports
 `sops-nix.nixosModules.sops` with `sops.age.keyFile =
-"/var/lib/nixcage/age.key"` and `sops.age.generateKey = true`. The key is
-created on first boot on the data volume and never leaves the VM;
+"/var/lib/nixcage/age.key"`. The nixcage module generates that key on first
+boot (a oneshot service on the data volume; sops-nix's own `generateKey`
+only runs once secrets exist, too late to bootstrap). The key never leaves
+the VM;
 `nixcage status` prints the public key (via `age-keygen -y`) for `.sops.yaml`.
 Decrypted secrets appear under `/run/secrets` (tmpfs) and reach container
 sessions only through `nixcage.secretEnv`. Interactive credentials (e.g.
