@@ -1,7 +1,13 @@
 ---
-title: ADR-001 -- NixOS microVM as the sole execution model
-status: Accepted
+id: ADR-001
+title: NixOS microVM as the sole execution model
+status: superseded
 date: 2026-04-24
+status_date: 2026-08-28
+summary: Replace bwrap/Seatbelt process sandboxing with one per-project NixOS microVM managed by nixcage
+depends_on: []
+supersedes: []
+superseded_by: [ADR-002]
 ---
 
 ## Context
