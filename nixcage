@@ -47,7 +47,20 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nixcage"
 # All values the CLI needs from the config flake, cached at build time so
 # 'enter' does not pay a nix eval on every invocation.
 CACHE_FILE="$STATE_DIR/cache"
-VM_ATTR="nixosConfigurations.nixcage.config"
+
+# Pick the VM configuration like nixos-rebuild picks a host: prefer
+# nixosConfigurations."nixcage-<hostname>" so one flake can serve several
+# machines, fall back to nixosConfigurations.nixcage.
+resolve_vm_attr() {
+  local host
+  host="$(hostname -s)"
+  if nix eval "$NIXCAGE_FLAKE#nixosConfigurations" \
+       --apply "c: c ? \"nixcage-$host\"" 2>/dev/null | grep -qx true; then
+    echo "nixosConfigurations.\"nixcage-$host\".config"
+  else
+    echo "nixosConfigurations.nixcage.config"
+  fi
+}
 
 check_flake() {
   # A path flake must contain flake.nix; other refs (git urls) are taken
@@ -213,15 +226,17 @@ vm_build() {
   check_flake
   mkdir -p "$STATE_DIR"
 
-  log_info "Building VM from $NIXCAGE_FLAKE (first build takes a while)..."
-  nix build "$NIXCAGE_FLAKE#$VM_ATTR.microvm.declaredRunner" \
+  local attr
+  attr="$(resolve_vm_attr)"
+  log_info "Building VM from $NIXCAGE_FLAKE#${attr%.config} (first build takes a while)..."
+  nix build "$NIXCAGE_FLAKE#$attr.microvm.declaredRunner" \
     --out-link "$STATE_DIR/result" -L
 
   # Cache the config values the CLI needs at runtime so 'enter' stays free
   # of nix eval calls. The cache is regenerated on every rebuild.
   local port roots
-  port="$(nix eval --raw "$NIXCAGE_FLAKE#$VM_ATTR.nixcage.sshPort" --apply toString)"
-  roots="$(nix eval --json "$NIXCAGE_FLAKE#$VM_ATTR.nixcage.workspaceRoots" | jq -r 'join(":")')"
+  port="$(nix eval --raw "$NIXCAGE_FLAKE#$attr.nixcage.sshPort" --apply toString)"
+  roots="$(nix eval --json "$NIXCAGE_FLAKE#$attr.nixcage.workspaceRoots" | jq -r 'join(":")')"
   cat >"$CACHE_FILE" <<EOF
 SSH_PORT=$port
 WORKSPACE_ROOTS=$roots

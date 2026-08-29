@@ -46,9 +46,12 @@ The guest is always Linux. On macOS hosts the runner is a Darwin-native qemu
 
 All configuration lives in a Nix flake the user owns. The CLI locates it by,
 in order: the `--flake <ref>` global option, the `NIXCAGE_FLAKE` environment
-variable, the default `~/.config/nixcage`. The flake must export
-`nixosConfigurations.nixcage` importing `microvm.nixosModules.microvm` and
-`nixcage.nixosModules.nixcage`. A starter is scaffolded with
+variable, the default `~/.config/nixcage`. The flake exports one or more VM
+configurations importing `microvm.nixosModules.microvm` and
+`nixcage.nixosModules.nixcage`; the CLI picks
+`nixosConfigurations."nixcage-<hostname -s>"` when it exists and falls back
+to `nixosConfigurations.nixcage`, so a single flake can serve several
+machines (the nixos-rebuild hostname convention). A starter is scaffolded with
 `nix flake new -t github:hamidr/nixcage ~/.config/nixcage`.
 
 ### 3.2 nixcage module options

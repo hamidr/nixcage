@@ -79,7 +79,10 @@ Anything else NixOS supports is fair game -- it is your VM. Apply changes with
 `nixcage rebuild` (this restarts the VM and interrupts running sessions).
 
 The CLI finds the flake at `~/.config/nixcage`; override with
-`--flake <ref>` or `NIXCAGE_FLAKE`.
+`--flake <ref>` or `NIXCAGE_FLAKE`. Multi-machine setups export one
+configuration per host: `nixosConfigurations."nixcage-<hostname>"` is
+preferred over the shared `nixosConfigurations.nixcage`, so your dotfiles
+flake can serve a macOS laptop and a NixOS desktop from one repo.
 
 ## Projects
 

@@ -46,8 +46,10 @@ dispatches to `cmd_*` functions (`enter`, `down`, `rebuild`, `rm`, `status`).
 ### Key subsystems
 
 **Config flake resolution** -- `--flake` > `NIXCAGE_FLAKE` > `~/.config/nixcage`.
-The flake must export `nixosConfigurations.nixcage`. The CLI never writes into
-it; `check_flake` errors with template guidance when it is missing.
+`resolve_vm_attr` picks `nixosConfigurations."nixcage-<hostname -s>"` when the
+flake has it, else `nixosConfigurations.nixcage` (nixos-rebuild hostname
+convention; lets one flake serve several machines). The CLI never writes into
+the flake; `check_flake` errors with template guidance when it is missing.
 
 **Build cache** (`vm_build`, `vm_read_cache`) -- `rebuild` runs `nix build` on
 `...microvm.declaredRunner` into `$STATE/result`, then `nix eval`s `sshPort`
