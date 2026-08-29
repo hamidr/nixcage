@@ -1,7 +1,7 @@
 ---
 id: ADR-003
 title: Containers run natively on Linux; the VM becomes a macOS kernel shim
-status: proposed
+status: implementing
 date: 2026-08-29
 status_date: 2026-08-29
 summary: Linux hosts run project nspawn containers directly; the shared VM remains only where a Linux kernel is missing
