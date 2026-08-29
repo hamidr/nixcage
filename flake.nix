@@ -34,7 +34,7 @@
         {
           packages.default = pkgs.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "2.1.0";
+            version = "3.0.0";
 
             src = ./.;
 
@@ -88,7 +88,7 @@
           in
           final.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "2.1.0";
+            version = "3.0.0";
 
             src = ./.;
 
