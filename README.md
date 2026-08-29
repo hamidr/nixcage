@@ -153,6 +153,23 @@ nixcage.secretEnv.ANTHROPIC_API_KEY = "anthropic";
 Interactive logins work too: container homes persist, so `claude login` done
 once inside a container survives restarts.
 
+## Store growth
+
+The VM owns its store, and every project's devShell lands in the same writable
+overlay, so it only grows. The VM therefore collects garbage weekly, keeping
+30 days, and hardlinks duplicate paths. Override any of it in your config
+flake:
+
+```nix
+nix.gc.dates = "monthly";
+nix.gc.automatic = false;
+```
+
+Collection between sessions drops devShell closures, since `nix develop` holds
+only a temporary root; the next `nixcage enter` for that project fetches them
+again. On Linux there is no VM and no separate store: the host's own gc policy
+applies unchanged.
+
 ## Platform notes
 
 | | Linux | macOS |

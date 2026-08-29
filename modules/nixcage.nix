@@ -185,10 +185,33 @@ in
       requires = [ "var-lib-nixcage.mount" ];
     };
 
-    nix.settings.experimental-features = [
-      "nix-command"
-      "flakes"
-    ];
+    nix = {
+      settings = {
+        experimental-features = [
+          "nix-command"
+          "flakes"
+        ];
+
+        ## Every project's devShell is a separate closure in the same overlay,
+        ## and they overlap heavily; hardlinking the duplicates is most of what
+        ## keeps a many-project VM from filling one.
+        auto-optimise-store = lib.mkDefault true;
+      };
+
+      ## The store overlay is a fixed-size volume that only grows: containers
+      ## build into it for the life of the VM and nothing else prunes it.
+      ## Every value is mkDefault, so a config flake can lengthen the window,
+      ## change the schedule, or turn collection off entirely.
+      ##
+      ## 'nix develop' keeps only a temporary root, so a collection between
+      ## sessions drops the devShell closures and the next enter refetches
+      ## them. That is the cost of not filling the volume.
+      gc = {
+        automatic = lib.mkDefault true;
+        dates = lib.mkDefault "weekly";
+        options = lib.mkDefault "--delete-older-than 30d";
+      };
+    };
 
     services.openssh = {
       enable = true;
