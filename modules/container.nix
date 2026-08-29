@@ -117,9 +117,13 @@ let
 
         write_secret_env "$rootfs/etc/nixcage-env"
 
+        # Pinning the address families explicitly silences nspawn's
+        # deprecation warning. AF_NETLINK is kept on top of the announced
+        # future default because glibc resolves names through it.
         systemd-nspawn --quiet --register=no \
           --directory="$rootfs" \
           --machine="$name" \
+          --restrict-address-families=AF_UNIX,AF_INET,AF_INET6,AF_NETLINK \
           --bind-ro=/nix/store \
           --bind-ro=/nix/var/nix/db \
           --bind=/nix/var/nix/daemon-socket \
