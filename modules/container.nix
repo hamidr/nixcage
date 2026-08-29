@@ -97,9 +97,20 @@ let
         check_name "$name"
         [ -d "$project" ] || die "project directory not found: $project"
 
+        ## The container is mapped onto the project owner rather than run as
+        ## real root: nix's libgit2 refuses a repository owned by a different
+        ## uid, and every project directory belongs to the invoking user.
+        local owner_uid owner_gid
+        owner_uid="$(stat -c %u "$project")"
+        owner_gid="$(stat -c %g "$project")"
+
         local cdir="$STATE_DIR/containers/$name"
         local home="$STATE_DIR/homes/$name"
         mkdir -p "$cdir" "$home"
+        ## The home is the container's /root and holds whatever the session
+        ## writes there, so it is private to the mapped user.
+        chown "$owner_uid:$owner_gid" "$home"
+        chmod 700 "$home"
 
         local rootfs="$cdir/session-$$"
         make_rootfs "$rootfs"
@@ -116,10 +127,15 @@ let
         fi
 
         write_secret_env "$rootfs/etc/nixcage-env"
+        ## Everything the skeleton contains was created by root and would
+        ## otherwise appear as an unmapped nobody inside the container.
+        chown -R "$owner_uid:$owner_gid" "$rootfs"
 
         systemd-nspawn --quiet --register=no \
           --directory="$rootfs" \
           --machine="$name" \
+          --private-users="$owner_uid:1" \
+          --private-users-ownership=off \
           --bind-ro=/nix/store \
           --bind-ro=/nix/var/nix/db \
           --bind=/nix/var/nix/daemon-socket \
