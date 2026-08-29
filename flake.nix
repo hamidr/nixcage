@@ -118,5 +118,11 @@
         path = ./templates/config;
         description = "nixcage shared VM configuration flake";
       };
+      ## The documented bootstrap is plain 'nix flake new -t <nixcage>',
+      ## which resolves templates.default.
+      flake.templates.default = {
+        path = ./templates/config;
+        description = "nixcage shared VM configuration flake";
+      };
     };
 }

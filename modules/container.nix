@@ -39,14 +39,26 @@ let
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
-      ## Render nixcage.secretEnv (VAR=secretname lines) into -E VAR=value
-      ## nspawn arguments. Secrets live in /run/secrets (sops-nix, tmpfs).
-      secret_env_args() {
+      ## Names reach root-level rm -rf and nspawn --machine; only the
+      ## derived-name alphabet is allowed.
+      check_name() {
+        printf '%s' "$1" | grep -qE '^[a-zA-Z0-9-]+$' || die "invalid container name: $1"
+      }
+
+      ## Render nixcage.secretEnv (VAR=secretname lines) into an export
+      ## file inside the session rootfs. Values must never appear in
+      ## nspawn's argv, where any local user could read them from
+      ## /proc/<pid>/cmdline; %q also keeps multiline secrets intact.
+      write_secret_env() {
+        local out="$1"
+        : >"$out"
+        chmod 600 "$out"
         [ -f "$SECRET_ENV" ] || return 0
+        local var secret
         while IFS='=' read -r var secret; do
           [ -n "$var" ] || continue
           if [ -r "/run/secrets/$secret" ]; then
-            printf -- '--setenv=%s=%s\n' "$var" "$(cat "/run/secrets/$secret")"
+            printf 'export %s=%q\n' "$var" "$(cat "/run/secrets/$secret")" >>"$out"
           else
             echo "nixcage-container: secret '$secret' for $var not found; skipping" >&2
           fi
@@ -82,7 +94,8 @@ let
       cmd_enter() {
         local name="$1" project="$2"
         shift 2
-        [ -d "$project" ] || die "project directory not found in VM: $project"
+        check_name "$name"
+        [ -d "$project" ] || die "project directory not found: $project"
 
         local cdir="$STATE_DIR/containers/$name"
         local home="$STATE_DIR/homes/$name"
@@ -94,18 +107,15 @@ let
         # shellcheck disable=SC2064
         trap "rm -rf '$rootfs'" EXIT
 
-        local shell_cmd
+        local shell_cmd=". /etc/nixcage-env 2>/dev/null || true; "
         if [ "$#" -gt 0 ]; then
-          shell_cmd="exec nix develop --command \"\$@\""
+          shell_cmd="''${shell_cmd}exec nix develop --command \"\$@\""
           set -- placeholder "$@"
         else
-          shell_cmd="exec nix develop"
+          shell_cmd="''${shell_cmd}exec nix develop"
         fi
 
-        local env_args=()
-        while IFS= read -r arg; do
-          env_args+=("$arg")
-        done < <(secret_env_args)
+        write_secret_env "$rootfs/etc/nixcage-env"
 
         systemd-nspawn --quiet --register=no \
           --directory="$rootfs" \
@@ -122,7 +132,6 @@ let
           --setenv=NIX_CONFIG='experimental-features = nix-command flakes' \
           --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt" \
           --setenv=TERM="''${TERM:-xterm}" \
-          "''${env_args[@]}" \
           "$PROFILE/bin/bash" -c "$shell_cmd" "$@"
       }
 
@@ -133,7 +142,8 @@ let
 
       cmd_rm() {
         local name="$1"
-        rm -rf "$STATE_DIR/containers/$name" "$STATE_DIR/homes/$name"
+        check_name "$name"
+        rm -rf "$STATE_DIR/containers/''${name:?}" "$STATE_DIR/homes/''${name:?}"
       }
 
       cmd="''${1:-}"

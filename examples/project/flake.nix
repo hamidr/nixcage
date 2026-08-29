@@ -13,11 +13,19 @@
         "x86_64-linux"
         "aarch64-linux"
       ];
+      ## claude-code is unfree; legacyPackages never allows unfree, so the
+      ## shell instantiates its own nixpkgs with the permission granted.
+      pkgsFor =
+        system:
+        import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        };
     in
     {
       devShells = forAllSystems (system: {
-        default = nixpkgs.legacyPackages.${system}.mkShell {
-          packages = with nixpkgs.legacyPackages.${system}; [
+        default = (pkgsFor system).mkShell {
+          packages = with (pkgsFor system); [
             ## Your toolchain -- and the AI agent, if you want one. nixcage
             ## installs nothing into containers.
             claude-code

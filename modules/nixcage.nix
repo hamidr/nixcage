@@ -44,8 +44,10 @@ in
         "virtiofs"
         "9p"
       ];
-      default = "virtiofs";
-      description = "Share protocol for workspace roots: virtiofs on Linux hosts, 9p on macOS.";
+      ## Since ADR-003 this VM only runs on macOS hosts, where virtiofsd
+      ## does not exist; 9p is the only working default.
+      default = "9p";
+      description = "Share protocol for workspace roots: 9p on macOS hosts, virtiofs on Linux hosts.";
     };
 
     secretEnv = lib.mkOption {
@@ -81,6 +83,17 @@ in
   };
 
   config = {
+    assertions = [
+      {
+        assertion = cfg.authorizedKeys != [ ];
+        message = ''
+          nixcage.authorizedKeys is empty: nobody could SSH into the VM and
+          'nixcage enter' would hang until timeout. Paste the public key the
+          CLI prints on first run (~/.local/state/nixcage/id_ed25519.pub).
+        '';
+      }
+    ];
+
     ## The VM owns its store: the closure ships as a read-only image and
     ## builds land in a persistent writable overlay. The host store is
     ## never shared into the guest.
@@ -145,16 +158,31 @@ in
     systemd.services.nixcage-age-key = {
       description = "Generate the nixcage age identity";
       wantedBy = [ "multi-user.target" ];
+      ## Without the mount ordering the key lands on the ephemeral rootfs
+      ## and is shadowed once the volume mounts (observed as an empty
+      ## age.key). -s, not -f: an empty file from such a race must not
+      ## satisfy the guard.
+      after = [ "var-lib-nixcage.mount" ];
+      requires = [ "var-lib-nixcage.mount" ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
       };
       script = ''
-        if [ ! -f /var/lib/nixcage/age.key ]; then
+        if [ ! -s /var/lib/nixcage/age.key ]; then
           umask 077
+          rm -f /var/lib/nixcage/age.key
           ${pkgs.age}/bin/age-keygen -o /var/lib/nixcage/age.key
         fi
       '';
+    };
+
+    ## sshd generates its persistent host key in preStart; force it after
+    ## the data volume mount or the first boot serves a throwaway tmpfs key
+    ## and every later boot fails host key verification.
+    systemd.services.sshd = {
+      after = [ "var-lib-nixcage.mount" ];
+      requires = [ "var-lib-nixcage.mount" ];
     };
 
     nix.settings.experimental-features = [
@@ -168,6 +196,15 @@ in
         PasswordAuthentication = false;
         PermitRootLogin = "no";
       };
+      ## On the data volume: the rootfs is ephemeral, and a stable host key
+      ## lets the CLI verify every boot after the first instead of blindly
+      ## re-accepting a fresh key each time.
+      hostKeys = [
+        {
+          path = "/var/lib/nixcage/ssh_host_ed25519_key";
+          type = "ed25519";
+        }
+      ];
     };
 
     users.users.nixcage = {

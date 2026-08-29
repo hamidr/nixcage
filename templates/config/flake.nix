@@ -52,9 +52,6 @@
               ## ~/.local/state/nixcage/id_ed25519.pub on first run).
               authorizedKeys = [ ];
 
-              ## On macOS hosts 9p is required (virtiofsd is Linux-only).
-              # shareProto = "9p";
-
               ## Environment variable -> sops secret name, injected into
               ## every container session.
               # secretEnv.ANTHROPIC_API_KEY = "anthropic";

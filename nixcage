@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# nixcage -- one shared NixOS microVM with per-project containers
+# nixcage -- per-project NixOS containers for AI coding agents
 
 set -euo pipefail
 
@@ -123,13 +123,33 @@ vm_read_cache() {
 vm_pid_file() { echo "$STATE_DIR/vm.pid"; }
 vm_virtiofsd_pid_file() { echo "$STATE_DIR/virtiofsd.pid"; }
 
+# The pid must both be alive and still look like the VM runner: after a
+# host reboot the state file survives and the pid can be reused by an
+# unrelated process, which 'down' would otherwise kill.
 vm_is_running() {
   local pid_file
   pid_file="$(vm_pid_file)"
   [[ -f "$pid_file" ]] || return 1
   local pid
   pid="$(cat "$pid_file")"
-  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || return 1
+  if ! ps -p "$pid" -o args= 2>/dev/null | grep -qE 'microvm|qemu'; then
+    rm -f "$pid_file"
+    return 1
+  fi
+}
+
+# True when something already listens on the given local TCP port.
+port_in_use() {
+  local port="$1"
+  (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null || return 1
+  exec 3>&- 3<&-
+}
+
+# Container names are passed to root-level rm -rf and into SSH command
+# strings; reject anything beyond the derived-name alphabet.
+validate_container_name() {
+  [[ "$1" =~ ^[a-zA-Z0-9-]+$ ]]
 }
 
 # Generate the host keypair lazily on first use; the public key must be
@@ -158,13 +178,12 @@ vm_ssh() {
 }
 
 # Poll until SSH is reachable or the VM process dies.
-# Uses accept-new since the VM generates fresh host keys each boot; the
-# known_hosts file is cleared on every start.
+# The VM's host key persists on its data volume, so accept-new trusts it
+# once on first contact and every later boot is verified against it.
 vm_wait_for_ssh() {
   vm_read_cache
   local known_hosts="$STATE_DIR/known_hosts"
   local key="$STATE_DIR/id_ed25519"
-  : >"$known_hosts"
   local timeout=120
   [[ "$OS" == "macos" ]] && timeout=300
   local deadline=$((SECONDS + timeout))
@@ -272,6 +291,10 @@ SSH_PORT=$port
 WORKSPACE_ROOTS=$roots
 EOF
 
+  # A rebuild may legitimately change the VM's persistent host key; a
+  # stale entry would otherwise hard-fail every later connection.
+  rm -f "$STATE_DIR/known_hosts"
+
   log_ok "VM built."
 }
 
@@ -281,6 +304,15 @@ vm_start() {
   local result="$STATE_DIR/result"
   if [[ ! -e "$result" ]]; then
     vm_build
+  fi
+
+  # A foreign listener on the SSH port would break qemu's forward -- or
+  # worse, get trusted by the accept-new handshake meant for the VM.
+  vm_read_cache
+  if port_in_use "$VM_SSH_PORT"; then
+    log_err "Port $VM_SSH_PORT is already in use on 127.0.0.1."
+    log_err "Free it, or change nixcage.sshPort and run 'nixcage rebuild'."
+    exit 1
   fi
 
   # Clear stale virtiofsd processes/sockets from a previous failed start.
@@ -309,10 +341,11 @@ vm_start() {
     echo "$!" >"$pid_file"
   )
 
-  # vm_wait_for_ssh exits on failure, which would orphan virtiofsd. An
-  # EXIT trap cleans up only when ssh did not succeed.
+  # vm_wait_for_ssh exits on failure, which would orphan the hypervisor
+  # (still holding the SSH port and blocking every later start) and
+  # virtiofsd. An EXIT trap cleans both up only when ssh did not succeed.
   _nixcage_start_ok=0
-  trap '[[ $_nixcage_start_ok -eq 1 ]] || vm_stop_virtiofsd' EXIT
+  trap '[[ $_nixcage_start_ok -eq 1 ]] || { kill "$(cat "$(vm_pid_file)" 2>/dev/null)" 2>/dev/null; rm -f "$(vm_pid_file)"; vm_stop_virtiofsd; }' EXIT
   vm_wait_for_ssh
   _nixcage_start_ok=1
   trap - EXIT
@@ -379,7 +412,10 @@ cmd_enter() {
 
   ensure_vm
 
-  local remote=(sudo nixcage-container enter "$name" "$project_dir")
+  # Everything in the remote command is re-split by the remote shell, so
+  # every word gets %q, not just the trailing command arguments.
+  local remote=(sudo nixcage-container enter)
+  remote+=("$(printf '%q' "$name")" "$(printf '%q' "$project_dir")")
   local arg
   for arg in "$@"; do
     remote+=("$(printf '%q' "$arg")")
@@ -445,6 +481,10 @@ cmd_rm() {
   local name
   if [[ $# -gt 0 ]]; then
     name="$1"
+    if ! validate_container_name "$name"; then
+      log_err "Invalid container name: $name"
+      exit 1
+    fi
   else
     if [[ ! -f "$PWD/flake.nix" ]]; then
       log_err "Usage: nixcage rm [name]  (run without a name from inside a project)"
@@ -453,8 +493,7 @@ cmd_rm() {
     name="$(container_name_for "$PWD")"
   fi
 
-  [[ "$OS" == "linux" ]] || ensure_vm
-
+  # Confirm before ensure_vm: aborting must not boot a VM.
   log_warn "This deletes container '$name' and its persistent home."
   read -rp "Continue? [y/N] " answer
   if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
@@ -465,6 +504,7 @@ cmd_rm() {
   if [[ "$OS" == "linux" ]]; then
     sudo nixcage-container rm "$name"
   else
+    ensure_vm
     vm_ssh -- sudo nixcage-container rm "$name"
   fi
   log_ok "Removed container $name."
@@ -510,7 +550,9 @@ cmd_status() {
       vm_ssh -- sudo nixcage-container list 2>/dev/null | sed 's/^/    /' || true
       local age_pub
       age_pub="$(vm_ssh -- sudo age-keygen -y /var/lib/nixcage/age.key 2>/dev/null || true)"
-      [[ -n "$age_pub" ]] && echo "  Age key:      $age_pub"
+      if [[ -n "$age_pub" ]]; then
+        echo "  Age key:      $age_pub"
+      fi
     fi
   fi
 }

@@ -16,10 +16,13 @@ if [[ -n "${BATS_LIB_PATH:-}" ]]; then
 	unset _lib_dirs _dir
 fi
 
-# Isolate every test from the real user state and config.
+# Isolate every test from the real user state and config. The OS is pinned
+# to macos so the suite behaves identically on Linux CI/dev machines;
+# linux_mode.bats overrides it.
 setup_temp_dir() {
 	TEST_TEMP_DIR="$(mktemp -d)"
 	export TEST_TEMP_DIR
+	export NIXCAGE_OS=macos
 	export XDG_STATE_HOME="$TEST_TEMP_DIR/state"
 	export NIXCAGE_FLAKE="$TEST_TEMP_DIR/config"
 	mkdir -p "$XDG_STATE_HOME/nixcage" "$NIXCAGE_FLAKE"
