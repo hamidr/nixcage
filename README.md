@@ -1,9 +1,10 @@
 # nixcage
 
-One shared NixOS microVM, one container per project. Any flake directory with a
-`devShells.default` becomes an isolated environment for AI coding agents -- no
-nixcage files in the project, VM-level isolation from the host, and a container
-boundary between projects.
+One systemd-nspawn container per project, driven by the project's own
+`devShells.default` -- no nixcage files in the project, a container boundary
+between projects. On Linux the containers run natively on the host. On macOS,
+which has no containers, they run inside one shared NixOS microVM that exists
+purely to provide a Linux kernel (and adds VM-level isolation from the host).
 
 ## How it works
 
@@ -46,7 +47,27 @@ enter per project builds the devShell inside the VM; later enters hit the cache.
 nix profile install github:hamidr/nixcage
 ```
 
-## Configuration
+## Configuration on Linux
+
+Containers run on the host; there is no VM. Import the host module in your
+NixOS configuration and rebuild:
+
+```nix
+# flake input: nixcage.url = "github:hamidr/nixcage";
+imports = [ inputs.nixcage.nixosModules.host ];
+
+nixcage = {
+  workspaceRoots = [ "/home/me/Src" ];
+  ## Env vars from this host's sops-nix secrets, per container session.
+  # secretEnv.ANTHROPIC_API_KEY = "anthropic";
+};
+```
+
+`nixos-rebuild switch` applies it; the CLI is just `enter`, `rm`, and
+`status` (`rebuild`/`down` are macOS-only -- the host owns the lifecycle).
+Containers use the host store read-only plus the host nix-daemon.
+
+## Configuration on macOS
 
 The VM is configured by a Nix flake you own. Create it from the template:
 
@@ -127,11 +148,15 @@ once inside a container survives restarts.
 
 | | Linux | macOS |
 |---|---|---|
-| Hypervisor | qemu (KVM) | qemu (Apple HVF) |
-| Filesystem share | VirtioFS | 9p |
-| Guest OS | NixOS (x86_64 or aarch64) | NixOS (aarch64 on Apple Silicon) |
+| Containers run | on the host | in a shared VM |
+| Host isolation | container boundary (nspawn) | VM boundary + container |
+| Nix store | host store, shared | VM-owned store |
+| Hypervisor | -- | qemu (Apple HVF) |
+| Secrets | host sops-nix | VM sops-nix + age key |
+| Config | `nixosModules.host` in your NixOS config | VM config flake |
 
-The guest is always Linux; macOS-native binaries do not exist inside the VM.
+The container environment is always Linux; on macOS, macOS-native binaries do
+not exist inside the VM.
 
 ### macOS: Linux builder setup
 

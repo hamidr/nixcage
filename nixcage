@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-NIXCAGE_VERSION="2.0.0"
+NIXCAGE_VERSION="2.1.0"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -38,10 +38,14 @@ detect_os() {
   esac
 }
 
-OS="$(detect_os)"
+# NIXCAGE_OS is a test override; real installs branch on the actual OS.
+OS="${NIXCAGE_OS:-$(detect_os)}"
 
-# The config flake is user-owned; the CLI never writes into it.
+# The config flake is user-owned; the CLI never writes into it. It is the
+# macOS configuration source; on Linux the host's nixosModules.host renders
+# /etc/nixcage/config instead and there is no VM.
 NIXCAGE_FLAKE="${NIXCAGE_FLAKE:-$HOME/.config/nixcage}"
+HOST_CONFIG="${NIXCAGE_HOST_CONFIG:-/etc/nixcage/config}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nixcage"
 
 # All values the CLI needs from the config flake, cached at build time so
@@ -71,6 +75,32 @@ check_flake() {
     log_err "Or point --flake / NIXCAGE_FLAKE at an existing one."
     exit 1
   fi
+}
+
+# Load configuration into VM_* globals from the platform's source: the
+# host-rendered /etc/nixcage/config on Linux, the build-time cache on macOS.
+cfg_read() {
+  if [[ "$OS" == "linux" ]]; then
+    host_read_config
+  else
+    vm_read_cache
+  fi
+}
+
+# Read the config rendered by nixosModules.host on a Linux host.
+host_read_config() {
+  if [[ ! -f "$HOST_CONFIG" ]]; then
+    log_err "No host config at $HOST_CONFIG."
+    log_err "Import nixcage's nixosModules.host in your NixOS configuration and rebuild."
+    exit 1
+  fi
+  VM_WORKSPACE_ROOTS=""
+  local key val
+  while IFS='=' read -r key val || [[ -n "$key" ]]; do
+    case "$key" in
+    WORKSPACE_ROOTS) VM_WORKSPACE_ROOTS="$val" ;;
+    esac
+  done <"$HOST_CONFIG"
 }
 
 # Read the build-time cache (SSH_PORT, WORKSPACE_ROOTS) into globals.
@@ -306,12 +336,12 @@ container_name_for() {
   echo "${base:-project}-${hash}"
 }
 
-# Verify the path sits under a configured workspace root; the roots are
-# mounted at identical paths inside the VM, so the same path is valid on
-# both sides.
+# Verify the path sits under a configured workspace root; on macOS the
+# roots are mounted at identical paths inside the VM, so the same path is
+# valid on both sides. On Linux the containers run on the host directly.
 check_workspace_root() {
   local project_dir="$1"
-  vm_read_cache
+  cfg_read
   local root
   IFS=':' read -ra _roots <<<"$VM_WORKSPACE_ROOTS"
   for root in "${_roots[@]}"; do
@@ -321,7 +351,7 @@ check_workspace_root() {
     fi
   done
   log_err "$project_dir is not under any workspace root ($VM_WORKSPACE_ROOTS)."
-  log_err "Add the root to nixcage.workspaceRoots in your config flake and run 'nixcage rebuild'."
+  log_err "Add the root to nixcage.workspaceRoots and apply your configuration."
   exit 1
 }
 
@@ -334,13 +364,20 @@ cmd_enter() {
   fi
 
   check_workspace_root "$project_dir"
-  ensure_vm
 
   local name
   name="$(container_name_for "$project_dir")"
 
   # Accept both 'enter -- cmd...' and 'enter cmd...'.
   [[ "${1:-}" == "--" ]] && shift
+
+  if [[ "$OS" == "linux" ]]; then
+    [[ $# -eq 0 ]] && log_info "Entering container $name..."
+    sudo nixcage-container enter "$name" "$project_dir" "$@"
+    return
+  fi
+
+  ensure_vm
 
   local remote=(sudo nixcage-container enter "$name" "$project_dir")
   local arg
@@ -356,7 +393,16 @@ cmd_enter() {
   fi
 }
 
+require_vm_platform() {
+  if [[ "$OS" == "linux" ]]; then
+    log_err "No VM on Linux -- containers run on the host."
+    log_err "Apply configuration changes with nixos-rebuild instead."
+    exit 1
+  fi
+}
+
 cmd_down() {
+  require_vm_platform
   if ! vm_is_running; then
     log_warn "VM is not running."
     vm_stop_virtiofsd
@@ -386,6 +432,7 @@ cmd_down() {
 }
 
 cmd_rebuild() {
+  require_vm_platform
   vm_build
   if vm_is_running; then
     log_warn "Restarting VM -- all container sessions will be interrupted."
@@ -406,7 +453,7 @@ cmd_rm() {
     name="$(container_name_for "$PWD")"
   fi
 
-  ensure_vm
+  [[ "$OS" == "linux" ]] || ensure_vm
 
   log_warn "This deletes container '$name' and its persistent home."
   read -rp "Continue? [y/N] " answer
@@ -415,12 +462,26 @@ cmd_rm() {
     return 0
   fi
 
-  vm_ssh -- sudo nixcage-container rm "$name"
+  if [[ "$OS" == "linux" ]]; then
+    sudo nixcage-container rm "$name"
+  else
+    vm_ssh -- sudo nixcage-container rm "$name"
+  fi
   log_ok "Removed container $name."
 }
 
 cmd_status() {
   echo "${BOLD}nixcage status${NC}"
+
+  if [[ "$OS" == "linux" ]]; then
+    host_read_config
+    echo "  Host config:  $HOST_CONFIG"
+    echo "  Roots:        $VM_WORKSPACE_ROOTS"
+    echo "  Containers:"
+    sudo nixcage-container list 2>/dev/null | sed 's/^/    /' || true
+    return
+  fi
+
   echo "  Config flake: $NIXCAGE_FLAKE"
 
   local built="no"
@@ -456,23 +517,27 @@ cmd_status() {
 
 cmd_help() {
   cat <<HELP
-${BOLD}nixcage${NC} v${NIXCAGE_VERSION} -- one shared NixOS microVM with per-project containers
+${BOLD}nixcage${NC} v${NIXCAGE_VERSION} -- per-project NixOS containers for AI coding agents
 
 ${BOLD}Usage:${NC}
   nixcage [--flake <ref>] <command> [args...]
 
 ${BOLD}Commands:${NC}
-  enter [-- cmd...]  Enter this project's container (starts the VM if needed)
-  down               Stop the VM
-  rebuild            Rebuild the VM from the config flake and restart it
+  enter [-- cmd...]  Enter this project's container (macOS: starts the VM if needed)
   rm [name]          Delete a project container and its persistent home
-  status             Show VM state, containers, and the age public key
+  status             Show container state (macOS: VM state and age public key)
+  down               macOS only: stop the VM
+  rebuild            macOS only: rebuild the VM from the config flake and restart it
   version            Print version
   help               Show this help
 
 ${BOLD}Configuration:${NC}
-  The VM is configured by a flake you own (default: ~/.config/nixcage,
-  override with --flake or NIXCAGE_FLAKE). Create one with:
+  Linux: containers run on this host. Import nixcage's nixosModules.host in
+  your NixOS configuration and set nixcage.workspaceRoots; apply with
+  nixos-rebuild.
+
+  macOS: containers run in a shared VM configured by a flake you own
+  (default: ~/.config/nixcage, override with --flake or NIXCAGE_FLAKE):
 
     nix flake new -t github:hamidr/nixcage ~/.config/nixcage
 

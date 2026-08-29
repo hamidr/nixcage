@@ -4,22 +4,29 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## What is nixcage
 
-nixcage is a single-file Bash tool that runs one shared NixOS microVM (via
-microvm.nix, qemu on both platforms) with one systemd-nspawn container per
-project inside it. A project is any flake directory with `devShells.default`
-under a configured workspace root -- there are no nixcage-specific files in
-projects. The primary use case is running AI coding agents (claude-code,
-opencode) in VM-level isolation from the host with a container boundary
-between projects. Architecture decision: `docs/ADR-002-shared-vm-project-containers.md`.
+nixcage is a single-file Bash tool that runs one systemd-nspawn container per
+project. On Linux the containers run natively on the host (config via
+`nixosModules.host` in the host's NixOS configuration). On macOS they run in
+one shared NixOS microVM (microvm.nix + qemu) that exists to provide a Linux
+kernel. A project is any flake directory with `devShells.default` under a
+configured workspace root -- there are no nixcage-specific files in projects.
+The primary use case is running AI coding agents in isolation. Architecture:
+`docs/ADR-002-shared-vm-project-containers.md` and
+`docs/ADR-003-native-containers-on-linux.md`.
 
 ## Repository layout
 
 - `nixcage` -- the entire host-side tool: a single self-contained Bash script.
-  All commands and VM lifecycle logic live here.
-- `modules/nixcage.nix` -- the NixOS module: nixcage options
+  All commands, the platform transport seam, and VM lifecycle logic live here.
+- `modules/container.nix` -- the shared container layer: the minimal userland
+  profile and the `nixcage-container` script owning all nspawn mechanics.
+  Used unchanged by both platform modules.
+- `modules/nixcage.nix` -- the VM module (macOS path): nixcage options
   (`workspaceRoots`, `authorizedKeys`, `sshPort`, `shareProto`, `secretEnv`,
-  `vm.*`), the VM base config, and the guest-side `nixcage-container` script
-  that owns all nspawn mechanics.
+  `vm.*`) and the VM base config.
+- `modules/host.nix` -- the Linux host module: `workspaceRoots` + `secretEnv`
+  options, renders `/etc/nixcage/config` for the CLI, installs the container
+  layer on the host.
 - `templates/config/` -- the flake template users instantiate at
   `~/.config/nixcage` (their VM configuration; sops-nix wired in).
 - `examples/project/` -- an ordinary project flake showing the devShell
@@ -84,11 +91,14 @@ host environment is never read.
 
 ### Platform branching
 
-`detect_os()` selects timeouts and nothing else at runtime. Platform
-divergence (9p vs virtiofs, `vmHostPackages`) lives in the user's config
-flake, guided by the template comments. The hypervisor is qemu everywhere
-because microvm.nix supports `forwardPorts` (our SSH path) only with qemu
-user-mode networking.
+`detect_os()` (overridable with `NIXCAGE_OS` for tests) selects the
+transport: Linux executes `sudo nixcage-container` locally and reads
+`/etc/nixcage/config` (`NIXCAGE_HOST_CONFIG` override for tests);
+macOS goes over SSH into the VM and reads the build-time cache. `cfg_read`
+is the dispatch point. `rebuild`/`down` are macOS-only
+(`require_vm_platform`); on Linux the host owns the lifecycle via
+nixos-rebuild. The macOS hypervisor is qemu because microvm.nix supports
+`forwardPorts` (our SSH path) only with qemu user-mode networking.
 
 ## Conventions
 

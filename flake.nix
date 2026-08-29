@@ -34,7 +34,7 @@
         {
           packages.default = pkgs.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "2.0.0";
+            version = "2.1.0";
 
             src = ./.;
 
@@ -88,7 +88,7 @@
           in
           final.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "2.0.0";
+            version = "2.1.0";
 
             src = ./.;
 
@@ -112,6 +112,7 @@
       };
 
       flake.nixosModules.nixcage = import ./modules/nixcage.nix;
+      flake.nixosModules.host = import ./modules/host.nix;
 
       flake.templates.config = {
         path = ./templates/config;

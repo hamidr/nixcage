@@ -4,17 +4,17 @@ Version: 2.0.0
 
 ## 1. Purpose
 
-nixcage runs one shared NixOS microVM per user and machine, with one
-systemd-nspawn container per project inside it. A project is any flake
+nixcage runs one systemd-nspawn container per project. A project is any flake
 directory with a `devShells.default` located under a configured workspace
-root; `nixcage enter` runs that devShell inside the project's container. The
-VM backend is [microvm.nix](https://github.com/astro/microvm.nix) (qemu on
-both platforms). The primary use case is running AI coding agents in VM-level
-isolation from the host, with a container boundary between projects.
+root; `nixcage enter` runs that devShell inside the project's container.
 
-There is no process-level sandboxing on the host. The VM boundary isolates
-everything from the host; the container boundary isolates projects from each
-other. See `docs/ADR-002-shared-vm-project-containers.md` for the rationale.
+On Linux the containers run natively on the host (container boundary between
+projects and toward the host). On macOS, which has no containers, they run in
+one shared NixOS microVM ([microvm.nix](https://github.com/astro/microvm.nix),
+qemu) that provides the Linux kernel and adds a VM boundary toward the host.
+The primary use case is running AI coding agents in isolation. See
+`docs/ADR-002-shared-vm-project-containers.md` and
+`docs/ADR-003-native-containers-on-linux.md` for the rationale.
 
 ## 2. Requirements
 
@@ -41,6 +41,21 @@ The guest is always Linux. On macOS hosts the runner is a Darwin-native qemu
 (`microvm.vmHostPackages`), set in the user's config flake template.
 
 ## 3. Configuration
+
+### 3.0 Linux: the host module
+
+On Linux there is no VM and no config flake. `nixosModules.host` is imported
+into the host's NixOS configuration; it declares `nixcage.workspaceRoots` and
+`nixcage.secretEnv`, installs `nixcage-container` and the container profile,
+and renders `/etc/nixcage/config` (`WORKSPACE_ROOTS=a:b`) for the CLI
+(override path with `NIXCAGE_HOST_CONFIG`, used by tests). Containers bind
+the host store read-only and build through the host nix-daemon; `secretEnv`
+resolves against the host's own sops-nix `/run/secrets`. The CLI commands on
+Linux are `enter`, `rm`, and `status`, executing `sudo nixcage-container`
+locally; `rebuild` and `down` fail pointing at `nixos-rebuild`. `NIXCAGE_OS`
+overrides OS detection for tests only.
+
+Sections 3.1-3.3 below apply to macOS.
 
 ### 3.1 The config flake
 
