@@ -123,7 +123,7 @@ let
         systemd-nspawn --quiet --register=no \
           --directory="$rootfs" \
           --machine="$name" \
-          --restrict-address-families=AF_UNIX,AF_INET,AF_INET6,AF_NETLINK \
+          --restrict-address-families="AF_UNIX AF_INET AF_INET6 AF_NETLINK" \
           --bind-ro=/nix/store \
           --bind-ro=/nix/var/nix/db \
           --bind=/nix/var/nix/daemon-socket \
