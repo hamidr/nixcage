@@ -8,21 +8,24 @@ purely to provide a Linux kernel (and adds VM-level isolation from the host).
 
 ## How it works
 
+On Linux, `nixcage enter` runs the container on the host directly. On macOS
+there are no containers, so the same container runs inside a shared NixOS
+microVM reached over SSH:
+
 ```
 nixcage enter                 (from any flake dir under a workspace root)
      |
-     +-- VM not running? --> boot the shared VM (qemu, microvm.nix)
+     +-- Linux: run the container on the host
      |
+     +-- macOS: VM not running? --> boot the shared VM (qemu, microvm.nix)
+     |          then SSH into it
      v
-SSH into the VM
-     |
-     v
-+---------------[VM boundary]----------------+
++----------[host, or the VM on macOS]--------+
 |                                            |
-|  /nix/store        VM-owned, never the     |
-|                    host store              |
-|  ~/Src             workspace roots,        |
-|                    mounted once            |
+|  /nix/store        the host's store on     |
+|                    Linux, the VM's on      |
+|                    macOS                   |
+|  ~/Src             workspace roots         |
 |                                            |
 |  +------[container: this project]-------+  |
 |  |                                      |  |
@@ -36,10 +39,10 @@ SSH into the VM
 +--------------------------------------------+
 ```
 
-The VM boots once and serves every project. Each `nixcage enter` runs
-`nix develop` inside a systemd-nspawn container that sees only its own project
-directory, its own persistent home, and the VM's Nix store read-only. The first
-enter per project builds the devShell inside the VM; later enters hit the cache.
+Each `nixcage enter` runs `nix develop` inside a systemd-nspawn container that
+sees only its own project directory, its own persistent home, and the Nix store
+read-only. The first enter per project builds the devShell; later enters hit the
+cache. On macOS the VM boots once and serves every project.
 
 ## Install
 
@@ -64,7 +67,7 @@ nixcage = {
 ```
 
 `nixos-rebuild switch` applies it; the CLI is just `enter`, `rm`, and
-`status` (`rebuild`/`down` are macOS-only -- the host owns the lifecycle).
+`status` (plus `version`; `rebuild`/`down` are macOS-only -- the host owns the lifecycle).
 Containers use the host store read-only plus the host nix-daemon.
 
 ## Configuration on macOS
@@ -85,7 +88,8 @@ nixcage = {
   ## The key printed by 'nixcage status' on first run.
   authorizedKeys = [ "ssh-ed25519 AAAA..." ];
 
-  ## macOS hosts need 9p (virtiofsd is Linux-only).
+  ## 9p is the default and the only protocol that works on a macOS host;
+  ## virtiofs needs virtiofsd, which is Linux-only.
   # shareProto = "9p";
 
   ## Environment variables injected into every container session,
@@ -116,13 +120,18 @@ devShell (see `examples/project/`). nixcage installs nothing into containers.
 
 | Command | Description |
 |---|---|
-| `nixcage enter [-- cmd]` | Enter this project's container (auto-starts the VM); with a command, run it non-interactively |
-| `nixcage down` | Stop the VM |
-| `nixcage rebuild` | Rebuild from the config flake and restart the VM |
+| `nixcage enter [-- cmd]` | Enter this project's container (on macOS, auto-starts the VM); with a command, run it non-interactively |
 | `nixcage rm [name]` | Delete a project's container and persistent home |
-| `nixcage status` | VM state, containers, age public key |
+| `nixcage status` | Configuration in use, containers, and on macOS the VM state and age public key |
+| `nixcage down` | Stop the VM (macOS only) |
+| `nixcage rebuild` | Rebuild from the config flake and restart the VM (macOS only) |
+| `nixcage version` | Print the version |
 
 ## Secrets
+
+On Linux, secrets come from the host's own sops-nix setup: declare
+`nixcage.secretEnv` next to your existing `sops.secrets` and rebuild. The steps
+below are the macOS path, where the VM owns the key.
 
 Secrets go through [sops-nix](https://github.com/Mic92/sops-nix), declared in
 your config flake; the host environment is never read.
@@ -176,8 +185,11 @@ another terminal during the build.
 1.x gave every project its own VM configured by `nixcage.vm.nix`. That model is
 gone. In each old project: stop the VM, delete `nixcage.vm.nix` and
 `.nixcage-vm/`, and drop the `.nixcage-vm/` line from `.gitignore`. Remove the
-shell hook block from your `~/.zshrc` / `~/.bashrc` -- 2.x has no hook. Then
-set up the config flake as above.
+shell hook block from your `~/.zshrc` / `~/.bashrc` -- 3.x has no hook. Then
+set up the host module (Linux) or the config flake (macOS) as above.
+
+Nothing carries over from a 1.x VM: the containers, their persistent homes, and
+the age key are all created fresh.
 
 ## License
 
