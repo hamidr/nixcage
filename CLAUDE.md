@@ -8,8 +8,8 @@ nixcage is a single-file Bash tool that runs one systemd-nspawn container per
 project. On Linux the containers run natively on the host (config via
 `nixosModules.host` in the host's NixOS configuration). On macOS they run in
 one shared NixOS microVM (microvm.nix + qemu) that exists to provide a Linux
-kernel. A project is any flake directory with `devShells.default` under a
-configured workspace root -- there are no nixcage-specific files in projects.
+kernel. A project is any flake directory under a
+configured workspace root (`devShells.default` is optional; see ADR-005) -- there are no nixcage-specific files in projects.
 The primary use case is running AI coding agents in isolation. Architecture:
 `docs/ADR-002-shared-vm-project-containers.md` and
 `docs/ADR-003-native-containers-on-linux.md`.
@@ -21,6 +21,9 @@ The primary use case is running AI coding agents in isolation. Architecture:
 - `modules/container.nix` -- the shared container layer: the minimal userland
   profile and the `nixcage-container` script owning all nspawn mechanics.
   Used unchanged by both platform modules.
+- `modules/dev-shell.sh` -- guest-side environment selection, sourced into the
+  session by store path. A shell file rather than an inline string so
+  shellcheck reads it and bats sources it.
 - `modules/nixcage.nix` -- the VM module (macOS path): nixcage options
   (`workspaceRoots`, `authorizedKeys`, `sshPort`, `shareProto`, `secretEnv`,
   `vm.*`) and the VM base config.

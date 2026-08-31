@@ -118,13 +118,14 @@ let
         # shellcheck disable=SC2064
         trap "rm -rf '$rootfs'" EXIT
 
-        local shell_cmd=". /etc/nixcage-env 2>/dev/null || true; "
-        if [ "$#" -gt 0 ]; then
-          shell_cmd="''${shell_cmd}exec nix develop --command \"\$@\""
-          set -- placeholder "$@"
-        else
-          shell_cmd="''${shell_cmd}exec nix develop"
-        fi
+        ## The environment is chosen inside the container, where the project
+        ## is actually bound; the library is referenced by store path because
+        ## the store is bound read-only there. bash -c consumes the first
+        ## argument as $0, so a placeholder always precedes the user command.
+        local shell_cmd=". /etc/nixcage-env 2>/dev/null || true; \
+          . ${./dev-shell.sh}; \
+          nixcage_enter_shell \"\$@\""
+        set -- placeholder "$@"
 
         write_secret_env "$rootfs/etc/nixcage-env"
         ## Everything the skeleton contains was created by root and would
