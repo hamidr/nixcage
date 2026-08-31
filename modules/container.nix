@@ -15,6 +15,10 @@ let
       nix
       git
       cacert
+      ## A project that declares its environment in .envrc is entered through
+      ## direnv rather than nix develop, so direnv is part of the userland
+      ## every session gets.
+      direnv
     ];
   };
 
@@ -148,6 +152,7 @@ let
           --setenv=NIX_REMOTE=daemon \
           --setenv=NIX_CONFIG='experimental-features = nix-command flakes' \
           --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt" \
+          --setenv=NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc" \
           --setenv=TERM="''${TERM:-xterm}" \
           "$PROFILE/bin/bash" -c "$shell_cmd" "$@"
       }

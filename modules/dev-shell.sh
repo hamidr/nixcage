@@ -47,8 +47,48 @@ nixcage_has_dev_shell() {
 ## workspace root defines a shell. The fallback is announced, and a flake
 ## that failed to evaluate is never given one -- that is a defect to fix, not
 ## an environment to substitute.
+## Point direnv at nix-direnv's stdlib, which caches the devShell profile and
+## keeps a gcroot on it. Without it every entry re-evaluates the flake and the
+## VM's weekly collection drops the closure between sessions. The home is
+## persistent, so this is written once and then confirmed cheaply.
+nixcage_seed_direnvrc() {
+	local rc="$HOME/.config/direnv/direnvrc" line="source $NIXCAGE_DIRENVRC"
+	[ -n "${NIXCAGE_DIRENVRC:-}" ] || return 0
+	if [ ! -f "$rc" ] || ! grep -qF "$line" "$rc"; then
+		mkdir -p "$(dirname "$rc")"
+		echo "$line" >>"$rc"
+	fi
+}
+
+## Enter the project through its own .envrc, as the host shell would.
+##
+## direnv refuses an .envrc it has not been told to trust, and there is nobody
+## to ask inside a container. Granting it here is the same bargain the
+## container itself makes: the session was opened on this project deliberately,
+## and the .envrc can reach nothing the session could not already reach.
+nixcage_enter_direnv() {
+	local project="$1"
+	shift
+	nixcage_seed_direnvrc
+	direnv allow "$project"
+	if [ "$#" -gt 0 ]; then
+		exec direnv exec "$project" "$@"
+	fi
+	exec direnv exec "$project" bash
+}
+
 nixcage_enter_shell() {
-	nixcage_has_dev_shell /workspace
+	local project="${NIXCAGE_PROJECT:-/workspace}"
+
+	## An .envrc is the project saying what its environment is, so it wins over
+	## the devShell probe -- which is usually the same answer, since most of
+	## these files are one 'use flake' line.
+	if [ -f "$project/.envrc" ]; then
+		nixcage_enter_direnv "$project" "$@"
+		return
+	fi
+
+	nixcage_has_dev_shell "$project"
 	case $? in
 	0)
 		if [ "$#" -gt 0 ]; then
@@ -64,7 +104,7 @@ nixcage_enter_shell() {
 		exec bash
 		;;
 	*)
-		echo "nixcage: the flake in /workspace failed to evaluate; see the error above" >&2
+		echo "nixcage: the project flake failed to evaluate; see the error above" >&2
 		return 1
 		;;
 	esac

@@ -22,8 +22,9 @@ The primary use case is running AI coding agents in isolation. Architecture:
   profile and the `nixcage-container` script owning all nspawn mechanics.
   Used unchanged by both platform modules.
 - `modules/dev-shell.sh` -- guest-side environment selection, sourced into the
-  session by store path. A shell file rather than an inline string so
-  shellcheck reads it and bats sources it.
+  session by store path: direnv when the project has an `.envrc`, else the
+  devShell, else the base userland. A shell file rather than an inline string
+  so shellcheck reads it and bats sources it.
 - `modules/nixcage.nix` -- the VM module (macOS path): nixcage options
   (`workspaceRoots`, `authorizedKeys`, `sshPort`, `shareProto`, `secretEnv`,
   `vm.*`) and the VM base config.
