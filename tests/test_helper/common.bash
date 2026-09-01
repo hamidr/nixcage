@@ -25,6 +25,9 @@ setup_temp_dir() {
 	export NIXCAGE_OS=macos
 	export XDG_STATE_HOME="$TEST_TEMP_DIR/state"
 	export NIXCAGE_FLAKE="$TEST_TEMP_DIR/config"
+	# An agent inherited from the machine running the suite would make the
+	# forwarding tests depend on the developer's own session.
+	unset SSH_AUTH_SOCK
 	mkdir -p "$XDG_STATE_HOME/nixcage" "$NIXCAGE_FLAKE"
 }
 

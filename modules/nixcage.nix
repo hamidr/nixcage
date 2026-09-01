@@ -63,6 +63,36 @@ in
       '';
     };
 
+    git = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          userName = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "Ada Lovelace";
+            description = "Committer name every session uses. No identity is rendered unless both this and userEmail are set.";
+          };
+          userEmail = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "ada@example.org";
+            description = "Committer email every session uses.";
+          };
+          signing.enable = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = ''
+              Sign commits and tags through the ssh-agent the CLI forwards
+              into the session. No key material is copied in, and a session
+              entered without a reachable agent simply fails to sign.
+            '';
+          };
+        };
+      };
+      default = { };
+      description = "Git identity and signing for container sessions.";
+    };
+
     vm = {
       cpus = lib.mkOption {
         type = lib.types.ints.positive;
@@ -145,6 +175,14 @@ in
       pkgs.git
       pkgs.age
     ];
+
+    ## Rendered only when an identity exists: an incomplete gitconfig would
+    ## replace git's own "who are you" error with a stranger one.
+    environment.etc."nixcage/gitconfig" =
+      lib.mkIf (cfg.git.userName != null && cfg.git.userEmail != null)
+        {
+          text = container.gitConfigText cfg.git;
+        };
 
     environment.etc."nixcage/profile".source = container.profile;
     environment.etc."nixcage/secret-env".text = lib.concatStrings (

@@ -30,10 +30,10 @@ The primary use case is running AI coding agents in isolation. Architecture:
   file for the same reason `dev-shell.sh` is one.
 - `modules/nixcage.nix` -- the VM module (macOS path): nixcage options
   (`workspaceRoots`, `authorizedKeys`, `sshPort`, `shareProto`, `secretEnv`,
-  `vm.*`) and the VM base config.
-- `modules/host.nix` -- the Linux host module: `workspaceRoots` + `secretEnv`
-  options, renders `/etc/nixcage/config` for the CLI, installs the container
-  layer on the host.
+  `git.*`, `vm.*`) and the VM base config.
+- `modules/host.nix` -- the Linux host module: `workspaceRoots`, `secretEnv`
+  and `git.*` options, renders `/etc/nixcage/config` for the CLI, installs the
+  container layer on the host.
 - `templates/config/` -- the flake template users instantiate at
   `~/.config/nixcage` (their VM configuration; sops-nix wired in).
 - `examples/project/` -- an ordinary project flake showing the devShell
@@ -95,7 +95,11 @@ and the persistent home at `/root`, then execs `nix develop`.
 project bind, but a linked worktree keeps its git directory inside the primary
 repository: `nixcage_git_binds` (`modules/git-worktree.sh`) resolves the
 administrative and common directories and they are bound at the exact path git
-recorded (ADR-007).
+recorded (ADR-007). Identity comes from `nixcage.git.{userName,userEmail}`
+rendered to `/etc/nixcage/gitconfig`, and signing goes through the user's
+ssh-agent: `enter` forwards `SSH_AUTH_SOCK` (`ssh -A` on macOS, an explicit
+`--auth-sock` past sudo on Linux) and the guest binds it at
+`/run/ssh-agent.sock`. No key material enters a container (ADR-008).
 
 **Secrets** -- sops-nix in the user's config flake; age key generated on the
 VM data volume at first boot; `nixcage.secretEnv` maps env vars to secret

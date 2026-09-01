@@ -404,9 +404,18 @@ cmd_enter() {
   # Accept both 'enter -- cmd...' and 'enter cmd...'.
   [[ "${1:-}" == "--" ]] && shift
 
+  # A session signs its commits through the invoking user's ssh-agent, so
+  # the socket is forwarded rather than any key material being copied in.
+  # Without a reachable agent the session still enters and only signing
+  # fails, which is the same outcome as running git with no key.
+  local -a agent_fwd=()
+  if [[ -n "${SSH_AUTH_SOCK:-}" && -e "${SSH_AUTH_SOCK}" ]]; then
+    agent_fwd=(--auth-sock "$SSH_AUTH_SOCK")
+  fi
+
   if [[ "$OS" == "linux" ]]; then
     [[ $# -eq 0 ]] && log_info "Entering container $name..."
-    sudo nixcage-container enter "$name" "$project_dir" "$@"
+    sudo nixcage-container enter "${agent_fwd[@]}" "$name" "$project_dir" "$@"
     return
   fi
 
@@ -415,6 +424,14 @@ cmd_enter() {
   # Everything in the remote command is re-split by the remote shell, so
   # every word gets %q, not just the trailing command arguments.
   local remote=(sudo nixcage-container enter)
+  # The forwarded socket lives in the VM and is named by the remote shell,
+  # so the expansion is deliberately left for it to perform.
+  local -a ssh_fwd=()
+  if [[ ${#agent_fwd[@]} -gt 0 ]]; then
+    ssh_fwd=(-A)
+    # shellcheck disable=SC2016  # the remote shell performs this expansion
+    remote+=(--auth-sock '"$SSH_AUTH_SOCK"')
+  fi
   remote+=("$(printf '%q' "$name")" "$(printf '%q' "$project_dir")")
   local arg
   for arg in "$@"; do
@@ -423,9 +440,9 @@ cmd_enter() {
 
   if [[ $# -eq 0 ]]; then
     log_info "Entering container $name..."
-    vm_ssh -t -- "${remote[@]}"
+    vm_ssh "${ssh_fwd[@]}" -t -- "${remote[@]}"
   else
-    vm_ssh -- "${remote[@]}"
+    vm_ssh "${ssh_fwd[@]}" -- "${remote[@]}"
   fi
 }
 

@@ -43,3 +43,33 @@ EOF
 	# The path must appear in shell-quoted form, not as bare words.
 	[[ "$output" == *"work\\ space/proj"* || "$output" == *"'$root/proj'"* ]]
 }
+
+@test "remote enter forwards the agent and lets the VM name its own socket" {
+	root="$TEST_TEMP_DIR/src"
+	mkdir -p "$root/proj"
+	touch "$root/proj/flake.nix"
+	write_cache 22022 "$root"
+	touch "$TEST_TEMP_DIR/agent.sock"
+	export SSH_AUTH_SOCK="$TEST_TEMP_DIR/agent.sock"
+	cd "$root/proj"
+	run_nixcage enter -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/ssh-calls"
+	# -A forwards the agent; the socket path is the VM's, so it stays
+	# unexpanded here and is resolved by the remote shell.
+	[[ "$output" == *" -A "* ]]
+	[[ "$output" == *'--auth-sock "$SSH_AUTH_SOCK"'* ]]
+}
+
+@test "remote enter does not forward an agent that does not exist" {
+	root="$TEST_TEMP_DIR/src"
+	mkdir -p "$root/proj"
+	touch "$root/proj/flake.nix"
+	write_cache 22022 "$root"
+	cd "$root/proj"
+	run_nixcage enter -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/ssh-calls"
+	[[ "$output" != *" -A "* ]]
+	[[ "$output" != *--auth-sock* ]]
+}

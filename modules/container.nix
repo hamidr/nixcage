@@ -19,6 +19,9 @@ let
       ## direnv rather than nix develop, so direnv is part of the userland
       ## every session gets.
       direnv
+      ## ssh-keygen signs commits and ssh-add names the key to sign with;
+      ## both talk to the forwarded agent rather than to any key on disk.
+      openssh
     ];
   };
 
@@ -100,6 +103,19 @@ let
       }
 
       cmd_enter() {
+        ## Options precede the positional arguments so a session command can
+        ## still be anything at all.
+        local auth_sock=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+          --auth-sock)
+            auth_sock="''${2:-}"
+            shift 2
+            ;;
+          *) break ;;
+          esac
+        done
+
         local name="$1" project="$2"
         shift 2
         check_name "$name"
@@ -149,6 +165,31 @@ let
           nixcage_enter_shell \"\$@\""
         set -- placeholder "$@"
 
+        ## Git identity, rendered by the platform module from nixcage.git.
+        ## Absent when the user declared none, in which case git behaves as
+        ## it does anywhere else without an identity.
+        if [ -f /etc/nixcage/gitconfig ]; then
+          cp /etc/nixcage/gitconfig "$rootfs/etc/gitconfig"
+        fi
+
+        ## Commits are signed through the invoking user's agent: the socket
+        ## is forwarded in, no key material is. The container is mapped onto
+        ## the project owner, so the socket has to be reachable by that uid
+        ## rather than by whoever forwarded it.
+        local -a agent_bind=()
+        if [ -n "$auth_sock" ]; then
+          if [ -S "$auth_sock" ]; then
+            chown "$owner_uid:$owner_gid" "$auth_sock"
+            : >"$rootfs/run/ssh-agent.sock"
+            agent_bind=(
+              "--bind=$auth_sock:/run/ssh-agent.sock"
+              "--setenv=SSH_AUTH_SOCK=/run/ssh-agent.sock"
+            )
+          else
+            echo "nixcage-container: no agent socket at $auth_sock; commits cannot be signed" >&2
+          fi
+        fi
+
         write_secret_env "$rootfs/etc/nixcage-env"
         ## Everything the skeleton contains was created by root and would
         ## otherwise appear as an unmapped nobody inside the container.
@@ -165,6 +206,7 @@ let
           --bind="$project:/workspace" \
           --bind="$home:/root" \
           ''${git_binds[@]+"''${git_binds[@]}"} \
+          ''${agent_bind[@]+"''${agent_bind[@]}"} \
           --chdir=/workspace \
           --setenv=HOME=/root \
           --setenv=PATH="$PROFILE/bin" \
@@ -197,8 +239,31 @@ let
       esac
     '';
   };
+  ## The git configuration a session sees, rendered from nixcage.git by
+  ## whichever platform module is in use. Signing goes through the agent the
+  ## CLI forwards, so no key is named here: with user.signingKey unset git
+  ## calls gpg.ssh.defaultKeyCommand and signs with the first agent key.
+  gitConfigText =
+    git:
+    ''
+      [user]
+        name = ${git.userName}
+        email = ${git.userEmail}
+    ''
+    + pkgs.lib.optionalString git.signing.enable ''
+      [gpg]
+        format = ssh
+      [gpg "ssh"]
+        program = ${pkgs.openssh}/bin/ssh-keygen
+        defaultKeyCommand = ssh-add -L
+      [commit]
+        gpgsign = true
+      [tag]
+        gpgsign = true
+    '';
 in
 {
   profile = containerProfile;
   script = nixcageContainer;
+  inherit gitConfigText;
 }

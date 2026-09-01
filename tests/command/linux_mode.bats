@@ -87,3 +87,40 @@ write_host_config() {
 	[[ "$output" != *"Built:"* ]]
 	[[ "$output" != *"SSH port:"* ]]
 }
+
+@test "enter forwards the ssh agent socket when one is available" {
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	touch "$TEST_TEMP_DIR/src/proj/flake.nix"
+	# A plain file stands in for the socket: the CLI only checks it exists.
+	touch "$TEST_TEMP_DIR/agent.sock"
+	export SSH_AUTH_SOCK="$TEST_TEMP_DIR/agent.sock"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/sudo-calls"
+	[[ "$output" == *"--auth-sock $TEST_TEMP_DIR/agent.sock"* ]]
+}
+
+@test "enter omits the agent socket when no agent is running" {
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	touch "$TEST_TEMP_DIR/src/proj/flake.nix"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/sudo-calls"
+	[[ "$output" != *--auth-sock* ]]
+}
+
+@test "enter omits the agent socket when SSH_AUTH_SOCK points nowhere" {
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	touch "$TEST_TEMP_DIR/src/proj/flake.nix"
+	export SSH_AUTH_SOCK="$TEST_TEMP_DIR/gone.sock"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/sudo-calls"
+	[[ "$output" != *--auth-sock* ]]
+}
