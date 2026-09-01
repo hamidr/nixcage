@@ -50,16 +50,17 @@ they lack is a place to leave each other a message.
    that project and what it has already seen.
 4. A request sent to another project can be answered, and the answer found by
    whoever asked.
-5. Nothing runs unattended. No message causes work to happen that the operator
-   did not start.
+5. The mailbox never executes. No message causes work to happen by itself; only
+   a party outside the mailbox, under the operator's policy, can act on one.
 
 ## Non-goals
 
-- **Autonomous actors.** No process wakes on delivery, no headless session
-  drains a mailbox, no daemon runs between sessions. Delivery means the message
-  is waiting the next time a human enters the project. This is deliberate: an
-  agent that can start work in another project turns a mail bug into unattended
-  token spend.
+- **Dispatch.** The mailbox starts nothing. No process wakes on delivery, no
+  session drains a mailbox, no daemon runs between sessions. A message is data
+  that waits until something outside the mailbox acts on it, whether that is a
+  human entering the project or the supervisor in PRD-002. This is deliberate:
+  a channel that also executes turns a mail bug into unattended token spend, and
+  keeping the two apart is what lets dispatch be governed on its own terms.
 - **Ability transfer.** An actor cannot grant another actor a capability, tool,
   or skill it did not have. Messages carry information and requests, never
   executable authority. A grant model needs revocation and an ownership model,
@@ -83,7 +84,7 @@ they lack is a place to leave each other a message.
   the receiver's machine rebooting, and a `nixcage rebuild`.
 - Over a week of ordinary use, the operator stops keeping a scratch list of
   "things to tell the other project".
-- No message ever causes a session to start.
+- No session is ever started by the mailbox itself.
 
 ## Requirements
 
@@ -124,6 +125,15 @@ they lack is a place to leave each other a message.
 - An unanswered request stays unanswered forever and is not distinguishable
   from one that was seen and ignored. This is a known limitation of the
   request/reply pair; see open questions.
+
+### Requests the operator must satisfy
+
+- An agent can address a request to the operator for the things a cage cannot
+  reach on its own: a tool in the shared container profile, a secret mapping, a
+  new workspace root, VM sizing. Everything else it installs itself through its
+  project's own flake or `.envrc`, which needs nothing from this system.
+- Such a request is an ordinary message. The mailbox does not apply it, and
+  neither does anything else automatically.
 
 ### Shared findings
 
@@ -167,15 +177,17 @@ they lack is a place to leave each other a message.
   reading text written by another agent. Treating that text as an instruction
   rather than as data is the obvious failure mode, and the guidance the agent
   receives has to address it.
-- **Silent drop.** Because nothing runs unattended, a message to a project the
-  operator does not open is never seen. The design accepts this; the operator
+- **Silent drop.** Because the mailbox starts nothing, a message to a project
+  that nobody and nothing opens is never seen. The design accepts this; the operator
   needs a way to notice it.
 
 ## Open questions
 
 - How does the operator learn that a project has mail without entering it?
-  A host-side listing of every actor's unread count would answer it; whether
-  that is enough is unknown until the tool is used.
+  A host-side listing of every actor's unread count is the minimum. A terminal
+  multiplexer showing every session at once is the likely answer, and herdr
+  0.8.0 accepts externally reported per-pane state, which is verified to work.
+  Whether the unread count belongs there or in a plain listing is still open.
 - Should a request carry a status beyond answered/unanswered? The
   request/reply pair was chosen for simplicity, and the cost is that "not
   looked at" and "refused" look identical. Revisit after real use.
@@ -183,7 +195,10 @@ they lack is a place to leave each other a message.
   flat stream with subjects enough at the volume one operator produces?
 - Is one mailbox per project the right granularity, or will roles within a
   project (reviewer, builder) be wanted? Deferred, but the addressing choice
-  should not make it impossible.
+  should not make it impossible. Git worktrees press on this: tools that give
+  each parallel agent its own worktree make every worktree a separate project
+  path, so actors become numerous and short-lived, and mail addressed to a
+  removed one has nowhere to go.
 
 ## Phases
 

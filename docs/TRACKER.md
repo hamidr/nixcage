@@ -6,7 +6,7 @@ document, then regenerate.
 
 **Generated:** 2026-09-01
 
-**Next PRD number:** 002
+**Next PRD number:** 003
 
 **Next ADR number:** 009
 
@@ -15,6 +15,7 @@ document, then regenerate.
 | # | Title | Status | Phases | Depends On | Summary | Flags |
 | --- | --- | --- | --- | --- | --- | --- |
 | [PRD-001](PRD-001-actor-mailbox.md) | A mailbox that lets project containers exchange messages | proposed | 0/4 | -- | give each project actor a durable mailbox so agents in separate containers can signal, delegate, and share findings |  |
+| [PRD-002](PRD-002-autonomous-workflow-supervisor.md) | A supervisor that runs declared workflows across cages | proposed | 0/5 | PRD-001 | declared workflows dispatch caged agent runs under gates and caps, so runs start without a human |  |
 
 ## ADRs
 
