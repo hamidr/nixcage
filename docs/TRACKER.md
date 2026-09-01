@@ -4,11 +4,17 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-08-31
+**Generated:** 2026-09-01
 
-**Next PRD number:** 001
+**Next PRD number:** 002
 
 **Next ADR number:** 007
+
+## PRDs
+
+| # | Title | Status | Phases | Depends On | Summary | Flags |
+| --- | --- | --- | --- | --- | --- | --- |
+| [PRD-001](PRD-001-actor-mailbox.md) | A mailbox that lets project containers exchange messages | proposed | 0/4 | -- | give each project actor a durable mailbox so agents in separate containers can signal, delegate, and share findings |  |
 
 ## ADRs
 
