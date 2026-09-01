@@ -148,6 +148,13 @@ result, with the operator setting the policy instead of executing it.
 ## Constraints
 
 - Dispatch, waiting, and gating all happen on the host, outside every cage.
+- The supervisor assumes no particular coding agent. Which agent a project runs
+  is a property of that project's own devShell, not of nixcage or of a
+  workflow, so a run is described by the command it starts and by the lifecycle
+  state that command's session reports.
+- An agent that accumulates its own skills or extensions does so inside the
+  cage's persistent home, which is that actor's private state. The supervisor
+  treats it as opaque: it neither reads it, seeds it, nor reasons about it.
 - The supervisor runs inside its own terminal-multiplexer session rather than a
   stray shell, because the multiplexer's own contract forbids controlling a
   session from outside it.
@@ -181,8 +188,11 @@ result, with the operator setting the policy instead of executing it.
 
 - What unit is the budget measured in, and where does the measurement come
   from? Runs and wall-clock are observable from outside the cage; tokens and
-  cost are not, unless the agent reports them. Without an answer, budget
-  degrades to a run count.
+  cost are not, unless the agent reports them. An agent offering a structured
+  event stream or an RPC channel could supply them, which would make the
+  allowance real rather than a run count. Since the agent is a per-project
+  choice, the budget mechanism has to work with whatever a project runs, and
+  degrade to a run count when nothing better is available.
 - Should an unanswered gate ever expire, and into what -- rejection, or an
   indefinite hold that the operator prunes by hand?
 - Where does a run's output land? A branch in the project, a worktree of its
