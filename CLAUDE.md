@@ -25,6 +25,9 @@ The primary use case is running AI coding agents in isolation. Architecture:
   session by store path: direnv when the project has an `.envrc`, else the
   devShell, else the base userland. A shell file rather than an inline string
   so shellcheck reads it and bats sources it.
+- `modules/git-worktree.sh` -- resolution of the git directories a linked
+  worktree points at, sourced by store path into `nixcage-container`. A shell
+  file for the same reason `dev-shell.sh` is one.
 - `modules/nixcage.nix` -- the VM module (macOS path): nixcage options
   (`workspaceRoots`, `authorizedKeys`, `sshPort`, `shareProto`, `secretEnv`,
   `vm.*`) and the VM base config.
@@ -87,6 +90,12 @@ session it builds a throwaway rootfs skeleton (nspawn locks its directory,
 so concurrent sessions need separate ones), binds the store read-only plus
 the nix-daemon socket (`NIX_REMOTE=daemon`), the project dir at `/workspace`,
 and the persistent home at `/root`, then execs `nix develop`.
+
+**Git in a session** -- an ordinary repository needs nothing beyond the
+project bind, but a linked worktree keeps its git directory inside the primary
+repository: `nixcage_git_binds` (`modules/git-worktree.sh`) resolves the
+administrative and common directories and they are bound at the exact path git
+recorded (ADR-007).
 
 **Secrets** -- sops-nix in the user's config flake; age key generated on the
 VM data volume at first boot; `nixcage.secretEnv` maps env vars to secret

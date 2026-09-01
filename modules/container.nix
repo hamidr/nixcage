@@ -33,6 +33,10 @@ let
       gnugrep
     ];
     text = ''
+      ## Sourced by store path: the file is a real shell file so shellcheck
+      ## and the bats suite can read it, and the store is available here.
+      . ${./git-worktree.sh}
+
       STATE_DIR=/var/lib/nixcage
       ## Resolve the /etc symlink to its store path: the container has its
       ## own /etc, but the store bind makes store paths valid inside.
@@ -108,6 +112,20 @@ let
         owner_uid="$(stat -c %u "$project")"
         owner_gid="$(stat -c %g "$project")"
 
+        ## A linked git worktree keeps its git directory inside the primary
+        ## repository, which the project bind does not cover; without these
+        ## binds every git command in the session fails outright. The paths
+        ## are bound at the spelling git itself recorded, so its own pointers
+        ## resolve unchanged inside the container.
+        local -a git_binds=()
+        local git_dirs git_dir
+        git_dirs="$(nixcage_git_binds "$project")" ||
+          die "cannot resolve the git directory of $project"
+        while IFS= read -r git_dir; do
+          [ -n "$git_dir" ] || continue
+          git_binds+=("--bind=$git_dir")
+        done <<<"$git_dirs"
+
         local cdir="$STATE_DIR/containers/$name"
         local home="$STATE_DIR/homes/$name"
         mkdir -p "$cdir" "$home"
@@ -146,6 +164,7 @@ let
           --bind=/nix/var/nix/daemon-socket \
           --bind="$project:/workspace" \
           --bind="$home:/root" \
+          ''${git_binds[@]+"''${git_binds[@]}"} \
           --chdir=/workspace \
           --setenv=HOME=/root \
           --setenv=PATH="$PROFILE/bin" \
