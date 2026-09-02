@@ -4,7 +4,7 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-09-01
+**Generated:** 2026-09-02
 
 **Next PRD number:** 003
 
