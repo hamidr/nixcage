@@ -2,3 +2,4 @@ result
 result-*
 .direnv/
 .DS_Store
+templates/config/flake.lock

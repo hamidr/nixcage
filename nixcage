@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-NIXCAGE_VERSION="3.1.0"
+NIXCAGE_VERSION="4.0.0"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -122,6 +122,22 @@ vm_read_cache() {
 
 vm_pid_file() { echo "$STATE_DIR/vm.pid"; }
 vm_virtiofsd_pid_file() { echo "$STATE_DIR/virtiofsd.pid"; }
+
+# How long to wait for the guest to shut itself down before signalling qemu,
+# and then for qemu to exit before killing it. Overridable because the test
+# suite drives them with stubs and must not sit out the real waits.
+VM_SHUTDOWN_TIMEOUT="${NIXCAGE_SHUTDOWN_TIMEOUT:-30}"
+VM_KILL_TIMEOUT="${NIXCAGE_KILL_TIMEOUT:-10}"
+
+# Wait up to $2 seconds for process $1 to disappear. Answers whether it did.
+vm_wait_for_exit() {
+  local pid="$1" deadline=$((SECONDS + $2))
+  while [[ $SECONDS -lt $deadline ]]; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 1
+  done
+  ! kill -0 "$pid" 2>/dev/null
+}
 
 # The pid must both be alive and still look like the VM runner: after a
 # host reboot the state file survives and the pid can be reused by an
@@ -446,6 +462,54 @@ cmd_enter() {
   fi
 }
 
+## Run a command as root wherever this machine's cages are: here on Linux,
+## and inside the shared VM on macOS. Exported because everything nixcage
+## builds a session for lives on that side of the transport, and a dependant
+## that had to reach it itself would need this machine's SSH key, its port and
+## the layout of nixcage's own state.
+##
+## It is not a shell. Every word arrives as one argument, and on macOS every
+## word is quoted for the remote shell, which re-splits the whole line rather
+## than only the trailing arguments.
+cmd_exec() {
+  local tty="" agent=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --tty) tty=1; shift ;;
+    --agent) agent=1; shift ;;
+    --) shift; break ;;
+    *) break ;;
+    esac
+  done
+
+  if [[ $# -eq 0 ]]; then
+    log_err "usage: nixcage exec [--tty] [--agent] -- <command> [args...]"
+    exit 1
+  fi
+
+  # sudo clears the environment, so the forwarded socket has to be carried
+  # across it by name. The command reads SSH_AUTH_SOCK from its own
+  # environment rather than being handed a path: on macOS the path is the
+  # VM's, which nothing on this side can spell.
+  local -a sudo_opts=()
+  [[ -n "$agent" ]] && sudo_opts=(--preserve-env=SSH_AUTH_SOCK)
+
+  if [[ "$OS" == "linux" ]]; then
+    sudo "${sudo_opts[@]}" "$@"
+    return
+  fi
+
+  ensure_vm
+
+  local remote=(sudo "${sudo_opts[@]}") arg
+  local -a ssh_opts=()
+  [[ -n "$agent" ]] && ssh_opts+=(-A)
+  [[ -n "$tty" ]] && ssh_opts+=(-t)
+  for arg in "$@"; do
+    remote+=("$(printf '%q' "$arg")")
+  done
+  vm_ssh "${ssh_opts[@]}" -- "${remote[@]}"
+}
 require_vm_platform() {
   if [[ "$OS" == "linux" ]]; then
     log_err "No VM on Linux -- containers run on the host."
@@ -465,18 +529,26 @@ cmd_down() {
   local pid
   pid="$(cat "$(vm_pid_file)")"
 
-  log_info "Stopping VM (pid $pid)..."
-  kill "$pid" 2>/dev/null || true
+  log_info "Shutting the VM down (pid $pid)..."
 
-  local deadline=$((SECONDS + 10))
-  while [[ $SECONDS -lt $deadline ]]; do
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 1
-  done
+  # Ask the guest to power itself off, so its filesystems are unmounted and
+  # everything written is on disk before qemu goes. Killing qemu instead
+  # leaves the last seconds of writes in the guest's page cache, which on ext4
+  # cost whole worktrees and still costs those seconds on ZFS.
+  #
+  # The connection dies with the guest, so ssh reports failure whether the
+  # shutdown worked or not. Only the process disappearing answers that.
+  if [[ -f "$CACHE_FILE" ]]; then
+    vm_ssh -- sudo poweroff >/dev/null 2>&1 || true
+  fi
 
-  if kill -0 "$pid" 2>/dev/null; then
-    log_warn "VM did not stop gracefully; forcing kill."
-    kill -9 "$pid" 2>/dev/null || true
+  if ! vm_wait_for_exit "$pid" "$VM_SHUTDOWN_TIMEOUT"; then
+    log_warn "The VM did not shut down; stopping qemu."
+    kill "$pid" 2>/dev/null || true
+    if ! vm_wait_for_exit "$pid" "$VM_KILL_TIMEOUT"; then
+      log_warn "VM did not stop gracefully; forcing kill."
+      kill -9 "$pid" 2>/dev/null || true
+    fi
   fi
 
   rm -f "$(vm_pid_file)"
@@ -583,6 +655,10 @@ ${BOLD}Usage:${NC}
 
 ${BOLD}Commands:${NC}
   enter [-- cmd...]  Enter this project's container (macOS: starts the VM if needed)
+  exec [--tty] [--agent] -- <cmd...>
+                     Run a command as root where the cages are: here on Linux,
+                     inside the VM on macOS. This is how a tool built on
+                     nixcage reaches nixcage-container.
   rm [name]          Delete a project container and its persistent home
   status             Show container state (macOS: VM state and age public key)
   down               macOS only: stop the VM
@@ -600,8 +676,8 @@ ${BOLD}Configuration:${NC}
 
     nix flake new -t github:hamidr/nixcage ~/.config/nixcage
 
-  A project is any flake directory with devShells.default under one of
-  your nixcage.workspaceRoots. No nixcage files exist in projects.
+  A project is any flake directory under one of your nixcage.workspaceRoots.
+  No nixcage files exist in projects.
 HELP
 }
 
@@ -619,6 +695,7 @@ main() {
   shift || true
   case "$command" in
   enter)   cmd_enter "$@" ;;
+  exec)    cmd_exec "$@" ;;
   down)    cmd_down "$@" ;;
   rebuild) cmd_rebuild "$@" ;;
   rm)      cmd_rm "$@" ;;

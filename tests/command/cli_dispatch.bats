@@ -17,15 +17,31 @@ teardown() {
 	[[ "$output" == *Usage:* ]]
 }
 
-@test "help lists exactly the five commands" {
+@test "every command the dispatcher accepts is in the help" {
+	# Derived from the dispatcher rather than listed here, so adding a command
+	# without documenting it fails instead of quietly shipping undiscoverable.
 	run_nixcage help
 	[ "$status" -eq 0 ]
-	for cmd in enter down rebuild rm status; do
-		[[ "$output" == *"$cmd"* ]]
+	local commands
+	commands="$(sed -n '/^  local command=/,/^  esac/p' "$NIXCAGE_BIN" |
+		grep -oE '^  [a-z|-]+\)' | tr -d ' )' | tr '|' '\n' | grep -vE '^(--|-)')"
+	[ -n "$commands" ]
+	for cmd in $commands; do
+		case "$cmd" in
+		help | version) continue ;;
+		esac
+		[[ "$output" == *"$cmd"* ]] || {
+			echo "the help does not mention: $cmd"
+			return 1
+		}
 	done
-	[[ "$output" != *install-hook* ]]
-	[[ "$output" != *init* ]]
-	[[ "$output" != *sync* ]]
+}
+
+@test "the help advertises nothing the dispatcher would reject" {
+	run_nixcage help
+	for word in install-hook init clone push; do
+		[[ "$output" != *"$word"* ]]
+	done
 }
 
 @test "version prints the version" {

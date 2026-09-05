@@ -100,3 +100,19 @@ EOF
 	[[ "$output" != *hello* ]]
 	[[ "$output" != *"ran nix develop"* ]]
 }
+
+@test "seeding the direnvrc needs no tool the base userland lacks" {
+	# A session that enters no devShell has bash, nix, git and little else:
+	# no grep, no sed. A seed that shelled out to one would append the same
+	# line on every entry.
+	touch "$PROJECT/.envrc"
+	stub_direnv
+	local tool
+	for tool in grep sed awk; do
+		printf '#!/usr/bin/env bash\nexit 127\n' >"$STUB_DIR/$tool"
+		chmod +x "$STUB_DIR/$tool"
+	done
+	run nixcage_enter_shell echo hello
+	run nixcage_enter_shell echo hello
+	[ "$(wc -l <"$HOME/.config/direnv/direnvrc")" -eq 1 ]
+}

@@ -16,8 +16,23 @@
 ##
 ## Returns 0 when a devShell exists, 1 when the flake evaluates and offers
 ## none, and 2 when the flake itself failed to evaluate.
+##
+## A second argument names one devShell instead, which is how a specialist
+## role gets its own toolchain: only that attribute is asked about, and the
+## fallbacks a default-shell probe accepts do not apply, because a role that
+## named a shell wants that shell and nothing else.
 nixcage_has_dev_shell() {
-	local project="${1:-/workspace}" answer
+	local project="${1:-/workspace}" want="${2:-}" answer test
+
+	if [ -n "$want" ]; then
+		nixcage_shell_name_ok "$want" || return 2
+		test="shells ? \"${want}\""
+	else
+		test="shells ? default
+      || legacy ? \${system}
+      || packages ? default
+      || legacyPackages ? \${system}"
+	fi
 
 	answer="$(nix eval --impure --raw --no-warn-dirty --expr "
     let
@@ -28,15 +43,80 @@ nixcage_has_dev_shell() {
       packages = flake.packages.\${system} or { };
       legacyPackages = flake.defaultPackage or { };
     in
-    if shells ? default
-      || legacy ? \${system}
-      || packages ? default
-      || legacyPackages ? \${system}
+    if ${test}
     then \"yes\"
     else \"no\"
   ")" || return 2
 
 	[ "$answer" = "yes" ]
+}
+
+## Answer whether $1 is spelled like a Nix attribute name nixcage will accept
+## as a devShell. Narrower than Nix allows on purpose: the name reaches a
+## flake reference and an eval expression, so anything that could be read as
+## syntax there is refused where it is declared rather than where it breaks.
+nixcage_shell_name_ok() {
+	[[ "${1:-}" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]]
+}
+
+## The devShells the project offers, one per line. Only ever used to make a
+## refusal useful: a role naming a shell that is not there needs to see what
+## is, or the mistake is a typo hunt.
+nixcage_dev_shell_names() {
+	local project="${1:-/workspace}"
+	nix eval --impure --raw --no-warn-dirty --expr "
+    let
+      flake = builtins.getFlake \"${project}\";
+      shells = flake.devShells.\${builtins.currentSystem} or { };
+    in
+    builtins.concatStringsSep \"\\n\" (builtins.attrNames shells)
+  " 2>/dev/null
+}
+
+## Enter the one devShell a role's declaration names.
+##
+## Refused rather than resolved when the project does not define it: falling
+## back to the default shell would hand a specialist somebody else's tools and
+## the run would fail somewhere far from the cause.
+nixcage_enter_named_shell() {
+	local project="$1" want="$2"
+	shift 2
+
+	if ! nixcage_shell_name_ok "$want"; then
+		echo "nixcage: not a usable devShell name: $want" >&2
+		return 1
+	fi
+
+	nixcage_has_dev_shell "$project" "$want"
+	case $? in
+	0) ;;
+	1)
+		{
+			echo "nixcage: this role is declared to work in devShells.$want, which $project does not define; it offers:"
+			## Indented in bash rather than with sed: this runs in the base
+			## container userland, which carries a shell and nix and little
+			## else, so a message must not depend on a text tool being there.
+			## The list arrives without a trailing newline, so the last name
+			## reaches the loop body only if the read's failure at EOF is
+			## still treated as a line.
+			local name
+			while IFS= read -r name || [ -n "$name" ]; do
+				[ -n "$name" ] || continue
+				echo "  $name"
+			done < <(nixcage_dev_shell_names "$project")
+		} >&2
+		return 1
+		;;
+	*)
+		echo "nixcage: the project flake failed to evaluate; see the error above" >&2
+		return 1
+		;;
+	esac
+
+	if [ "$#" -gt 0 ]; then
+		exec nix develop "$project#$want" --command "$@"
+	fi
+	exec nix develop "$project#$want"
 }
 
 ## Enter the project's environment, choosing it by what the project offers.
@@ -54,10 +134,17 @@ nixcage_has_dev_shell() {
 nixcage_seed_direnvrc() {
 	local rc="$HOME/.config/direnv/direnvrc" line="source $NIXCAGE_DIRENVRC"
 	[ -n "${NIXCAGE_DIRENVRC:-}" ] || return 0
-	if [ ! -f "$rc" ] || ! grep -qF "$line" "$rc"; then
-		mkdir -p "$(dirname "$rc")"
-		echo "$line" >>"$rc"
+	## Matched in bash rather than with grep: the base container userland is a
+	## shell, nix, git and little else, and a missing grep here would report
+	## the line absent every time and append it on every session.
+	if [ -f "$rc" ]; then
+		local existing
+		while IFS= read -r existing || [ -n "$existing" ]; do
+			[ "$existing" = "$line" ] && return 0
+		done <"$rc"
 	fi
+	mkdir -p "$(dirname "$rc")"
+	echo "$line" >>"$rc"
 }
 
 ## Enter the project through its own .envrc, as the host shell would.
@@ -79,6 +166,15 @@ nixcage_enter_direnv() {
 
 nixcage_enter_shell() {
 	local project="${NIXCAGE_PROJECT:-/workspace}"
+
+	## A role that named its own devShell has said what its environment is more
+	## specifically than the project can, so it wins over both the .envrc and
+	## the default-shell probe. Several specialists work one repository, and an
+	## .envrc offers them all one environment.
+	if [ -n "${NIXCAGE_SHELL:-}" ]; then
+		nixcage_enter_named_shell "$project" "$NIXCAGE_SHELL" "$@"
+		return
+	fi
 
 	## An .envrc is the project saying what its environment is, so it wins over
 	## the devShell probe -- which is usually the same answer, since most of

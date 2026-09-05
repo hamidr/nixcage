@@ -57,6 +57,19 @@
               # secretEnv.ANTHROPIC_API_KEY = "anthropic";
 
               # vm = { cpus = 8; mem = 8192; diskSize = 40960; };
+
+              ## The VM keeps its state on a ZFS pool of its own (ADR-017).
+              ## Once the first boot has copied the old ext4 volume's contents
+              ## into it -- the storage service says when it has -- set this
+              ## false and delete nixcage-data.img from the state directory.
+              # vm.legacyDataVolume = false;
+
+              ## The uid range nixcage allocates from when something asks it
+              ## for a principal's number -- cageworks does, for each of its
+              ## roles. Uncomment to allow it; the range must not overlap any
+              ## account that exists in the VM.
+              #
+              # principalUidRange = { base = 700000; size = 64; };
             };
 
             ## Uncomment on macOS (see hostSystem above).

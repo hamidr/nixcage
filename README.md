@@ -121,11 +121,30 @@ devShell (see `examples/project/`). nixcage installs nothing into containers.
 | Command | Description |
 |---|---|
 | `nixcage enter [-- cmd]` | Enter this project's container (on macOS, auto-starts the VM); with a command, run it non-interactively |
+| `nixcage exec [--tty] [--agent] -- cmd` | Run a command as root where the cages are: on this host on Linux, inside the VM on macOS |
 | `nixcage rm [name]` | Delete a project's container and persistent home |
 | `nixcage status` | Configuration in use, containers, and on macOS the VM state and age public key |
 | `nixcage down` | Stop the VM (macOS only) |
 | `nixcage rebuild` | Rebuild from the config flake and restart the VM (macOS only) |
 | `nixcage version` | Print the version |
+
+## Building on nixcage
+
+nixcage runs cages and has no opinion about what runs in them. A tool that
+wants more than one person entering one project -- several named workers
+sharing a repository, say -- pins nixcage as a flake input and uses four
+exported primitives, which are the whole interface (ADR-009):
+
+| Primitive | What it gives |
+|---|---|
+| `nixcage-container enter [--uid n] [--user name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] <name> <project> [cmd]` | A session built out of what you asked for |
+| `nixcage-container uid <principal>` | A durable uid for a name, never reissued |
+| `nixcage-container storage ensure <path> <uid> [quota]` | That path owned by that uid, bounded where it can be |
+| `nixcage exec [--tty] [--agent] -- <cmd>` | A way to reach the other three from your own machine |
+
+You name paths and principals; nixcage names datasets and numbers. Set
+`nixcage.principalUidRange` to allow allocation at all.
+[cageworks](https://github.com/hamidr/cageworks) is built on exactly this.
 
 ## Secrets
 

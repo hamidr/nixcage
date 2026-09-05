@@ -34,7 +34,7 @@
         {
           packages.default = pkgs.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "3.1.0";
+            version = "4.0.0";
 
             src = ./.;
 
@@ -65,6 +65,9 @@
               bats.libraries.bats-support
               bats.libraries.bats-assert
               openssh
+              ## The worktree tests build real repositories rather than
+              ## stubbing git, so it belongs in the shell.
+              git
             ];
 
             BATS_LIB_PATH = "${pkgs.bats.libraries.bats-support}/share/bats:${pkgs.bats.libraries.bats-assert}/share/bats";
@@ -88,7 +91,7 @@
           in
           final.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "3.1.0";
+            version = "4.0.0";
 
             src = ./.;
 

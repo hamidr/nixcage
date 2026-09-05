@@ -58,7 +58,8 @@ they lack is a place to leave each other a message.
 - **Dispatch.** The mailbox starts nothing. No process wakes on delivery, no
   session drains a mailbox, no daemon runs between sessions. A message is data
   that waits until something outside the mailbox acts on it, whether that is a
-  human entering the project or the supervisor in PRD-002. This is deliberate:
+  human entering the project or a supervisor built on top of nixcage. That
+  is deliberate:
   a channel that also executes turns a mail bug into unattended token spend, and
   keeping the two apart is what lets dispatch be governed on its own terms.
 - **Ability transfer.** An actor cannot grant another actor a capability, tool,

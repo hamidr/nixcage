@@ -4,18 +4,17 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-09-02
+**Generated:** 2026-09-06
 
-**Next PRD number:** 003
+**Next PRD number:** 002
 
-**Next ADR number:** 009
+**Next ADR number:** 010
 
 ## PRDs
 
 | # | Title | Status | Phases | Depends On | Summary | Flags |
 | --- | --- | --- | --- | --- | --- | --- |
 | [PRD-001](PRD-001-actor-mailbox.md) | A mailbox that lets project containers exchange messages | proposed | 0/4 | -- | give each project actor a durable mailbox so agents in separate containers can signal, delegate, and share findings |  |
-| [PRD-002](PRD-002-autonomous-workflow-supervisor.md) | A supervisor that runs declared workflows across cages | proposed | 0/5 | PRD-001 | declared workflows dispatch caged agent runs under gates and caps, so runs start without a human |  |
 
 ## ADRs
 
@@ -29,3 +28,4 @@ document, then regenerate.
 | [ADR-006](ADR-006-direnv-project-environments.md) | A project with an .envrc is entered through direnv | implemented | -- | ADR-005 | sessions run direnv when the project has an .envrc, so those projects get the same environment as on the host |  |
 | [ADR-007](ADR-007-worktree-git-directory-bind.md) | A linked git worktree binds its git directory into the session | implemented | -- | ADR-002 | sessions bind the git directories a linked worktree points at, so git works in a worktree instead of failing outright |  |
 | [ADR-008](ADR-008-session-git-identity-and-signing.md) | Sessions commit under a declared identity and sign through the forwarded ssh-agent | implemented | -- | ADR-007 | sessions get a declared git identity and sign through the forwarded ssh-agent, holding no key of their own |  |
+| [ADR-009](ADR-009-exported-primitives.md) | nixcage exports four primitives and nothing else | accepted | -- | ADR-002, ADR-003, ADR-004 | a session, a principal's uid, owned storage and a way to reach the cage host are the whole interface a dependant sees |  |

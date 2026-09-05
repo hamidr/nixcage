@@ -35,6 +35,57 @@ in
       '';
     };
 
+    storage = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          dataset = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "tank/nixcage";
+            description = ''
+              The ZFS dataset mounted at /var/lib/nixcage, if this host keeps
+              nixcage's state on one. Set it and every directory nixcage hands
+              out becomes a child dataset, which is what makes a quota on one
+              possible and what keeps an unclean shutdown from truncating what
+              was written there.
+              Left null, nixcage uses ordinary directories and behaves exactly
+              as before; nothing here requires ZFS of a Linux host (ADR-017).
+            '';
+          };
+        };
+      };
+      default = { };
+      description = "Where nixcage keeps its state on this host.";
+    };
+
+    principalUidRange = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.submodule {
+          options = {
+            base = lib.mkOption {
+              type = lib.types.ints.unsigned;
+              example = 700000;
+              description = "First uid a principal may be allocated.";
+            };
+            size = lib.mkOption {
+              type = lib.types.ints.positive;
+              default = 64;
+              description = "How many uids the range covers.";
+            };
+          };
+        }
+      );
+      default = null;
+      description = ''
+        The uid range `nixcage-container uid` allocates from (ADR-004). A
+        principal is whatever a caller wants a durable uid for; nixcage only
+        promises that one name always answers with one number and that a
+        forgotten name's number is never reissued, so nothing new can inherit
+        a dead principal's files. The range must not overlap accounts that
+        already exist on this host.
+      '';
+    };
+
     git = lib.mkOption {
       type = lib.types.submodule {
         options = {
@@ -66,7 +117,8 @@ in
     };
   };
 
-  config = {
+  config = lib.mkMerge [
+    {
     environment.systemPackages = [ container.script ];
 
     ## Rendered only when an identity exists: an incomplete gitconfig would
@@ -76,6 +128,16 @@ in
         {
           text = container.gitConfigText cfg.git;
         };
+
+    ## Rendered only when a uid range is declared: an ordinary session never
+    ## reads it, and the uid and storage verbs refuse to answer without it.
+    environment.etc."nixcage/container" = lib.mkIf (cfg.principalUidRange != null) {
+      text = ''
+        PRINCIPAL_UID_BASE=${toString cfg.principalUidRange.base}
+        PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}
+        STORAGE_DATASET=${lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset}
+      '';
+    };
 
     environment.etc."nixcage/profile".source = container.profile;
     environment.etc."nixcage/secret-env".text = lib.concatStrings (
@@ -90,5 +152,6 @@ in
     systemd.tmpfiles.rules = [
       "d /var/lib/nixcage 0755 root root -"
     ];
-  };
+    }
+  ];
 }
