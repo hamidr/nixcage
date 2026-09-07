@@ -137,13 +137,18 @@ exported primitives, which are the whole interface (ADR-009):
 
 | Primitive | What it gives |
 |---|---|
-| `nixcage-container enter [--uid n] [--user name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] <name> <project> [cmd]` | A session built out of what you asked for |
-| `nixcage-container uid <principal>` | A durable uid for a name, never reissued |
+| `nixcage-container enter [--uid n] [--user name] [--subject name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] <name> <project> [cmd]` | A session built out of what you asked for |
+| `nixcage-container uid <principal> [<subject>]` | A durable uid for a name, never reissued |
 | `nixcage-container storage ensure <path> <uid> [quota]` | That path owned by that uid, bounded where it can be |
 | `nixcage exec [--tty] [--agent] -- <cmd>` | A way to reach the other three from your own machine |
 
 You name paths and principals; nixcage names datasets and numbers. Set
-`nixcage.principalUidRange` to allow allocation at all.
+`nixcage.principalUidRange` to allow allocation at all, and
+`nixcage.principalSubjects` when one cage needs to hold processes that should
+not be able to reach each other: a principal is then allocated a contiguous
+block, one uid per subject beside cage root, and a session may run as one of
+them (ADR-010). Declaring no subjects is a block of one and a session that is
+cage root, which is what ADR-004 built.
 [cageworks](https://github.com/hamidr/cageworks) is built on exactly this.
 
 ## Secrets

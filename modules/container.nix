@@ -78,7 +78,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] <name> <project> [cmd...] | uid <principal> | storage ensure <path> <uid> [quota] | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | list | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -128,6 +128,21 @@ let
         done <"$SECRET_ENV"
       }
 
+      ## The subjects a cage has, declared by the host. Cage root is not one of
+      ## them, so the block a principal is allocated is one wider than this.
+      declared_subjects() { echo "''${PRINCIPAL_SUBJECTS:-}"; }
+
+      ## What a new principal should be allocated. What an existing one has is
+      ## read from the store instead, because a block is fixed when it is
+      ## allocated and widening one in place would reach the uid after it.
+      declared_block() {
+        local subject count=1
+        for subject in $(declared_subjects); do
+          count=$((count + 1))
+        done
+        echo "$count"
+      }
+
       ## A per-session rootfs skeleton is a few kilobytes; separate ones let
       ## concurrent sessions of the same project coexist because nspawn
       ## takes an exclusive lock on its directory tree.
@@ -139,12 +154,10 @@ let
         chmod 1777 "$root/tmp"
         echo 'NAME=nixcage' >"$root/etc/os-release"
         cp /etc/resolv.conf "$root/etc/resolv.conf" 2>/dev/null || true
-        nixcage_principal_passwd "$login" >"$root/etc/passwd" ||
-          die "invalid principal name: $login"
-        cat >"$root/etc/group" <<'EOF'
-      root:x:0:
-      nogroup:x:65534:
-      EOF
+        nixcage_principal_passwd "$login" "$(declared_subjects)" >"$root/etc/passwd" ||
+          die "invalid principal or subject name"
+        nixcage_principal_group "$(declared_subjects)" >"$root/etc/group" ||
+          die "invalid subject name"
         cat >"$root/etc/nsswitch.conf" <<'EOF'
       passwd: files
       group: files
@@ -168,6 +181,7 @@ let
 
         local auth_sock="$NIXCAGE_ENTER_AUTH_SOCK"
         local user="$NIXCAGE_ENTER_USER"
+        local subject="$NIXCAGE_ENTER_SUBJECT"
         local home="$NIXCAGE_ENTER_HOME"
         local shell_name="$NIXCAGE_ENTER_SHELL"
         local uid="$NIXCAGE_ENTER_UID"
@@ -223,23 +237,51 @@ let
           git_binds+=("--bind=$git_dir")
         done <<<"$git_dirs"
 
+        ## A session runs as cage root unless the caller names one of the
+        ## subjects the host declared. The offset decides both the uid inside
+        ## the cage and the host uid its home must belong to, since ownership
+        ## is not shifted on the way in.
+        ## The cage maps the block this uid was allocated, never the width the
+        ## host declares now: a principal allocated before a subject was
+        ## declared sits directly against its neighbour, and mapping wider
+        ## would put that neighbour inside this cage.
+        local block
+        block="$(nixcage_principal_size_at "$(uid_store)" "$owner_uid")" ||
+          die "cannot resolve the block of uid $owner_uid"
+
+        local subject_offset=0 session_home=/root
+        if [ -n "$subject" ]; then
+          subject_offset="$(nixcage_principal_subject_offset "$subject" "$(declared_subjects)")" ||
+            die "no such subject: $subject"
+          [ "$subject_offset" -lt "$block" ] ||
+            die "uid $owner_uid holds a block of $block; it has no subject $subject"
+          session_home="/home/$subject"
+        fi
+        local session_uid=$((owner_uid + subject_offset))
+        local session_gid=$((owner_gid + subject_offset))
+        local -a session_user=()
+        [ -n "$subject" ] && session_user=("--user=$subject")
+
         local cdir="$STATE_DIR/containers/$name"
         [ -n "$home" ] || home="$STATE_DIR/homes/$name"
         mkdir -p "$cdir" "$home"
-        ## The home is the container's /root and holds whatever the session
-        ## writes there, so it is private to the mapped user. If its contents
-        ## belong to someone else the whole tree is re-owned rather than left
-        ## unusable: a principal's uid can change when nixcage state is lost
-        ## and reallocated, and a home the session cannot write fails far from
-        ## that cause, as a read-only database deep inside a flake evaluation.
-        if [ "$(stat -c %u "$home")" != "$owner_uid" ] ||
-          [ -n "$(find "$home" ! -uid "$owner_uid" -print -quit 2>/dev/null)" ]; then
-          chown -R "$owner_uid:$owner_gid" "$home"
+        ## The home holds whatever the session writes there, so it is private
+        ## to the subject running. If its contents belong to someone else the
+        ## whole tree is re-owned rather than left unusable: a principal's uid
+        ## can change when nixcage state is lost and reallocated, and a home
+        ## the session cannot write fails far from that cause, as a read-only
+        ## database deep inside a flake evaluation.
+        if [ "$(stat -c %u "$home")" != "$session_uid" ] ||
+          [ -n "$(find "$home" ! -uid "$session_uid" -print -quit 2>/dev/null)" ]; then
+          chown -R "$session_uid:$session_gid" "$home"
         fi
         chmod 700 "$home"
 
         local rootfs="$cdir/session-$$"
         make_rootfs "$rootfs" "$user"
+        ## The home is bound over this, so what it holds never shows; it has
+        ## to exist for the bind to land on something.
+        mkdir -p "$rootfs$session_home"
         ## Expand now: locals are out of scope when the EXIT trap fires.
         # shellcheck disable=SC2064
         trap "rm -rf '$rootfs'" EXIT
@@ -268,7 +310,7 @@ let
         local -a agent_bind=()
         if [ -n "$auth_sock" ]; then
           if [ -S "$auth_sock" ]; then
-            chown "$owner_uid:$owner_gid" "$auth_sock"
+            chown "$session_uid:$session_gid" "$auth_sock"
             : >"$rootfs/run/ssh-agent.sock"
             agent_bind=(
               "--bind=$auth_sock:/run/ssh-agent.sock"
@@ -287,18 +329,19 @@ let
         systemd-nspawn --quiet --register=no \
           --directory="$rootfs" \
           --machine="$name" \
-          --private-users="$owner_uid:1" \
+          --private-users="$owner_uid:$block" \
           --private-users-ownership=off \
           --bind-ro=/nix/store \
           --bind-ro=/nix/var/nix/db \
           --bind=/nix/var/nix/daemon-socket \
           --bind="$project:/workspace" \
-          --bind="$home:/root" \
+          --bind="$home:$session_home" \
           ''${git_binds[@]+"''${git_binds[@]}"} \
           ''${agent_bind[@]+"''${agent_bind[@]}"} \
           ''${asked_binds[@]+"''${asked_binds[@]}"} \
           --chdir=/workspace \
-          --setenv=HOME=/root \
+          ''${session_user[@]+"''${session_user[@]}"} \
+          --setenv=HOME="$session_home" \
           --setenv=PATH="$PROFILE/bin" \
           --setenv=NIX_REMOTE=daemon \
           --setenv=NIX_CONFIG='experimental-features = nix-command flakes' \
@@ -314,11 +357,30 @@ let
       ## reissued. What a principal is stays the caller's: nixcage only
       ## promises that one name always answers with one number.
       cmd_uid() {
-        local principal="''${1:-}"
-        [ -n "$principal" ] || die "usage: nixcage-container uid <principal>"
+        local principal="''${1:-}" subject="''${2:-}"
+        [ -n "$principal" ] || die "usage: nixcage-container uid <principal> [<subject>]"
         read_container_config
-        nixcage_principal_uid "$(uid_store)" \
-          "''${PRINCIPAL_UID_BASE:?}" "''${PRINCIPAL_UID_SIZE:?}" "$principal"
+
+        ## Allocating is what makes a subject's number answerable, so it
+        ## happens either way: a caller asking for a subject of a principal
+        ## that has never been seen gets that principal allocated first.
+        local base
+        base="$(nixcage_principal_uid "$(uid_store)" \
+          "''${PRINCIPAL_UID_BASE:?}" "''${PRINCIPAL_UID_SIZE:?}" \
+          "$principal" "$(declared_block)")" || exit 1
+
+        if [ -z "$subject" ]; then
+          echo "$base"
+          return 0
+        fi
+
+        ## A caller names a subject and nixcage names the number, so the
+        ## offset is resolved here rather than added by whoever asked.
+        local offset
+        offset="$(nixcage_principal_subject_offset "$subject" "$(declared_subjects)")" ||
+          die "no such subject: $subject"
+        nixcage_principal_subject_uid "$(uid_store)" "$principal" "$offset" ||
+          die "$principal has no subject $subject"
       }
 
       ## Give a path to a uid, bounded where it can be bounded. Whether that is

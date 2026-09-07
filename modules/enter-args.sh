@@ -19,6 +19,7 @@
 nixcage_enter_reset() {
 	NIXCAGE_ENTER_UID=""
 	NIXCAGE_ENTER_USER=""
+	NIXCAGE_ENTER_SUBJECT=""
 	NIXCAGE_ENTER_HOME=""
 	NIXCAGE_ENTER_SHELL=""
 	NIXCAGE_ENTER_AUTH_SOCK=""
@@ -52,6 +53,10 @@ nixcage_enter_parse() {
 			;;
 		--user)
 			NIXCAGE_ENTER_USER="${2:-}"
+			shift 2 || return 1
+			;;
+		--subject)
+			NIXCAGE_ENTER_SUBJECT="${2:-}"
 			shift 2 || return 1
 			;;
 		--home)
@@ -93,6 +98,16 @@ nixcage_enter_parse() {
 	if [ -n "$NIXCAGE_ENTER_UID" ] &&
 		! [[ "$NIXCAGE_ENTER_UID" =~ ^[0-9]+$ ]]; then
 		echo "nixcage: not a uid: $NIXCAGE_ENTER_UID" >&2
+		return 1
+	fi
+
+	## A subject is one of the names the host declared, and it reaches
+	## /etc/passwd and nspawn's --user, so it is held to the same alphabet a
+	## principal is. Which offset it maps to is decided where the declaration
+	## is read, not here.
+	if [ -n "$NIXCAGE_ENTER_SUBJECT" ] &&
+		! [[ "$NIXCAGE_ENTER_SUBJECT" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]]; then
+		echo "nixcage: not a subject name: $NIXCAGE_ENTER_SUBJECT" >&2
 		return 1
 	fi
 

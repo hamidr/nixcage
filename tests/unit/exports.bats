@@ -39,7 +39,7 @@ teardown() {
 }
 
 @test "enter accepts every flag a caller parameterises a session with" {
-	for flag in --uid --user --home --shell --bind --bind-ro --setenv --no-agent --auth-sock; do
+	for flag in --uid --user --subject --home --shell --bind --bind-ro --setenv --no-agent --auth-sock; do
 		run grep -qE "^$(printf '\t\t')$flag\)" "$(ENTER_ARGS)"
 		assert_success
 	done
@@ -92,5 +92,24 @@ teardown() {
 	# Renaming it without moving it would reallocate every number, and a
 	# reissued uid hands something new the files of something dead.
 	run grep -q 'mv "$STATE_DIR/role-uids" "$store"' "$(CONTAINER_NIX)"
+	assert_success
+}
+
+@test "the cage maps the block a principal was allocated, not a fixed one" {
+	# A mapping of one where the block is wider leaves the subjects unmapped;
+	# a fixed wider one would map whatever was allocated next door (ADR-010).
+	run grep -q -- '--private-users="\$owner_uid:\$block"' "$(CONTAINER_NIX)"
+	assert_success
+	# The width comes from what this uid was allocated, not from what the host
+	# declares now: a principal allocated narrower sits against its neighbour.
+	run grep -q 'nixcage_principal_size_at "$(uid_store)" "$owner_uid"' "$(CONTAINER_NIX)"
+	assert_success
+}
+
+@test "uid answers for a subject without the caller doing arithmetic" {
+	# A caller names principals and subjects; nixcage names numbers (ADR-009).
+	run grep -qE 'uid <principal> \[<subject>\]' "$(CONTAINER_NIX)"
+	assert_success
+	run grep -q 'nixcage_principal_subject_uid' "$(CONTAINER_NIX)"
 	assert_success
 }

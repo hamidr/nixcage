@@ -21,6 +21,7 @@ teardown() {
 	nixcage_enter_parse myproj /srv/myproj
 	[ -z "$NIXCAGE_ENTER_UID" ]
 	[ -z "$NIXCAGE_ENTER_USER" ]
+	[ -z "$NIXCAGE_ENTER_SUBJECT" ]
 	[ -z "$NIXCAGE_ENTER_HOME" ]
 	[ "${#NIXCAGE_ENTER_BINDS[@]}" -eq 0 ]
 	[ "${#NIXCAGE_ENTER_ENV[@]}" -eq 0 ]
@@ -118,4 +119,23 @@ teardown() {
 	nixcage_enter_parse n /srv/w
 	[ -z "$NIXCAGE_ENTER_UID" ]
 	[ "${#NIXCAGE_ENTER_BINDS[@]}" -eq 0 ]
+}
+
+@test "a session can name the subject it runs as" {
+	nixcage_enter_parse --subject agent myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_SUBJECT" = agent ]
+	[ "${NIXCAGE_ENTER_ARGV[0]}" = myproj ]
+}
+
+@test "a subject that could forge a passwd line is refused at the boundary" {
+	run nixcage_enter_parse --subject "root:x:0:0::/:/bin/sh" myproj /srv/myproj
+	assert_failure
+	assert_output --partial "not a subject name"
+	run nixcage_enter_parse --subject "../escape" myproj /srv/myproj
+	assert_failure
+}
+
+@test "naming no subject leaves the session as cage root" {
+	nixcage_enter_parse --uid 700000 myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_SUBJECT" ]
 }

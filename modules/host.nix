@@ -86,6 +86,23 @@ in
       '';
     };
 
+    principalSubjects = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "agent" ];
+      description = ''
+        The subjects every cage has besides its root (ADR-010). A principal is
+        allocated one uid per subject plus one for cage root, contiguously, so
+        a supervising process and the program it supervises can be different
+        principals inside one cage. Declaring none is the ADR-004 behaviour: a
+        block of one, and a session that is cage root.
+
+        A block is fixed when it is allocated. Declaring a subject does not
+        widen a principal allocated before it, because the uid after that
+        block already belongs to somebody else.
+      '';
+    };
+
     git = lib.mkOption {
       type = lib.types.submodule {
         options = {
@@ -135,6 +152,7 @@ in
       text = ''
         PRINCIPAL_UID_BASE=${toString cfg.principalUidRange.base}
         PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}
+        PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
         STORAGE_DATASET=${lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset}
       '';
     };
