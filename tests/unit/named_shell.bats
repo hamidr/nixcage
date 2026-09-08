@@ -68,7 +68,7 @@ EOF
 	[ "$status" -eq 2 ]
 }
 
-@test "a role with a declared shell enters that shell" {
+@test "a session with a declared shell enters that shell" {
 	stub_nix yes 0
 	NIXCAGE_SHELL=backend-jvm run nixcage_enter_shell echo hello
 	[ "$status" -eq 0 ]

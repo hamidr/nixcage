@@ -17,10 +17,11 @@
 ## Returns 0 when a devShell exists, 1 when the flake evaluates and offers
 ## none, and 2 when the flake itself failed to evaluate.
 ##
-## A second argument names one devShell instead, which is how a specialist
-## role gets its own toolchain: only that attribute is asked about, and the
-## fallbacks a default-shell probe accepts do not apply, because a role that
-## named a shell wants that shell and nothing else.
+## A second argument names one devShell instead, which is how a caller asks
+## for one toolchain out of the several a project may offer: only that
+## attribute is asked about, and the fallbacks a default-shell probe accepts
+## do not apply, because a session that named a shell wants that shell and
+## nothing else.
 nixcage_has_dev_shell() {
 	local project="${1:-/workspace}" want="${2:-}" answer test
 
@@ -60,7 +61,7 @@ nixcage_shell_name_ok() {
 }
 
 ## The devShells the project offers, one per line. Only ever used to make a
-## refusal useful: a role naming a shell that is not there needs to see what
+## refusal useful: a caller naming a shell that is not there needs to see what
 ## is, or the mistake is a typo hunt.
 nixcage_dev_shell_names() {
 	local project="${1:-/workspace}"
@@ -73,10 +74,10 @@ nixcage_dev_shell_names() {
   " 2>/dev/null
 }
 
-## Enter the one devShell a role's declaration names.
+## Enter the one devShell the session was asked for.
 ##
 ## Refused rather than resolved when the project does not define it: falling
-## back to the default shell would hand a specialist somebody else's tools and
+## back to the default shell would hand the session somebody else's tools and
 ## the run would fail somewhere far from the cause.
 nixcage_enter_named_shell() {
 	local project="$1" want="$2"
@@ -92,7 +93,7 @@ nixcage_enter_named_shell() {
 	0) ;;
 	1)
 		{
-			echo "nixcage: this role is declared to work in devShells.$want, which $project does not define; it offers:"
+			echo "nixcage: this session was asked for devShells.$want, which $project does not define; it offers:"
 			## Indented in bash rather than with sed: this runs in the base
 			## container userland, which carries a shell and nix and little
 			## else, so a message must not depend on a text tool being there.
@@ -167,10 +168,10 @@ nixcage_enter_direnv() {
 nixcage_enter_shell() {
 	local project="${NIXCAGE_PROJECT:-/workspace}"
 
-	## A role that named its own devShell has said what its environment is more
-	## specifically than the project can, so it wins over both the .envrc and
-	## the default-shell probe. Several specialists work one repository, and an
-	## .envrc offers them all one environment.
+	## A session that named its own devShell has said what its environment is
+	## more specifically than the project can, so it wins over both the .envrc
+	## and the default-shell probe. Several sessions work one repository, and
+	## an .envrc offers them all one environment.
 	if [ -n "${NIXCAGE_SHELL:-}" ]; then
 		nixcage_enter_named_shell "$project" "$NIXCAGE_SHELL" "$@"
 		return

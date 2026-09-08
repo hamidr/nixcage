@@ -96,9 +96,8 @@ let
       }
 
       ## Where allocations are recorded. The file was called role-uids while the
-      ## factory lived here and every principal was a role; renaming it in
-      ## place keeps every number already handed out, which is the one property
-      ## the store exists to have.
+      ## factory lived here; renaming it in place keeps every number already
+      ## handed out, which is the one property the store exists to have.
       uid_store() {
         local store="$STATE_DIR/principal-uids"
         if [ ! -f "$store" ] && [ -f "$STATE_DIR/role-uids" ]; then

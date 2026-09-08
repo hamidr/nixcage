@@ -146,3 +146,28 @@ teardown() {
 	run grep -q "etc/profiles/per-user/root/bin/getent" "$(CONTAINER_NIX)"
 	assert_success
 }
+
+@test "shipped code models no caller's concept" {
+	# ADR-009's consequence: nixcage stops having an opinion about what is
+	# built on it. A caller's word for its own actors -- a role, a task, a
+	# factory -- appearing in a code path or an error message means nixcage is
+	# modelling something on the far side of the interface, and the next
+	# dependant with a different word finds a cage that talks about roles.
+	#
+	# The word is allowed only where it names the dependant that has it
+	# (cageworks) or the store renamed away from it (role-uids), so every
+	# surviving occurrence says on its own line why it is there.
+	local shipped=(
+		"$NIXCAGE_ROOT/nixcage"
+		"$NIXCAGE_ROOT"/modules/*.sh
+		"$NIXCAGE_ROOT"/modules/*.nix
+		"$NIXCAGE_ROOT/templates/config/flake.nix"
+	)
+	run grep -nEi '\broles?\b' "${shipped[@]}"
+	local line
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		[[ "$line" == *role-uids* || "$line" == *cageworks* ]] ||
+			fail "names a caller's concept: $line"
+	done <<<"$output"
+}

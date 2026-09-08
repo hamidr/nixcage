@@ -64,10 +64,10 @@
               ## false and delete nixcage-data.img from the state directory.
               # vm.legacyDataVolume = false;
 
-              ## The uid range nixcage allocates from when something asks it
-              ## for a principal's number -- cageworks does, for each of its
-              ## roles. Uncomment to allow it; the range must not overlap any
-              ## account that exists in the VM.
+              ## The uid range nixcage allocates from when something asks it for
+              ## a principal's number. cageworks asks once per role -- "role" is
+              ## its word, not nixcage's. Uncomment to allow it; the range must
+              ## not overlap any account that exists in the VM.
               #
               # principalUidRange = { base = 700000; size = 64; };
             };
