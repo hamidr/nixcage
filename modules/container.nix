@@ -153,6 +153,18 @@ let
         mkdir -p "$root"/{etc,usr,tmp,root,workspace,nix,proc,sys,dev,run,var/empty}
         chmod 1777 "$root/tmp"
         echo 'NAME=nixcage' >"$root/etc/os-release"
+        ## nspawn resolves every user but root by exec'ing getent inside the
+        ## container, and this systemd is patched to look for it on Nix profile
+        ## paths rather than at /usr/bin/getent or /bin/getent. None of them
+        ## exists in a rootfs this size, so the exec fails, the helper returns
+        ## nothing, and nspawn reports "Failed to resolve user" for a name the
+        ## /etc/passwd written below carries.
+        ##
+        ## This is the search path that survives: a tmpfs is mounted over /run,
+        ## and the lookup happens as root before the session drops to a subject.
+        mkdir -p "$root/etc/profiles/per-user/root/bin"
+        ln -sf ${pkgs.glibc.getent}/bin/getent \
+          "$root/etc/profiles/per-user/root/bin/getent"
         cp /etc/resolv.conf "$root/etc/resolv.conf" 2>/dev/null || true
         nixcage_principal_passwd "$login" "$(declared_subjects)" >"$root/etc/passwd" ||
           die "invalid principal or subject name"

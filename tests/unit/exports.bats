@@ -131,3 +131,18 @@ teardown() {
 		assert_output --partial "read_container_config"
 	done
 }
+
+@test "the rootfs carries getent where this systemd looks for it" {
+	# nspawn resolves any user but root by exec'ing getent inside the
+	# container, and nixpkgs patches that search to Nix profile locations
+	# rather than /usr/bin/getent and /bin/getent. Every one of them is absent
+	# from a rootfs this builds, so the exec fails, the helper returns nothing
+	# and nspawn reports "Failed to resolve user" for a name its own
+	# /etc/passwd carries.
+	#
+	# /etc/profiles/per-user/root is the search path that survives: nspawn
+	# mounts a tmpfs over /run, and resolution happens as root before the
+	# session drops to a subject.
+	run grep -q "etc/profiles/per-user/root/bin/getent" "$(CONTAINER_NIX)"
+	assert_success
+}
