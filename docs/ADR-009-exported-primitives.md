@@ -1,9 +1,9 @@
 ---
 id: ADR-009
 title: nixcage exports four primitives and nothing else
-status: accepted
+status: implemented
 date: 2026-09-05
-status_date: 2026-09-05
+status_date: 2026-09-08
 summary: a session, a principal's uid, owned storage and a way to reach the cage host are the whole interface a dependant sees
 depends_on: [ADR-002, ADR-003, ADR-004]
 supersedes: []
@@ -73,16 +73,16 @@ spelt with a `..` segment, the rootfs itself, anything under `/nix`, anything
 under `/etc/nixcage`, and nspawn's own API mounts. `--setenv` names are checked
 for the same reason; values are not, because any byte is a legal value.
 
+**4. The uid store is renamed in place, not recreated.** It was `role-uids`
+while the factory lived here. Renaming it without moving it would reallocate
+every number, and a reissued uid hands something new the files of something
+dead, which is the one property the store exists to prevent.
+
 **5. The option parser is a shell file, not a loop inside the Nix string.**
 `modules/enter-args.sh` holds it, so the suite sources it and drives the
 interface directly. An interface nothing can drive is one that breaks at a
 dependant's run time instead of at ours, and this one is the whole point of
 the document.
-
-**4. The uid store is renamed in place, not recreated.** It was `role-uids`
-while the factory lived here. Renaming it without moving it would reallocate
-every number, and a reissued uid hands something new the files of something
-dead, which is the one property the store exists to prevent.
 
 ## Consequences
 
@@ -120,8 +120,10 @@ nix develop --command bats --recursive tests/
 `tests/unit/bind.bats` covers every refusal in point 3,
 `tests/unit/storage.bats` and `tests/unit/principal_uid.bats` cover point 2,
 and `tests/command/exec.bats` covers the transport. `tests/unit/exports.bats`
-asserts what is left over: that every verb is still dispatched and that no flag
-the parser accepts is missing from the usage line a caller reads at run time.
+asserts what is left over: that every verb is still dispatched, that no flag
+the parser accepts is missing from the usage line a caller reads at run time,
+and that the shipped files name no caller's actors -- the consequence below,
+which the guest-side shell modules were still breaking after the split.
 
 The guest script itself is a Nix string, so it exists only once built. Building
 it runs the shellcheck `writeShellApplication` does:
