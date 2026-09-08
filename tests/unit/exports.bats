@@ -113,3 +113,21 @@ teardown() {
 	run grep -q 'nixcage_principal_subject_uid' "$(CONTAINER_NIX)"
 	assert_success
 }
+
+@test "every verb that reads the host's declaration reads it first" {
+	# What /etc/nixcage/container declares is not ambient: read_container_config
+	# sources it, and a verb that skips the call sees every variable in it as
+	# empty. cmd_enter resolves --subject against PRINCIPAL_SUBJECTS and writes
+	# an /etc/passwd entry per declared subject, so it needs the file as much as
+	# uid and storage do.
+	#
+	# Skipping it fails in the worst available way: the subject list is empty,
+	# so the offset loop never runs and every --subject is refused as "no such
+	# subject" while the host's own configuration names it. ADR-010 point 6 is
+	# unreachable for exactly as long as this is missing.
+	for verb in enter uid storage; do
+		run awk "/^      cmd_$verb\(\) \{/,/^      \}\$/" "$(CONTAINER_NIX)"
+		assert_success
+		assert_output --partial "read_container_config"
+	done
+}

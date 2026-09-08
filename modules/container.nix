@@ -173,6 +173,12 @@ let
         nixcage_enter_parse "$@" || exit 1
         set -- ''${NIXCAGE_ENTER_ARGV[@]+"''${NIXCAGE_ENTER_ARGV[@]}"}
 
+        ## What the host declared, before anything reads it. A session resolves
+        ## --subject against PRINCIPAL_SUBJECTS and writes an /etc/passwd entry
+        ## per declared subject, and without this both are empty: every subject
+        ## the host declared is refused as one that does not exist.
+        read_container_config
+
         local name="''${1:-}" project="''${2:-}"
         [ -n "$name" ] && [ -n "$project" ] || die "$(usage)"
         shift 2
