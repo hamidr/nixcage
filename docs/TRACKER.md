@@ -4,7 +4,7 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-09-07
+**Generated:** 2026-09-08
 
 **Next PRD number:** 002
 
@@ -29,4 +29,4 @@ document, then regenerate.
 | [ADR-007](ADR-007-worktree-git-directory-bind.md) | A linked git worktree binds its git directory into the session | implemented | -- | ADR-002 | sessions bind the git directories a linked worktree points at, so git works in a worktree instead of failing outright |  |
 | [ADR-008](ADR-008-session-git-identity-and-signing.md) | Sessions commit under a declared identity and sign through the forwarded ssh-agent | implemented | -- | ADR-007 | sessions get a declared git identity and sign through the forwarded ssh-agent, holding no key of their own |  |
 | [ADR-009](ADR-009-exported-primitives.md) | nixcage exports four primitives and nothing else | accepted | -- | ADR-002, ADR-003, ADR-004 | a session, a principal's uid, owned storage and a way to reach the cage host are the whole interface a dependant sees |  |
-| [ADR-010](ADR-010-a-cage-maps-a-block-of-uids.md) | A cage maps a block of uids, and a session need not be root | proposed | -- | ADR-004, ADR-009 | a principal gets a contiguous block rather than one number, so a cage can hold subjects that do not trust each other |  |
+| [ADR-010](ADR-010-a-cage-maps-a-block-of-uids.md) | A cage maps a block of uids, and a session need not be root | implemented | -- | ADR-004, ADR-009 | a principal gets a contiguous block rather than one number, so a cage can hold subjects that do not trust each other |  |

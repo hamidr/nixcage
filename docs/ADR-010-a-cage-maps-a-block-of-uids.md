@@ -1,9 +1,9 @@
 ---
 id: ADR-010
 title: A cage maps a block of uids, and a session need not be root
-status: proposed
+status: implemented
 date: 2026-09-07
-status_date: 2026-09-07
+status_date: 2026-09-08
 summary: a principal gets a contiguous block rather than one number, so a cage can hold subjects that do not trust each other
 depends_on: [ADR-004, ADR-009]
 supersedes: []
@@ -162,7 +162,26 @@ and an exhausted range still fails with the message naming the option to widen.
 `tests/unit/enter_args.bats` gets the mapping and the subject flag, since what
 `enter` composes is what a dependant sees.
 
-Point 7 is reasoned from how user namespaces work and is not yet measured. It
-is the claim the rest of the document rests on, so it moves this ADR off
-proposed only once a test on a real host shows cage root reaching a uid inside
-its block and failing to reach one outside it.
+Point 7 was reasoned from how user namespaces work rather than measured, and
+it is the claim the rest of the document rests on. It has now been measured on
+a real host, against a principal allocated a block of two at 700000:
+
+```
+cage root -> its own subject (uid 1):   REACHED-1
+cage root -> past its block (uid 2):    setpriv: setresuid failed: Invalid argument
+```
+
+Cage root reaches the subject inside its block and cannot reach the number one
+past it, which is what the paragraph above asked for. The drop is done with
+`setpriv` named by store path, because the container profile carries no
+`util-linux` and the store is bound into every session.
+
+Two faults stood between this document and that measurement, and both meant no
+host had ever entered a cage as a subject. `cmd_enter` never called
+`read_container_config`, so `PRINCIPAL_SUBJECTS` was empty and point 6 refused
+every subject the host declared. Past that, nspawn resolves any user but root
+by exec'ing `getent` inside the container, and this systemd searches Nix
+profile paths for it rather than `/usr/bin/getent` and `/bin/getent`, none of
+which `make_rootfs` created. Both are fixed, and `tests/unit/exports.bats`
+holds each shape: every verb that reads the host's declaration reads it first,
+and the rootfs carries getent where this systemd looks for it.
