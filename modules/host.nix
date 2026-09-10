@@ -10,7 +10,10 @@
 }:
 let
   cfg = config.nixcage;
-  container = import ./container.nix { inherit pkgs; };
+  container = import ./container.nix {
+    inherit pkgs;
+    extraPackages = cfg.containerPackages;
+  };
 in
 {
   options.nixcage = {
@@ -83,6 +86,22 @@ in
         forgotten name's number is never reissued, so nothing new can inherit
         a dead principal's files. The range must not overlap accounts that
         already exist on this host.
+      '';
+    };
+
+        containerPackages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      example = lib.literalExpression "[ pkgs.ripgrep ]";
+      description = ''
+        Packages every session's userland carries, on top of the minimal one
+        nixcage provides. For a dependant that needs something present in every
+        cage whatever a project declares: `enter` takes binds and environment
+        and never packages, so there is otherwise no way to put one there.
+
+        nixcage has no opinion about what belongs in this list. What goes in it
+        is the host's business, which is what keeps the decision on the side
+        that knows why it is being made.
       '';
     };
 

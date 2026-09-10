@@ -171,3 +171,30 @@ teardown() {
 			fail "names a caller's concept: $line"
 	done <<<"$output"
 }
+
+@test "the session userland carries the tools a session reaches for" {
+	# coreutils has none of sed, grep, awk or xargs; they are gnused,
+	# gnugrep, gawk and findutils. A project with a devShell never notices,
+	# because mkShell inherits stdenv and stdenv carries all four. ADR-005
+	# makes a devShell optional, so a project without one gets a session
+	# where the ordinary text tools are simply absent.
+	for pkg in gnused gnugrep gawk findutils; do
+		run grep -qE "^      $pkg\$" "$(CONTAINER_NIX)"
+		assert_success
+	done
+}
+
+@test "a host can add to the session userland without editing this layer" {
+	# A dependant that needs one more thing in every cage has no way to put
+	# it there: enter takes binds and environment, not packages, and
+	# prepending PATH means reconstructing the profile path it does not know.
+	# The alternative is nixcage growing an opinion about what belongs in
+	# somebody else's cage, which ADR-009 exists to prevent.
+	run grep -q "extraPackages" "$(CONTAINER_NIX)"
+	assert_success
+
+	for m in host.nix nixcage.nix; do
+		run grep -q "containerPackages" "$NIXCAGE_ROOT/modules/$m"
+		assert_success
+	done
+}

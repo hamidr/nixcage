@@ -3,7 +3,15 @@
 ## VM module (macOS path) and the host module (Linux path) unchanged --
 ## the script only assumes a Linux system with /var/lib/nixcage,
 ## /etc/nixcage/{profile,secret-env}, and a nix daemon socket.
-{ pkgs }:
+{
+  pkgs,
+  ## What the host adds to every session's userland. A dependant that needs one
+  ## more thing in every cage has no other way to put it there: enter takes
+  ## binds and environment, never packages, and prepending PATH would mean
+  ## reconstructing a profile path the caller does not know. Empty by default,
+  ## so a host that asks for nothing gets exactly what it got before.
+  extraPackages ? [ ],
+}:
 let
   ## Minimal userland for project containers. Containers hold no system of
   ## their own -- this profile plus the read-only store bind is everything.
@@ -15,6 +23,13 @@ let
       nix
       git
       cacert
+      ## coreutils carries none of these. A project with a devShell gets them
+      ## from stdenv and never notices; ADR-005 makes a devShell optional, and
+      ## a session without one should not be missing the ordinary text tools.
+      gnused
+      gnugrep
+      gawk
+      findutils
       ## A project that declares its environment in .envrc is entered through
       ## direnv rather than nix develop, so direnv is part of the userland
       ## every session gets.
@@ -22,7 +37,8 @@ let
       ## ssh-keygen signs commits and ssh-add names the key to sign with;
       ## both talk to the forwarded agent rather than to any key on disk.
       openssh
-    ];
+    ]
+    ++ extraPackages;
   };
 
   ## Guest-side container manager. The host CLI only ever calls this over
