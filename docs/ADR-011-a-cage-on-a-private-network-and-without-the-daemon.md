@@ -71,7 +71,12 @@ session joins it with nspawn's `--network-namespace-path`. Nothing is set
 inside, because the cage that owns the namespace already did, so the
 switch to the subject is nspawn's own `--user` as in an ordinary session.
 Which pid is the running cage's is the caller's to know, as the address
-was.
+was. Two facts seen on a machine: nspawn keeps a directory per machine
+name under `/run/systemd/nspawn` and refuses a second machine of one name
+whether registered or not, so the joining session needs a name of its own;
+and `/sys/class/net` in the joining session is the host's sysfs, listing
+the host's interfaces, while netlink and `/proc/net/dev` are the joined
+namespace's own. The names leak; the network does not.
 
 ## Consequences
 
