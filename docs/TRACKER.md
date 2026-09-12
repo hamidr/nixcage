@@ -4,11 +4,11 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-09-08
+**Generated:** 2026-09-12
 
 **Next PRD number:** 001
 
-**Next ADR number:** 011
+**Next ADR number:** 012
 
 ## ADRs
 
@@ -24,3 +24,4 @@ document, then regenerate.
 | [ADR-008](ADR-008-session-git-identity-and-signing.md) | Sessions commit under a declared identity and sign through the forwarded ssh-agent | implemented | -- | ADR-007 | sessions get a declared git identity and sign through the forwarded ssh-agent, holding no key of their own |  |
 | [ADR-009](ADR-009-exported-primitives.md) | nixcage exports four primitives and nothing else | implemented | -- | ADR-002, ADR-003, ADR-004 | a session, a principal's uid, owned storage and a way to reach the cage host are the whole interface a dependant sees |  |
 | [ADR-010](ADR-010-a-cage-maps-a-block-of-uids.md) | A cage maps a block of uids, and a session need not be root | implemented | -- | ADR-004, ADR-009 | a principal gets a contiguous block rather than one number, so a cage can hold subjects that do not trust each other |  |
+| [ADR-011](ADR-011-a-cage-on-a-private-network-and-without-the-daemon.md) | A cage may be placed on a private network, and may be given no nix daemon | proposed | -- | ADR-009, ADR-010 | two enter options a dependant asked for: one veth on a named bridge at a named address, and no daemon socket |  |

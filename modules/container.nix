@@ -94,7 +94,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>] [--no-nix-daemon] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | list | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -218,6 +218,9 @@ let
         local home="$NIXCAGE_ENTER_HOME"
         local shell_name="$NIXCAGE_ENTER_SHELL"
         local uid="$NIXCAGE_ENTER_UID"
+        local network_bridge="$NIXCAGE_ENTER_NETWORK_BRIDGE"
+        local network_addr="$NIXCAGE_ENTER_NETWORK_ADDR"
+        local no_nix_daemon="$NIXCAGE_ENTER_NO_NIX_DAEMON"
         local -a asked_binds=(''${NIXCAGE_ENTER_BINDS[@]+"''${NIXCAGE_ENTER_BINDS[@]}"})
         local -a asked_env=(''${NIXCAGE_ENTER_ENV[@]+"''${NIXCAGE_ENTER_ENV[@]}"})
 
@@ -295,6 +298,7 @@ let
         local -a session_user=()
         [ -n "$subject" ] && session_user=("--user=$subject")
 
+
         local cdir="$STATE_DIR/containers/$name"
         [ -n "$home" ] || home="$STATE_DIR/homes/$name"
         mkdir -p "$cdir" "$home"
@@ -327,6 +331,39 @@ let
           . ${./dev-shell.sh}; \
           nixcage_enter_shell \"\$@\""
         set -- placeholder "$@"
+
+        ## A cage on a private network has one veth, on the bridge the
+        ## caller named, and no other interface. nspawn makes the veth and
+        ## retains CAP_NET_ADMIN inside, and nothing else assigns the
+        ## address: the session's first process is cage root long enough to
+        ## set it on host0, then becomes the subject. --user would have made
+        ## it the subject before host0 existed, so the switch is ours here.
+        local -a network_args=() session_cmd_env=()
+        if [ -n "$network_bridge" ]; then
+          network_args=("--network-bridge=$network_bridge")
+          session_user=()
+          session_cmd_env=("--setenv=NIXCAGE_SESSION_CMD=$shell_cmd")
+          local become=""
+          if [ -n "$subject" ]; then
+            become="export USER=$subject LOGNAME=$subject; \
+              exec ${pkgs.util-linux}/bin/setpriv \
+                --reuid=$subject_offset --regid=$subject_offset --clear-groups --"
+          else
+            become="exec"
+          fi
+          shell_cmd="${pkgs.iproute2}/bin/ip addr add $network_addr dev host0 && \
+            ${pkgs.iproute2}/bin/ip link set host0 up && \
+            $become $PROFILE/bin/bash -c \"\$NIXCAGE_SESSION_CMD\" \"\$@\""
+        fi
+
+        ## The daemon socket is what lets nix inside a session build and
+        ## fetch. A caller that asks for none gets a session where nix cannot
+        ## reach a store at all, which is the point.
+        local -a daemon_args=(
+          --bind=/nix/var/nix/daemon-socket
+          --setenv=NIX_REMOTE=daemon
+        )
+        [ -n "$no_nix_daemon" ] && daemon_args=()
 
         ## Git identity, rendered by the platform module from nixcage.git.
         ## Absent when the user declared none, in which case git behaves as
@@ -366,7 +403,8 @@ let
           --private-users-ownership=off \
           --bind-ro=/nix/store \
           --bind-ro=/nix/var/nix/db \
-          --bind=/nix/var/nix/daemon-socket \
+          ''${daemon_args[@]+"''${daemon_args[@]}"} \
+          ''${network_args[@]+"''${network_args[@]}"} \
           --bind="$project:/workspace" \
           --bind="$home:$session_home" \
           ''${git_binds[@]+"''${git_binds[@]}"} \
@@ -376,7 +414,7 @@ let
           ''${session_user[@]+"''${session_user[@]}"} \
           --setenv=HOME="$session_home" \
           --setenv=PATH="$PROFILE/bin" \
-          --setenv=NIX_REMOTE=daemon \
+          ''${session_cmd_env[@]+"''${session_cmd_env[@]}"} \
           --setenv=NIX_CONFIG='experimental-features = nix-command flakes' \
           --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt" \
           --setenv=NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc" \

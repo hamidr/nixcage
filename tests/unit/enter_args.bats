@@ -139,3 +139,73 @@ teardown() {
 	nixcage_enter_parse --uid 700000 myproj /srv/myproj
 	[ -z "$NIXCAGE_ENTER_SUBJECT" ]
 }
+
+# A cage on a private network (cageworks ADR-037). The caller names the bridge
+# and the one address the cage gets on it; nixcage owns the veth and sets the
+# address inside, so what a caller can ask for is a placement and nothing else.
+
+@test "given a bridge and an address, a session is placed on that bridge at that address" {
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_NETWORK_BRIDGE" = cageworks-acme ]
+	[ "$NIXCAGE_ENTER_NETWORK_ADDR" = 10.77.0.4/24 ]
+	[ "${NIXCAGE_ENTER_ARGV[0]}" = myproj ]
+}
+
+@test "given no network option, a session has no bridge and no address" {
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_NETWORK_BRIDGE" ]
+	[ -z "$NIXCAGE_ENTER_NETWORK_ADDR" ]
+}
+
+@test "when the address carries no prefix, the network is refused" {
+	run nixcage_enter_parse --network cageworks-acme:10.77.0.4 myproj /srv/myproj
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"not a bridge placement"* ]]
+}
+
+@test "when the bridge name could not be an interface, the network is refused" {
+	run nixcage_enter_parse --network "a-name-far-too-long-for-an-interface:10.77.0.4/24" myproj /srv/myproj
+	[ "$status" -ne 0 ]
+	run nixcage_enter_parse --network "br/acme:10.77.0.4/24" myproj /srv/myproj
+	[ "$status" -ne 0 ]
+}
+
+@test "when the placement has no colon, the network is refused" {
+	run nixcage_enter_parse --network cageworks-acme myproj /srv/myproj
+	[ "$status" -ne 0 ]
+}
+
+# A cage without the nix daemon (cageworks ADR-037): nothing inside can build
+# or fetch, so a tool reaches a cage through the flake or not at all.
+
+@test "given no daemon is asked for, a session records that it has none" {
+	nixcage_enter_parse --no-nix-daemon myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_NO_NIX_DAEMON" = 1 ]
+}
+
+@test "given no option, a session keeps its daemon" {
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_NO_NIX_DAEMON" ]
+}
+
+@test "when a devShell is named without a daemon, the pair is refused rather than resolved" {
+	run nixcage_enter_parse --shell backend --no-nix-daemon myproj /srv/myproj
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"--shell and --no-nix-daemon are mutually exclusive"* ]]
+	run nixcage_enter_parse --no-nix-daemon --shell backend myproj /srv/myproj
+	[ "$status" -ne 0 ]
+}
+
+@test "a network and no daemon together are fine" {
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 --no-nix-daemon myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_NETWORK_BRIDGE" = cageworks-acme ]
+	[ "$NIXCAGE_ENTER_NO_NIX_DAEMON" = 1 ]
+}
+
+@test "a parse without a network does not inherit the last one's placement" {
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 --no-nix-daemon myproj /srv/myproj
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_NETWORK_BRIDGE" ]
+	[ -z "$NIXCAGE_ENTER_NETWORK_ADDR" ]
+	[ -z "$NIXCAGE_ENTER_NO_NIX_DAEMON" ]
+}

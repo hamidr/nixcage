@@ -24,6 +24,9 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_SHELL=""
 	NIXCAGE_ENTER_AUTH_SOCK=""
 	NIXCAGE_ENTER_NO_AGENT=""
+	NIXCAGE_ENTER_NETWORK_BRIDGE=""
+	NIXCAGE_ENTER_NETWORK_ADDR=""
+	NIXCAGE_ENTER_NO_NIX_DAEMON=""
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
 	NIXCAGE_ENTER_ARGV=()
@@ -67,6 +70,14 @@ nixcage_enter_parse() {
 			NIXCAGE_ENTER_SHELL="${2:-}"
 			shift 2 || return 1
 			;;
+		--network)
+			nixcage_enter_network_arg "${2:-}" || return 1
+			shift 2 || return 1
+			;;
+		--no-nix-daemon)
+			NIXCAGE_ENTER_NO_NIX_DAEMON=1
+			shift
+			;;
 		--bind)
 			arg="$(nixcage_bind_arg --bind "${2:-}")" || return 1
 			NIXCAGE_ENTER_BINDS+=("$arg")
@@ -95,6 +106,15 @@ nixcage_enter_parse() {
 		return 1
 	fi
 
+	## A devShell is realised by nix inside the session, and nix inside the
+	## session reaches the store through the daemon. Refused for the same
+	## reason the agent pair is: the alternative is a session that fails at
+	## its first command with an error about a socket nobody mentioned.
+	if [ -n "$NIXCAGE_ENTER_SHELL" ] && [ -n "$NIXCAGE_ENTER_NO_NIX_DAEMON" ]; then
+		echo "nixcage: --shell and --no-nix-daemon are mutually exclusive" >&2
+		return 1
+	fi
+
 	if [ -n "$NIXCAGE_ENTER_UID" ] &&
 		! [[ "$NIXCAGE_ENTER_UID" =~ ^[0-9]+$ ]]; then
 		echo "nixcage: not a uid: $NIXCAGE_ENTER_UID" >&2
@@ -120,4 +140,23 @@ nixcage_enter_parse() {
 	fi
 
 	return 0
+}
+
+## A placement on a private network: <bridge>:<address>/<prefix>. The bridge
+## name becomes an interface name on the host, so it is held to the kernel's
+## fifteen characters and the alphabet an interface may carry; the address is
+## one IPv4 address with its prefix, because it is set on the cage's veth and
+## an address with no prefix is a route nobody chose. Both are the caller's;
+## which veth and which capability set the cage gets are nixcage's.
+nixcage_enter_network_arg() {
+	local placement="$1"
+	local bridge="${placement%%:*}" addr="${placement#*:}"
+	if [ "$bridge" = "$placement" ] ||
+		! [[ "$bridge" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,14}$ ]] ||
+		! [[ "$addr" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]]; then
+		echo "nixcage: not a bridge placement: $placement" >&2
+		return 1
+	fi
+	NIXCAGE_ENTER_NETWORK_BRIDGE="$bridge"
+	NIXCAGE_ENTER_NETWORK_ADDR="$addr"
 }

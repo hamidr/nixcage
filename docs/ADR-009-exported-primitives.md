@@ -41,6 +41,8 @@ dependant silently.
   NAME` and `--no-agent` alongside the `--auth-sock` it already had. Every one
   of them existed as a special case inside the script before this document, so
   what is exported is a description of working code rather than a design.
+  ADR-010 added `--subject NAME`; ADR-011 adds `--network BRIDGE:ADDR/PREFIX`
+  and `--no-nix-daemon`.
 - *A principal's uid.* `nixcage-container uid <principal>` allocates from the
   range `nixcage.principalUidRange` declares, monotonically, never reissuing a
   number. What a principal is stays the caller's: nixcage promises only that
