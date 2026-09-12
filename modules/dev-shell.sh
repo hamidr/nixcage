@@ -168,6 +168,21 @@ nixcage_enter_direnv() {
 nixcage_enter_shell() {
 	local project="${NIXCAGE_PROJECT:-/workspace}"
 
+	## A session with no nix daemon (ADR-011) can evaluate nothing, so the
+	## probe below would refuse it as a broken project. It runs the command in
+	## the base userland, with whatever the caller put on the front of PATH:
+	## a caller that took the daemon away is the one that realised the
+	## toolchain elsewhere, and this is how it hands it in.
+	if [ -n "${NIXCAGE_NO_NIX_DAEMON:-}" ]; then
+		if [ -n "${NIXCAGE_PATH_PREFIX:-}" ]; then
+			export PATH="$NIXCAGE_PATH_PREFIX:$PATH"
+		fi
+		if [ "$#" -gt 0 ]; then
+			exec "$@"
+		fi
+		exec bash
+	fi
+
 	## A session that named its own devShell has said what its environment is
 	## more specifically than the project can, so it wins over both the .envrc
 	## and the default-shell probe. Several sessions work one repository, and

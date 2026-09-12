@@ -53,7 +53,10 @@ A session that names no subject stays cage root, as it does today.
 every build or fetch fails at once. `--shell` with it is refused rather
 than resolved: a devShell is realised by nix inside the session, and the
 alternative is a session that fails at its first command with an error
-about a socket nobody mentioned.
+about a socket nobody mentioned. Inside, the environment selection skips
+its flake probe, which could not run, and execs the command in the base
+userland; a caller that realised a toolchain elsewhere hands it in as
+`--setenv NIXCAGE_PATH_PREFIX=<dir>`, put on the front of `PATH`.
 
 **4. Both are options and both default off.** A session that asks for
 neither is the session ADR-009 exported, byte for byte.

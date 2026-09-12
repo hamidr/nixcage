@@ -363,7 +363,9 @@ let
           --bind=/nix/var/nix/daemon-socket
           --setenv=NIX_REMOTE=daemon
         )
-        [ -n "$no_nix_daemon" ] && daemon_args=()
+        ## Told to the session as well, so the environment selection inside
+        ## skips the flake probe it could not run (dev-shell.sh).
+        [ -n "$no_nix_daemon" ] && daemon_args=(--setenv=NIXCAGE_NO_NIX_DAEMON=1)
 
         ## Git identity, rendered by the platform module from nixcage.git.
         ## Absent when the user declared none, in which case git behaves as
