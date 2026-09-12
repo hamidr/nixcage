@@ -338,6 +338,9 @@ let
         ## address: the session's first process is cage root long enough to
         ## set it on host0, then becomes the subject. --user would have made
         ## it the subject before host0 existed, so the switch is ours here.
+        ## The inner bash -c consumes its first argument as $0 exactly as
+        ## the outer one does, so the placeholder is given again; without it
+        ## the command's first word was eaten and "--mode" reached exec.
         local -a network_args=() session_cmd_env=()
         if [ -n "$network_bridge" ]; then
           network_args=("--network-bridge=$network_bridge")
@@ -353,7 +356,7 @@ let
           fi
           shell_cmd="${pkgs.iproute2}/bin/ip addr add $network_addr dev host0 && \
             ${pkgs.iproute2}/bin/ip link set host0 up && \
-            $become $PROFILE/bin/bash -c \"\$NIXCAGE_SESSION_CMD\" \"\$@\""
+            $become $PROFILE/bin/bash -c \"\$NIXCAGE_SESSION_CMD\" placeholder \"\$@\""
         fi
 
         ## The daemon socket is what lets nix inside a session build and
