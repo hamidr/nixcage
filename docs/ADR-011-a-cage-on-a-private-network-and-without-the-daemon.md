@@ -61,6 +61,18 @@ userland; a caller that realised a toolchain elsewhere hands it in as
 **4. Both are options and both default off.** A session that asks for
 neither is the session ADR-009 exported, byte for byte.
 
+**5. `enter --network ns:<path>`, the network of a cage already running**
+(amended 2026-09-12). A placement names one veth and one address, and a
+second session for the same name would collide with the first on both:
+the dependant found this when a person entered a role whose actor the
+supervisor keeps running. The second shape names a network namespace by
+absolute path, `/proc/<pid>/ns/net` of the running cage's leader, and the
+session joins it with nspawn's `--network-namespace-path`. Nothing is set
+inside, because the cage that owns the namespace already did, so the
+switch to the subject is nspawn's own `--user` as in an ordinary session.
+Which pid is the running cage's is the caller's to know, as the address
+was.
+
 ## Consequences
 
 `modules/enter-args.sh` grows two options and one refusal; the guest script
@@ -80,6 +92,9 @@ Services a dependant wants reachable listen on the bridge.
 address; one without a prefix, without a colon, or with a name that could
 not be an interface is refused; no daemon is recorded when asked for and
 absent otherwise; `--shell` with `--no-nix-daemon` is refused in either
-order; a parse inherits neither from the last one. The guest script builds,
-which runs shellcheck over the nspawn line. What the cage actually sees is
-the dependant's proof, `tests/manual/isolation.sh` in cageworks.
+order; a parse inherits neither from the last one; a namespace path is
+parsed into the namespace and no bridge, a relative one is refused, and a
+parse inherits no namespace either. The guest script builds, which runs
+shellcheck over the nspawn line. What the cage actually sees is the
+dependant's proof, `tests/manual/isolation.sh` in cageworks, which enters a
+role by hand beside its running actor.

@@ -26,6 +26,7 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_NO_AGENT=""
 	NIXCAGE_ENTER_NETWORK_BRIDGE=""
 	NIXCAGE_ENTER_NETWORK_ADDR=""
+	NIXCAGE_ENTER_NETWORK_NS=""
 	NIXCAGE_ENTER_NO_NIX_DAEMON=""
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
@@ -148,8 +149,22 @@ nixcage_enter_parse() {
 ## one IPv4 address with its prefix, because it is set on the cage's veth and
 ## an address with no prefix is a route nobody chose. Both are the caller's;
 ## which veth and which capability set the cage gets are nixcage's.
+##
+## Or the network of a cage already running: ns:<path>, an absolute path to
+## a network namespace such as /proc/<pid>/ns/net. The session joins it and
+## sets nothing, because the cage that owns the namespace already did; a
+## second veth for the same name and address would collide with the first.
 nixcage_enter_network_arg() {
 	local placement="$1"
+	if [ "${placement#ns:}" != "$placement" ]; then
+		local path="${placement#ns:}"
+		if ! nixcage_bind_path_ok "$path"; then
+			echo "nixcage: not a network namespace path: $placement" >&2
+			return 1
+		fi
+		NIXCAGE_ENTER_NETWORK_NS="$path"
+		return 0
+	fi
 	local bridge="${placement%%:*}" addr="${placement#*:}"
 	if [ "$bridge" = "$placement" ] ||
 		! [[ "$bridge" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,14}$ ]] ||

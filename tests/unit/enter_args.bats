@@ -151,6 +151,30 @@ teardown() {
 	[ "${NIXCAGE_ENTER_ARGV[0]}" = myproj ]
 }
 
+# The network of a cage already running (cageworks: a person entering a role
+# whose actor holds the role's one veth and address). The caller names the
+# namespace by path; nixcage joins it and sets nothing, since the cage that
+# owns it did.
+@test "given a namespace path, a session joins that network and is placed on no bridge" {
+	nixcage_enter_parse --network ns:/proc/4242/ns/net myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_NETWORK_NS" = /proc/4242/ns/net ]
+	[ -z "$NIXCAGE_ENTER_NETWORK_BRIDGE" ]
+	[ -z "$NIXCAGE_ENTER_NETWORK_ADDR" ]
+	[ "${NIXCAGE_ENTER_ARGV[0]}" = myproj ]
+}
+
+@test "when the namespace path is not absolute, the network is refused" {
+	run nixcage_enter_parse --network ns:proc/4242/ns/net myproj /srv/myproj
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"not a network namespace"* ]]
+}
+
+@test "a parse without a network does not inherit the last one's namespace" {
+	nixcage_enter_parse --network ns:/proc/4242/ns/net myproj /srv/myproj
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_NETWORK_NS" ]
+}
+
 @test "given no network option, a session has no bridge and no address" {
 	nixcage_enter_parse myproj /srv/myproj
 	[ -z "$NIXCAGE_ENTER_NETWORK_BRIDGE" ]

@@ -94,7 +94,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>] [--no-nix-daemon] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | list | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -220,6 +220,7 @@ let
         local uid="$NIXCAGE_ENTER_UID"
         local network_bridge="$NIXCAGE_ENTER_NETWORK_BRIDGE"
         local network_addr="$NIXCAGE_ENTER_NETWORK_ADDR"
+        local network_ns="$NIXCAGE_ENTER_NETWORK_NS"
         local no_nix_daemon="$NIXCAGE_ENTER_NO_NIX_DAEMON"
         local -a asked_binds=(''${NIXCAGE_ENTER_BINDS[@]+"''${NIXCAGE_ENTER_BINDS[@]}"})
         local -a asked_env=(''${NIXCAGE_ENTER_ENV[@]+"''${NIXCAGE_ENTER_ENV[@]}"})
@@ -341,8 +342,14 @@ let
         ## The inner bash -c consumes its first argument as $0 exactly as
         ## the outer one does, so the placeholder is given again; without it
         ## the command's first word was eaten and "--mode" reached exec.
+        ##
+        ## A session joining a running cage's namespace has nothing to set:
+        ## the cage that owns it did, so the switch to the subject is
+        ## nspawn's own --user as in an ordinary session.
         local -a network_args=() session_cmd_env=()
-        if [ -n "$network_bridge" ]; then
+        if [ -n "$network_ns" ]; then
+          network_args=("--network-namespace-path=$network_ns")
+        elif [ -n "$network_bridge" ]; then
           network_args=("--network-bridge=$network_bridge")
           session_user=()
           session_cmd_env=("--setenv=NIXCAGE_SESSION_CMD=$shell_cmd")
