@@ -137,9 +137,10 @@ exported primitives, which are the whole interface (ADR-009):
 
 | Primitive | What it gives |
 |---|---|
-| `nixcage-container enter [--uid n] [--user name] [--subject name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] [--network BRIDGE:ADDR/PREFIX] [--no-nix-daemon] <name> <project> [cmd]` | A session built out of what you asked for |
+| `nixcage-container enter [--uid n] [--user name] [--subject name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] [--network BRIDGE:ADDR/PREFIX\|ns:PATH] [--no-nix-daemon] [--memory SIZE] [--cpus N] <name> <project> [cmd]` | A session built out of what you asked for, bounded on its scope when asked |
 | `nixcage-container uid <principal> [<subject>]` | A durable uid for a name, never reissued |
 | `nixcage-container storage ensure <path> <uid> [quota]` | That path owned by that uid, bounded where it can be |
+| `nixcage-container status <name>`, `netns <name>`, `stop <name>` | A running cage from its scope: its leader and cgroup, the namespace path `enter --network ns:` takes, and an end to it (ADR-012) |
 | `nixcage exec [--tty] [--agent] -- <cmd>` | A way to reach the other three from your own machine |
 
 You name paths and principals; nixcage names datasets and numbers. Set
