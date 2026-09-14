@@ -38,10 +38,14 @@ nixcage_storage_has_dataset() {
 ##
 ## Not cosmetic: a mounted parent would cover the directory it mounts on, and
 ## that directory holds the datasets of every sibling.
+##
+## Two sessions prepared side by side reach for the same parent; the one
+## whose create loses asks again rather than failing on the other's success.
 nixcage_storage_ensure_container() {
 	local dataset="$1"
 	nixcage_storage_has_dataset "$dataset" && return 0
-	zfs create -o mountpoint=none "$dataset"
+	zfs create -o mountpoint=none "$dataset" 2>/dev/null ||
+		nixcage_storage_has_dataset "$dataset"
 }
 
 ## Every ancestor of a dataset, outermost first, down to but excluding the
