@@ -8,7 +8,7 @@ document, then regenerate.
 
 **Next PRD number:** 001
 
-**Next ADR number:** 013
+**Next ADR number:** 014
 
 ## ADRs
 
@@ -26,3 +26,4 @@ document, then regenerate.
 | [ADR-010](ADR-010-a-cage-maps-a-block-of-uids.md) | A cage maps a block of uids, and a session need not be root | implemented | -- | ADR-004, ADR-009 | a principal gets a contiguous block rather than one number, so a cage can hold subjects that do not trust each other |  |
 | [ADR-011](ADR-011-a-cage-on-a-private-network-and-without-the-daemon.md) | A cage may be placed on a private network, and may be given no nix daemon | proposed | -- | ADR-009, ADR-010 | two enter options a dependant asked for: one veth on a named bridge at a named address, and no daemon socket |  |
 | [ADR-012](ADR-012-a-cage-has-a-scope-and-nixcage-answers-for-it.md) | A cage has a scope, and nixcage answers for it | proposed | -- | ADR-009, ADR-011 | status, netns and stop for a running cage from the scope nspawn gives it; memory and cpu bounds set on it at enter |  |
+| [ADR-013](ADR-013-nixcage-makes-the-veth-and-names-it.md) | nixcage makes a cage's veth and names it, so a cage name is not bounded by an interface name | proposed | -- | ADR-011, ADR-012 | for a bridge placement nixcage makes the veth pair, names the host end from a hash, and tells the caller that name |  |
