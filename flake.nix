@@ -78,6 +78,12 @@
           };
         };
 
+      ## The host end of a cage's veth on a bridge placement, as a function
+      ## of the cage's name (ADR-013): the same twelve hex digits the guest
+      ## script computes, for a host that writes its rules at build time.
+      flake.lib.vethHostName =
+        name: "nc-" + builtins.substring 0 12 (builtins.hashString "sha256" name);
+
       flake.overlays.default = final: _prev: {
         nixcage =
           let

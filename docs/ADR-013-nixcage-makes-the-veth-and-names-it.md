@@ -43,8 +43,10 @@ only until nspawn renames it.
 
 **3. The caller is told the name.** `nixcage-container veth <name>` prints
 the host end's name, a pure function of the cage's name that needs no
-running cage. A host's rules key on what nixcage printed, never on a
-prefix they assume.
+running cage; the flake exports the same function as `lib.vethHostName`
+for a host that writes its rules at build time, and the suite holds the
+two equal. A host's rules key on what nixcage said, never on a prefix
+they assume.
 
 **4. The bound on a cage's name is nspawn's, not an interface's.** A cage
 name is a machine name: the alphabet `check_name` allows, at most

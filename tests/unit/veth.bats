@@ -71,3 +71,13 @@ teardown() {
 	assert_failure
 	[ ! -e "$CALLS" ]
 }
+
+# The host's rules are written at its build, where no verb can be asked, so
+# the flake exports the same function of the name (ADR-013 point 3) and the
+# two are held equal here.
+@test "the flake's lib.vethHostName answers exactly what the shell answers" {
+	local from_nix
+	from_nix="$(nix eval --raw --impure --expr "(builtins.getFlake \"path:$NIXCAGE_ROOT\").lib.vethHostName \"a-cage-name-well-past-twelve-characters\"" 2>/dev/null)"
+	[ -n "$from_nix" ]
+	[ "$from_nix" = "$(nixcage_veth_host_name a-cage-name-well-past-twelve-characters)" ]
+}
