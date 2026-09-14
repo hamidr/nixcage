@@ -28,6 +28,8 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_NETWORK_ADDR=""
 	NIXCAGE_ENTER_NETWORK_NS=""
 	NIXCAGE_ENTER_NO_NIX_DAEMON=""
+	NIXCAGE_ENTER_MEMORY=""
+	NIXCAGE_ENTER_CPUS=""
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
 	NIXCAGE_ENTER_ARGV=()
@@ -78,6 +80,14 @@ nixcage_enter_parse() {
 		--no-nix-daemon)
 			NIXCAGE_ENTER_NO_NIX_DAEMON=1
 			shift
+			;;
+		--memory)
+			NIXCAGE_ENTER_MEMORY="${2:-}"
+			shift 2 || return 1
+			;;
+		--cpus)
+			NIXCAGE_ENTER_CPUS="${2:-}"
+			shift 2 || return 1
 			;;
 		--bind)
 			arg="$(nixcage_bind_arg --bind "${2:-}")" || return 1
@@ -132,6 +142,19 @@ nixcage_enter_parse() {
 		return 1
 	fi
 
+	## Bounds become properties of the cage's scope (ADR-012), in the forms
+	## systemd reads: a size with a unit letter, a count of whole cpus.
+	if [ -n "$NIXCAGE_ENTER_MEMORY" ] &&
+		! [[ "$NIXCAGE_ENTER_MEMORY" =~ ^[0-9]+[KMGT]?$ ]]; then
+		echo "nixcage: not a memory size: $NIXCAGE_ENTER_MEMORY" >&2
+		return 1
+	fi
+	if [ -n "$NIXCAGE_ENTER_CPUS" ] &&
+		! [[ "$NIXCAGE_ENTER_CPUS" =~ ^[1-9][0-9]*$ ]]; then
+		echo "nixcage: not a cpu count: $NIXCAGE_ENTER_CPUS" >&2
+		return 1
+	fi
+
 	## The home is a destination inside the cage's own filesystem, so it is
 	## held to the same spelling every other path is.
 	if [ -n "$NIXCAGE_ENTER_HOME" ] &&
@@ -174,4 +197,12 @@ nixcage_enter_network_arg() {
 	fi
 	NIXCAGE_ENTER_NETWORK_BRIDGE="$bridge"
 	NIXCAGE_ENTER_NETWORK_ADDR="$addr"
+}
+
+## The bounds as nspawn takes them, one argument per line: properties of
+## the scope it allocates for the cage. A cpu count is a quota of that many
+## whole cpus.
+nixcage_enter_property_args() {
+	[ -z "$NIXCAGE_ENTER_MEMORY" ] || printf -- '--property=MemoryMax=%s\n' "$NIXCAGE_ENTER_MEMORY"
+	[ -z "$NIXCAGE_ENTER_CPUS" ] || printf -- '--property=CPUQuota=%s%%\n' "$((NIXCAGE_ENTER_CPUS * 100))"
 }

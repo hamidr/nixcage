@@ -78,6 +78,7 @@ let
       . ${./bind.sh}
       . ${./enter-args.sh}
       . ${./dev-shell.sh}
+      . ${./scope.sh}
 
       STATE_DIR=/var/lib/nixcage
       ## Rendered by the platform module: the uid range principals are
@@ -94,7 +95,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--memory <size>] [--cpus <n>] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | list | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -408,9 +409,19 @@ let
         ## otherwise appear as an unmapped nobody inside the container.
         chown -R "$owner_uid:$owner_gid" "$rootfs"
 
+        ## Bounds are properties of the scope nspawn allocates for the cage
+        ## (ADR-012); with none asked, the cage is bounded by the machine.
+        local -a property_args=()
+        local property_line
+        while IFS= read -r property_line; do
+          [ -n "$property_line" ] || continue
+          property_args+=("$property_line")
+        done < <(nixcage_enter_property_args)
+
         systemd-nspawn --quiet --register=no \
           --directory="$rootfs" \
           --machine="$name" \
+          ''${property_args[@]+"''${property_args[@]}"} \
           --private-users="$owner_uid:$block" \
           --private-users-ownership=off \
           --bind-ro=/nix/store \
@@ -487,6 +498,28 @@ let
         esac
       }
 
+      ## The verbs over a running cage, read from its scope (ADR-012).
+      cmd_status() {
+        local name="''${1:-}"
+        [ -n "$name" ] || die "usage: nixcage-container status <name>"
+        check_name "$name"
+        nixcage_scope_status "$name"
+      }
+
+      cmd_netns() {
+        local name="''${1:-}"
+        [ -n "$name" ] || die "usage: nixcage-container netns <name>"
+        check_name "$name"
+        nixcage_scope_netns "$name"
+      }
+
+      cmd_stop() {
+        local name="''${1:-}"
+        [ -n "$name" ] || die "usage: nixcage-container stop <name>"
+        check_name "$name"
+        nixcage_scope_stop "$name"
+      }
+
       cmd_list() {
         [ -d "$STATE_DIR/containers" ] || return 0
         ls -1 "$STATE_DIR/containers"
@@ -504,6 +537,9 @@ let
       enter) cmd_enter "$@" ;;
       uid) cmd_uid "$@" ;;
       storage) cmd_storage "$@" ;;
+      status) cmd_status "$@" ;;
+      netns) cmd_netns "$@" ;;
+      stop) cmd_stop "$@" ;;
       list) cmd_list ;;
       rm) cmd_rm "$@" ;;
       *) die "$(usage)" ;;

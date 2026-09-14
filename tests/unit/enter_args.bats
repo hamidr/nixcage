@@ -233,3 +233,36 @@ teardown() {
 	[ -z "$NIXCAGE_ENTER_NETWORK_ADDR" ]
 	[ -z "$NIXCAGE_ENTER_NO_NIX_DAEMON" ]
 }
+
+# A cage bounded on the scope nspawn gives it (ADR-012): two properties the
+# caller sizes, refused when they could not be a size or a count.
+@test "given memory and cpus, a session carries them as properties of its scope" {
+	nixcage_enter_parse --memory 4G --cpus 2 myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_MEMORY" = 4G ]
+	[ "$NIXCAGE_ENTER_CPUS" = 2 ]
+	run nixcage_enter_property_args
+	assert_line --index 0 "--property=MemoryMax=4G"
+	assert_line --index 1 "--property=CPUQuota=200%"
+}
+
+@test "given neither bound, a session sets no property and is bounded by the machine" {
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_MEMORY" ]
+	[ -z "$NIXCAGE_ENTER_CPUS" ]
+	run nixcage_enter_property_args
+	assert_output ""
+}
+
+@test "when the memory is not a size, the session is refused" {
+	run nixcage_enter_parse --memory lots myproj /srv/myproj
+	assert_failure
+	assert_output --partial "not a memory size: lots"
+}
+
+@test "when the cpu count is not a positive integer, the session is refused" {
+	run nixcage_enter_parse --cpus 1.5 myproj /srv/myproj
+	assert_failure
+	assert_output --partial "not a cpu count: 1.5"
+	run nixcage_enter_parse --cpus 0 myproj /srv/myproj
+	assert_failure
+}
