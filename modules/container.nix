@@ -62,6 +62,8 @@ let
       coreutils
       systemd
       gnugrep
+      ## The veth pair a bridge placement gets is made here (ADR-013).
+      iproute2
       ## Resolving a linked worktree's git directories, which the project bind
       ## does not cover.
       git
@@ -79,6 +81,7 @@ let
       . ${./enter-args.sh}
       . ${./dev-shell.sh}
       . ${./scope.sh}
+      . ${./veth.sh}
 
       STATE_DIR=/var/lib/nixcage
       ## Rendered by the platform module: the uid range principals are
@@ -95,7 +98,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | veth <name> | list | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -351,7 +354,15 @@ let
         if [ -n "$network_ns" ]; then
           network_args=("--network-namespace-path=$network_ns")
         elif [ -n "$network_bridge" ]; then
-          network_args=("--network-bridge=$network_bridge")
+          ## The pair is nixcage's (ADR-013): made here, its host end on
+          ## the bridge under a name that fits any cage name, its cage end
+          ## handed to nspawn to rename host0. Deleted with the rootfs,
+          ## whichever way the session ends.
+          nixcage_veth_make "$name" "$network_bridge" ||
+            die "could not make the veth pair for $name on $network_bridge"
+          # shellcheck disable=SC2064
+          trap "rm -rf '$rootfs'; ip link del '$(nixcage_veth_host_name "$name")' 2>/dev/null" EXIT
+          network_args=("$(nixcage_veth_nspawn_arg "$name")")
           session_user=()
           session_cmd_env=("--setenv=NIXCAGE_SESSION_CMD=$shell_cmd")
           local become=""
@@ -530,6 +541,14 @@ let
         nixcage_scope_stop "$name"
       }
 
+      ## The host end of a cage's veth, a function of its name (ADR-013).
+      cmd_veth() {
+        local name="''${1:-}"
+        [ -n "$name" ] || die "usage: nixcage-container veth <name>"
+        check_name "$name"
+        nixcage_veth_host_name "$name"
+      }
+
       cmd_list() {
         [ -d "$STATE_DIR/containers" ] || return 0
         ls -1 "$STATE_DIR/containers"
@@ -550,6 +569,7 @@ let
       status) cmd_status "$@" ;;
       netns) cmd_netns "$@" ;;
       stop) cmd_stop "$@" ;;
+      veth) cmd_veth "$@" ;;
       list) cmd_list ;;
       rm) cmd_rm "$@" ;;
       *) die "$(usage)" ;;

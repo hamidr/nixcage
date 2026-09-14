@@ -43,9 +43,8 @@ only until nspawn renames it.
 
 **3. The caller is told the name.** `nixcage-container veth <name>` prints
 the host end's name, a pure function of the cage's name that needs no
-running cage, and `status` prints it beside the cgroup when the cage is
-running. A host's rules key on what nixcage printed, never on a prefix
-they assume.
+running cage. A host's rules key on what nixcage printed, never on a
+prefix they assume.
 
 **4. The bound on a cage's name is nspawn's, not an interface's.** A cage
 name is a machine name: the alphabet `check_name` allows, at most
@@ -67,8 +66,8 @@ deleted by the trap like a rootfs is. A pair whose cage end nspawn moved
 back is a pair with both ends on the host until the trap runs, which is
 the session's own exit.
 
-The host end's name carries no hint of the cage; `veth <name>` and
-`status` are how a person reading `ip link` finds out. That is the price
+The host end's name carries no hint of the cage; `veth <name>` is how a
+person reading `ip link` finds out. That is the price
 of a name that fits, and the two verbs are the receipt.
 
 ## Verification
