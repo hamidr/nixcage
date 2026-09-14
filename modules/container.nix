@@ -95,7 +95,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--memory <size>] [--cpus <n>] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | list | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -418,33 +418,43 @@ let
           property_args+=("$property_line")
         done < <(nixcage_enter_property_args)
 
-        systemd-nspawn --quiet --register=no \
-          --directory="$rootfs" \
-          --machine="$name" \
-          ''${property_args[@]+"''${property_args[@]}"} \
-          --private-users="$owner_uid:$block" \
-          --private-users-ownership=off \
-          --bind-ro=/nix/store \
-          --bind-ro=/nix/var/nix/db \
-          ''${daemon_args[@]+"''${daemon_args[@]}"} \
-          ''${network_args[@]+"''${network_args[@]}"} \
-          --bind="$project:/workspace" \
-          --bind="$home:$session_home" \
-          ''${git_binds[@]+"''${git_binds[@]}"} \
-          ''${agent_bind[@]+"''${agent_bind[@]}"} \
-          ''${asked_binds[@]+"''${asked_binds[@]}"} \
-          --chdir=/workspace \
-          ''${session_user[@]+"''${session_user[@]}"} \
-          --setenv=HOME="$session_home" \
-          --setenv=PATH="$PROFILE/bin" \
-          ''${session_cmd_env[@]+"''${session_cmd_env[@]}"} \
-          --setenv=NIX_CONFIG='experimental-features = nix-command flakes' \
-          --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt" \
-          --setenv=NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc" \
-          ''${shell_env[@]+"''${shell_env[@]}"} \
-          ''${asked_env[@]+"''${asked_env[@]}"} \
-          --setenv=TERM="''${TERM:-xterm}" \
+        ## The line as it would run, held as an array so that --print-argv
+        ## can print it one word per line and run nothing: a dependant asserts
+        ## what nixcage makes of its flags against this, with no cage.
+        local -a nspawn_args=(
+          --quiet --register=no
+          --directory="$rootfs"
+          --machine="$name"
+          ''${property_args[@]+"''${property_args[@]}"}
+          --private-users="$owner_uid:$block"
+          --private-users-ownership=off
+          --bind-ro=/nix/store
+          --bind-ro=/nix/var/nix/db
+          ''${daemon_args[@]+"''${daemon_args[@]}"}
+          ''${network_args[@]+"''${network_args[@]}"}
+          --bind="$project:/workspace"
+          --bind="$home:$session_home"
+          ''${git_binds[@]+"''${git_binds[@]}"}
+          ''${agent_bind[@]+"''${agent_bind[@]}"}
+          ''${asked_binds[@]+"''${asked_binds[@]}"}
+          --chdir=/workspace
+          ''${session_user[@]+"''${session_user[@]}"}
+          --setenv=HOME="$session_home"
+          --setenv=PATH="$PROFILE/bin"
+          ''${session_cmd_env[@]+"''${session_cmd_env[@]}"}
+          --setenv=NIX_CONFIG='experimental-features = nix-command flakes'
+          --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt"
+          --setenv=NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc"
+          ''${shell_env[@]+"''${shell_env[@]}"}
+          ''${asked_env[@]+"''${asked_env[@]}"}
+          --setenv=TERM="''${TERM:-xterm}"
           "$PROFILE/bin/bash" -c "$shell_cmd" "$@"
+        )
+        if [ -n "$NIXCAGE_ENTER_PRINT_ARGV" ]; then
+          printf '%s\n' systemd-nspawn "''${nspawn_args[@]}"
+          exit 0
+        fi
+        systemd-nspawn "''${nspawn_args[@]}"
       }
 
       ## The uid of a named principal, allocated on first use and never

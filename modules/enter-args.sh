@@ -30,6 +30,7 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_NO_NIX_DAEMON=""
 	NIXCAGE_ENTER_MEMORY=""
 	NIXCAGE_ENTER_CPUS=""
+	NIXCAGE_ENTER_PRINT_ARGV=""
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
 	NIXCAGE_ENTER_ARGV=()
@@ -88,6 +89,10 @@ nixcage_enter_parse() {
 		--cpus)
 			NIXCAGE_ENTER_CPUS="${2:-}"
 			shift 2 || return 1
+			;;
+		--print-argv)
+			NIXCAGE_ENTER_PRINT_ARGV=1
+			shift
 			;;
 		--bind)
 			arg="$(nixcage_bind_arg --bind "${2:-}")" || return 1

@@ -266,3 +266,16 @@ teardown() {
 	run nixcage_enter_parse --cpus 0 myproj /srv/myproj
 	assert_failure
 }
+
+# The composed nspawn line as a contract a dependant can test against
+# (ADR-012 consequence): asked for, the session is printed and not run.
+@test "given --print-argv, a session records that it is to be printed, not run" {
+	nixcage_enter_parse --print-argv myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_PRINT_ARGV" = 1 ]
+	[ "${NIXCAGE_ENTER_ARGV[0]}" = myproj ]
+}
+
+@test "given no --print-argv, a session runs" {
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_PRINT_ARGV" ]
+}
