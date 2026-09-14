@@ -11,7 +11,9 @@ setup() {
 	source "$NIXCAGE_ROOT/modules/veth.sh"
 	CALLS="$TEST_TEMP_DIR/ip.calls"
 	mkdir -p "$TEST_TEMP_DIR/bin"
-	printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\n' "$CALLS" >"$TEST_TEMP_DIR/bin/ip"
+	# No interface exists until made: "link show" answers as ip does for
+	# a name it does not have.
+	printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\ncase "$1 $2" in "link show") exit 1 ;; esac\n' "$CALLS" >"$TEST_TEMP_DIR/bin/ip"
 	chmod +x "$TEST_TEMP_DIR/bin/ip"
 	export PATH="$TEST_TEMP_DIR/bin:$PATH"
 }
@@ -49,9 +51,32 @@ teardown() {
 	host="$(nixcage_veth_host_name builder)"
 	cage="$(nixcage_veth_cage_name builder)"
 	run cat "$CALLS"
-	assert_line --index 0 "link add $host type veth peer name $cage"
-	assert_line --index 1 "link set $host master fabriek-acme"
-	assert_line --index 2 "link set $host up"
+	assert_line --index 0 "link show $host"
+	assert_line --index 1 "link add $host type veth peer name $cage"
+	assert_line --index 2 "link set $host master fabriek-acme"
+	assert_line --index 3 "link set $host up"
+}
+
+@test "a host end left behind by a session that was killed is deleted before the pair is made again" {
+	# A wrapper ended by SIGTERM runs no EXIT trap; the next session for the
+	# same name found "RTNETLINK answers: File exists" and never started.
+	local host
+	host="$(nixcage_veth_host_name builder)"
+	cat >"$TEST_TEMP_DIR/bin/ip" <<EOF
+#!/usr/bin/env bash
+printf "%s\\n" "\$*" >>"$CALLS"
+case "\$*" in
+"link show $host") [ -e "$TEST_TEMP_DIR/stale" ] ;;
+"link del $host") rm -f "$TEST_TEMP_DIR/stale" ;;
+esac
+EOF
+	touch "$TEST_TEMP_DIR/stale"
+	run nixcage_veth_make builder fabriek-acme
+	assert_success
+	run cat "$CALLS"
+	assert_line --index 0 "link show $host"
+	assert_line --index 1 "link del $host"
+	assert_line --index 2 "link add $host type veth peer name $(nixcage_veth_cage_name builder)"
 }
 
 @test "deleting the pair deletes the host end, which takes the cage end with it" {

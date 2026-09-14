@@ -330,6 +330,10 @@ let
         ## Expand now: locals are out of scope when the EXIT trap fires.
         # shellcheck disable=SC2064
         trap "rm -rf '$rootfs'" EXIT
+        ## A signal that is not trapped ends bash without the EXIT trap, and
+        ## a supervisor stopping a session sends one: the rootfs and the veth
+        ## below stayed, and the next session for the name could not start.
+        trap 'exit 143' TERM HUP INT
 
         ## The environment is chosen inside the container, where the project
         ## is actually bound; the library is referenced by store path because
