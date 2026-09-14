@@ -32,11 +32,16 @@ nixcage_veth_cage_name() {
 }
 
 ## The pair, its host end on the bridge and up. The cage end gets its
-## address inside the cage, as ADR-011 has it.
+## address inside the cage, as ADR-011 has it. A host end already there is
+## a session that was killed rather than ended and took no trap with it;
+## the name is the cage's, so the stale pair goes before the new one comes.
 nixcage_veth_make() {
 	local name="$1" bridge="$2" host cage
 	host="$(nixcage_veth_host_name "$name")" || return 1
 	cage="$(nixcage_veth_cage_name "$name")" || return 1
+	if ip link show "$host" >/dev/null 2>&1; then
+		ip link del "$host" || return 1
+	fi
 	ip link add "$host" type veth peer name "$cage" &&
 		ip link set "$host" master "$bridge" &&
 		ip link set "$host" up
