@@ -114,6 +114,26 @@ zfs_calls() {
 	assert_output --partial "create -o mountpoint=none nixcage/state/worktrees/acme"
 }
 
+@test "a parent two sessions create at once is created by one and accepted by the other" {
+	# Two roles' worktrees prepared side by side both reach for the same
+	# parent; the second create fails "dataset already exists" and is not
+	# a failure of the worktree.
+	stub_zfs nixcage/state
+	cat >"$STUB_DIR/zfs" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >>"$TEST_TEMP_DIR/zfs-calls"
+case "\$1" in
+list) [ "\${@: -1}" = nixcage/state/worktrees/acme/builder ] && exit 1; exit 0 ;;
+create) case "\$*" in *mountpoint=none*) echo "cannot create '\${@: -1}': dataset already exists" >&2; exit 1 ;; esac ;;
+esac
+exit 0
+EOF
+	run nixcage_storage_ensure "$STATE" nixcage/state "$STATE/worktrees/acme/builder" 700000
+	assert_success
+	run zfs_calls
+	assert_output --partial "create -o mountpoint=$STATE/worktrees/acme/builder nixcage/state/worktrees/acme/builder"
+}
+
 @test "a quota is applied whether the dataset is new or not" {
 	# One that only took effect on creation would leave everything declared
 	# before it unbounded.
