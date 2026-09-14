@@ -48,6 +48,8 @@ factory of roles over one repository, is built entirely on those. Architecture:
 - `modules/scope.sh` -- the verbs over a running cage, read from the scope
   nspawn allocates for it (ADR-012): status, the leader's namespace path,
   stop. Over a cgroup root and a proc root the suite can point at fixtures.
+- `modules/exec-cage.sh` -- a command inside a running cage (ADR-012): the
+  nsenter, setpriv and env words from the leader's own environment.
 - `modules/veth.sh` -- the veth pair a bridge placement gets (ADR-013): the
   host end named from a hash of the cage's name, the ip words to make and
   delete it, and the argument nspawn takes.

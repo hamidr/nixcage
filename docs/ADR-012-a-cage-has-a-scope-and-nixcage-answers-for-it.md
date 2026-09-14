@@ -57,10 +57,18 @@ bounded as before, by the machine.
 events to cages keys on; nixcage prints it in `status` so a caller never
 composes it. Every process a cage starts is in it, whatever uid it takes.
 
-**4. ADR-011 point 5 is amended.** Which pid a running cage is stays a
+**4. A command inside a running cage.** `nixcage-container exec
+[--subject <name>] <name> [-- cmd...]` enters every namespace of the
+leader, the user one included, where joining grants full capabilities,
+and runs the command with the leader's own `HOME` and `PATH` in
+`/workspace`, as cage root or, with a subject, as that subject's offset
+through `setpriv` the way a session becomes it. A hand beside a running
+actor is then inside the actor's cage, not beside it.
+
+**5. ADR-011 point 5 is amended.** Which pid a running cage is stays a
 fact the caller needs; it is now a fact nixcage tells.
 
-**5. `--keep-unit` stays out.** It would move the cage into the caller's
+**6. `--keep-unit` stays out.** It would move the cage into the caller's
 own unit, disable `--property=`, and make the cage's identity whatever
 started it. The scope nspawn allocates is the right one.
 
@@ -68,9 +76,10 @@ started it. The scope nspawn allocates is the right one.
 
 `modules/scope.sh` holds the verbs' logic as functions over a cgroup root
 and a proc root, so the suite drives them on fixtures rather than on a
-running cage; `enter-args.sh` grows two options and their two refusals;
-the guest script gains three verbs and two properties on the nspawn line.
-`systemctl` enters the guest script's closure by store path.
+running cage; `modules/exec-cage.sh` holds the words that put a command
+inside; `enter-args.sh` grows two options and their two refusals; the
+guest script gains four verbs and two properties on the nspawn line.
+`systemctl`, `nsenter` and `setpriv` enter the guest script's closure.
 
 A dependant that found the leader by `pgrep` deletes that code and asks.
 A dependant that could not stop a cage can, and one that could not bound a

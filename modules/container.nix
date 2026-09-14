@@ -64,6 +64,8 @@ let
       gnugrep
       ## The veth pair a bridge placement gets is made here (ADR-013).
       iproute2
+      ## exec enters a running cage's namespaces and becomes a subject.
+      util-linux
       ## Resolving a linked worktree's git directories, which the project bind
       ## does not cover.
       git
@@ -82,6 +84,7 @@ let
       . ${./dev-shell.sh}
       . ${./scope.sh}
       . ${./veth.sh}
+      . ${./exec-cage.sh}
 
       STATE_DIR=/var/lib/nixcage
       ## Rendered by the platform module: the uid range principals are
@@ -98,7 +101,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | veth <name> | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | veth <name> | exec [--subject <name>] <name> [-- cmd...] | list | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -541,6 +544,33 @@ let
         nixcage_scope_stop "$name"
       }
 
+      ## A command inside a running cage, in every namespace of its leader,
+      ## as cage root or as one of the host's declared subjects (ADR-012).
+      cmd_exec() {
+        local subject="" name="" offset=""
+        if [ "''${1:-}" = "--subject" ]; then
+          subject="''${2:-}"
+          shift 2 || die "usage: nixcage-container exec [--subject <name>] <name> [-- cmd...]"
+        fi
+        name="''${1:-}"
+        [ -n "$name" ] || die "usage: nixcage-container exec [--subject <name>] <name> [-- cmd...]"
+        shift
+        check_name "$name"
+        local leader
+        leader="$(nixcage_scope_leader "$name")" || die "$name is not running"
+        if [ -n "$subject" ]; then
+          read_container_config
+          offset="$(nixcage_principal_subject_offset "$subject" "$(declared_subjects)")" ||
+            die "no such subject: $subject"
+        fi
+        local -a words=()
+        local word
+        while IFS= read -r word; do
+          words+=("$word")
+        done < <(nixcage_exec_words "$leader" "$offset" -- "$@")
+        exec "''${words[@]}"
+      }
+
       ## The host end of a cage's veth, a function of its name (ADR-013).
       cmd_veth() {
         local name="''${1:-}"
@@ -570,6 +600,7 @@ let
       netns) cmd_netns "$@" ;;
       stop) cmd_stop "$@" ;;
       veth) cmd_veth "$@" ;;
+      exec) cmd_exec "$@" ;;
       list) cmd_list ;;
       rm) cmd_rm "$@" ;;
       *) die "$(usage)" ;;
