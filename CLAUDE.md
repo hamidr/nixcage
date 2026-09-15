@@ -42,6 +42,10 @@ factory of roles over one repository, is built entirely on those. Architecture:
 - `modules/bind.sh` -- what a caller may map into a cage and where. `--bind`
   takes any host path, so the check that used to be implicit in "only our own
   code adds binds" is written here.
+- `modules/store-closure.sh` -- what of the store a session without the
+  daemon sees (ADR-014): a root's spelling, the closure query over the roots,
+  and the read-only bind per path. A session with the daemon binds the whole
+  store as before.
 - `modules/principal-uid.sh` -- allocation of the uid a cage is mapped onto.
   A principal is whatever a caller wants a durable number for; nixcage promises
   only that one name always answers with one number and that none is reissued.

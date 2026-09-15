@@ -7,7 +7,8 @@
 ## breaks at a dependant's run time instead of at ours.
 ##
 ## Sourced by store path into nixcage-container, beside bind.sh, whose checks
-## every asked-for bind and variable goes through.
+## every asked-for bind and variable goes through, and store-closure.sh,
+## whose check every store root goes through.
 
 ## What a parse produced. Globals rather than a printed record because two of
 ## them are arrays, and a session command may hold newlines, spaces and
@@ -33,6 +34,7 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_PRINT_ARGV=""
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
+	NIXCAGE_ENTER_STORE_ROOTS=()
 	NIXCAGE_ENTER_ARGV=()
 }
 
@@ -107,6 +109,18 @@ nixcage_enter_parse() {
 		--setenv)
 			arg="$(nixcage_setenv_arg "${2:-}")" || return 1
 			NIXCAGE_ENTER_ENV+=("$arg")
+			shift 2 || return 1
+			;;
+		--store-root)
+			## A path the caller realised and wants a session without the
+			## daemon to see with its closure (ADR-014). Held to the store's
+			## own spelling here; whether the store holds it is the query's
+			## answer, at the session.
+			if ! nixcage_store_root_ok "${2:-}"; then
+				echo "nixcage: not a store path: ${2:-}" >&2
+				return 1
+			fi
+			NIXCAGE_ENTER_STORE_ROOTS+=("$2")
 			shift 2 || return 1
 			;;
 		*) break ;;

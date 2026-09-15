@@ -198,3 +198,15 @@ teardown() {
 		assert_success
 	done
 }
+
+@test "a session without the daemon binds the closure of its roots, not the store" {
+	# ADR-014: the whole-store bind stays for a session with the daemon and
+	# for nothing else. A closure that reached nspawn without the query would
+	# be a list somebody typed, and it would be stale by the next profile.
+	run grep -c 'nixcage_store_bind_args' "$(CONTAINER_NIX)"
+	assert_output "1"
+	run grep -c -- '--bind-ro=/nix/store$' "$(CONTAINER_NIX)"
+	assert_output "1"
+	run grep -q '\. ${./store-closure.sh}' "$(CONTAINER_NIX)"
+	assert_success
+}

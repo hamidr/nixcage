@@ -1,7 +1,7 @@
 ---
 id: ADR-014
 title: A cage without the daemon sees the closure of its roots, not the store
-status: proposed
+status: implementing
 date: 2026-09-15
 status_date: 2026-09-15
 summary: enter --no-nix-daemon binds each path of its roots' closure and nothing else of /nix/store; --store-root names a root
@@ -95,3 +95,16 @@ time nixcage-container enter --no-nix-daemon \
 The claim is that the closure-only start is within one second of the
 whole-store start at a thousand paths. The count and both times are
 recorded beside the result in this document's Verification section.
+
+## Verification
+
+Implemented 2026-09-15: `modules/store-closure.sh` holds the root check,
+the one query over every root and the bind per path, driven by
+`tests/unit/store_closure.bats` with `nix-store` stubbed; `enter
+--store-root` is parsed and refused by `modules/enter-args.sh`
+(`tests/unit/enter_args.bats`); `modules/container.nix` binds the closure
+of the profile, the paths its own line names and the roots when the
+daemon is absent, and the whole store otherwise, which
+`tests/unit/exports.bats` asserts by shape and the guest script's build
+on a Linux builder checks. Open: the measurement above, which needs a
+machine with a JVM profile.
