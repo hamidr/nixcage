@@ -9,6 +9,8 @@ setup() {
 	setup_temp_dir
 	# shellcheck source=../../modules/bind.sh
 	source "$NIXCAGE_ROOT/modules/bind.sh"
+	# shellcheck source=../../modules/store-closure.sh
+	source "$NIXCAGE_ROOT/modules/store-closure.sh"
 	# shellcheck source=../../modules/enter-args.sh
 	source "$NIXCAGE_ROOT/modules/enter-args.sh"
 }
@@ -278,4 +280,23 @@ teardown() {
 @test "given no --print-argv, a session runs" {
 	nixcage_enter_parse myproj /srv/myproj
 	[ -z "$NIXCAGE_ENTER_PRINT_ARGV" ]
+}
+
+@test "given --store-root, a session records each root in order" {
+	nixcage_enter_parse --store-root /nix/store/abc-profile \
+		--store-root /nix/store/def-pi n /srv/w
+	[ "${#NIXCAGE_ENTER_STORE_ROOTS[@]}" = 2 ]
+	[ "${NIXCAGE_ENTER_STORE_ROOTS[0]}" = "/nix/store/abc-profile" ]
+	[ "${NIXCAGE_ENTER_STORE_ROOTS[1]}" = "/nix/store/def-pi" ]
+}
+
+@test "given no --store-root, a session has none" {
+	nixcage_enter_parse n /srv/w
+	[ "${#NIXCAGE_ENTER_STORE_ROOTS[@]}" = 0 ]
+}
+
+@test "a store root outside the store stops the parse" {
+	run nixcage_enter_parse --store-root /etc/nixcage/profile n /srv/w
+	assert_failure
+	assert_output --partial "not a store path: /etc/nixcage/profile"
 }

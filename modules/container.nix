@@ -51,6 +51,18 @@ let
   ## bound on it. Anything built on nixcage is built on these, so each takes
   ## argv and prints a result rather than expecting its caller to know how
   ## nixcage keeps its state.
+  ## The store paths a session's own line names besides the profile: what a
+  ## session without the daemon has to see for that line to run at all
+  ## (ADR-014). The environment selection is sourced by path; direnv reads
+  ## its rc by path; a session on a private network sets its address and
+  ## becomes its subject by path.
+  sessionRoots = pkgs.lib.escapeShellArgs [
+    "${./dev-shell.sh}"
+    "${pkgs.nix-direnv}"
+    "${pkgs.iproute2}"
+    "${pkgs.util-linux}"
+  ];
+
   nixcageContainer = pkgs.writeShellApplication {
     name = "nixcage-container";
     ## The sourced helpers are store paths, which shellcheck cannot follow from
@@ -72,6 +84,9 @@ let
       ## The ownership check on a session's home walks it, so find has to be on
       ## the script's own PATH rather than only on the system's.
       findutils
+      ## The closure a session without the daemon is bound is queried here,
+      ## on the host, where the store's db is (ADR-014).
+      nix
     ];
     text = ''
       ## Sourced by store path: the file is a real shell file so shellcheck
@@ -80,6 +95,7 @@ let
       . ${./principal-uid.sh}
       . ${./storage.sh}
       . ${./bind.sh}
+      . ${./store-closure.sh}
       . ${./enter-args.sh}
       . ${./dev-shell.sh}
       . ${./scope.sh}
@@ -101,7 +117,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | veth <name> | exec [--subject <name>] <name> [-- cmd...] | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--no-nix-daemon] [--store-root <path>] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | veth <name> | exec [--subject <name>] <name> [-- cmd...] | list | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -172,7 +188,9 @@ let
         local root="$1" login="''${2:-}"
         ## nspawn refuses a rootfs without /usr ("doesn't look like it has
         ## an OS tree").
-        mkdir -p "$root"/{etc,usr,tmp,root,workspace,nix,proc,sys,dev,run,var/empty}
+        ## /nix/store is a directory here so that a session without the
+        ## daemon has an empty store to bind its closure onto (ADR-014).
+        mkdir -p "$root"/{etc,usr,tmp,root,workspace,nix/store,proc,sys,dev,run,var/empty}
         chmod 1777 "$root/tmp"
         echo 'NAME=nixcage' >"$root/etc/os-release"
         ## nspawn resolves every user but root by exec'ing getent inside the
@@ -229,6 +247,7 @@ let
         local network_addr="$NIXCAGE_ENTER_NETWORK_ADDR"
         local network_ns="$NIXCAGE_ENTER_NETWORK_NS"
         local no_nix_daemon="$NIXCAGE_ENTER_NO_NIX_DAEMON"
+        local -a store_roots=(''${NIXCAGE_ENTER_STORE_ROOTS[@]+"''${NIXCAGE_ENTER_STORE_ROOTS[@]}"})
         local -a asked_binds=(''${NIXCAGE_ENTER_BINDS[@]+"''${NIXCAGE_ENTER_BINDS[@]}"})
         local -a asked_env=(''${NIXCAGE_ENTER_ENV[@]+"''${NIXCAGE_ENTER_ENV[@]}"})
 
@@ -396,6 +415,25 @@ let
         ## skips the flake probe it could not run (dev-shell.sh).
         [ -n "$no_nix_daemon" ] && daemon_args=(--setenv=NIXCAGE_NO_NIX_DAEMON=1)
 
+        ## What of the store the session sees (ADR-014). With the daemon,
+        ## all of it: the daemon adds paths while the session runs and the
+        ## session has to see them. Without it, the closure of what it was
+        ## handed and nothing else: the base profile, the store paths this
+        ## line names, and the roots the caller realised elsewhere. The
+        ## query is one, on the host, before nspawn runs; a root the store
+        ## does not hold ends the session here with nix's message.
+        local -a store_args=(
+          --bind-ro=/nix/store
+          --bind-ro=/nix/var/nix/db
+        )
+        if [ -n "$no_nix_daemon" ]; then
+          local store_binds
+          store_binds="$(nixcage_store_bind_args "$PROFILE" ${sessionRoots} \
+            ''${store_roots[@]+"''${store_roots[@]}"})" ||
+            die "could not close over the session's store roots"
+          mapfile -t store_args <<<"$store_binds"
+        fi
+
         ## Git identity, rendered by the platform module from nixcage.git.
         ## Absent when the user declared none, in which case git behaves as
         ## it does anywhere else without an identity. A caller entering as
@@ -446,8 +484,7 @@ let
           ''${property_args[@]+"''${property_args[@]}"}
           --private-users="$owner_uid:$block"
           --private-users-ownership=off
-          --bind-ro=/nix/store
-          --bind-ro=/nix/var/nix/db
+          "''${store_args[@]}"
           ''${daemon_args[@]+"''${daemon_args[@]}"}
           ''${network_args[@]+"''${network_args[@]}"}
           --bind="$project:/workspace"
