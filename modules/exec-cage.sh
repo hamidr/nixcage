@@ -38,7 +38,8 @@ NIXCAGE_EXEC_SETPRIV="${NIXCAGE_EXEC_SETPRIV:-setpriv}"
 nixcage_exec_words() {
 	local leader="$1" offset="$2"
 	shift 2
-	[ "${1:-}" = "--" ] && shift
+	## The verb's own separator, and the caller's when they wrote one too.
+	while [ "${1:-}" = "--" ]; do shift; done
 	printf '%s\n' nsenter "--target=$leader" --mount --uts --ipc --net --pid --user --wdns=/workspace --
 	if [ -n "$offset" ]; then
 		printf '%s\n' "$NIXCAGE_EXEC_SETPRIV" "--reuid=$offset" "--regid=$offset" --clear-groups --

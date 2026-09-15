@@ -77,6 +77,16 @@ teardown() {
 	assert_line --index 15 "/nix/store/xyz-coreutils/bin/env"
 }
 
+# The verb's caller writes "exec <name> -- cmd", and the verb hands the
+# rest on with a separator of its own; the second reached env as its
+# command: "env: '--': No such file or directory".
+@test "a separator the caller wrote is taken off as well as the verb's own" {
+	run nixcage_exec_words 4001 "" -- -- git status
+	assert_success
+	assert_line --index 14 "git"
+	assert_line --index 15 "status"
+}
+
 @test "no command means the cage's shell" {
 	run nixcage_exec_words 4001 "" --
 	assert_success
