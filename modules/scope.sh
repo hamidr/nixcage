@@ -19,20 +19,36 @@ nixcage_scope_name_ok() {
 	[[ "$1" =~ ^[a-zA-Z0-9-]+$ ]]
 }
 
+## nspawn names the scope machine-<name>.scope when machined registers the
+## cage and <name>.scope when told --register=no, and which depends on the
+## systemd at hand (261 does the latter). Both are asked, and the one that
+## is active is the cage's; when neither is, the registered spelling stands
+## for what the name would be.
 nixcage_scope_unit() {
 	nixcage_scope_name_ok "$1" || return 1
-	printf 'machine-%s.scope\n' "$1"
+	if [ "$(systemctl show -p ActiveState --value "$1.scope" 2>/dev/null)" = active ]; then
+		printf '%s.scope\n' "$1"
+	else
+		printf 'machine-%s.scope\n' "$1"
+	fi
 }
 
+## The cgroup of a unit, or of the cage's unit when given a name.
 nixcage_scope_cgroup() {
-	nixcage_scope_name_ok "$1" || return 1
-	printf 'machine.slice/machine-%s.scope\n' "$1"
+	local unit
+	case "$1" in
+	*.scope) unit="$1" ;;
+	*) unit="$(nixcage_scope_unit "$1")" || return 1 ;;
+	esac
+	printf 'machine.slice/%s\n' "$unit"
 }
 
-nixcage_scope_active() {
+## The cage's active unit, or nothing.
+nixcage_scope_active_unit() {
 	local unit
 	unit="$(nixcage_scope_unit "$1")" || return 1
-	[ "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null)" = active ]
+	[ "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null)" = active ] || return 1
+	printf '%s\n' "$unit"
 }
 
 ## One field of a process's status file, as the kernel writes it.
@@ -68,15 +84,16 @@ nixcage_scope_status() {
 		echo "nixcage: invalid container name: $name" >&2
 		return 1
 	}
-	if ! nixcage_scope_active "$name"; then
-		echo stopped
-		return 0
-	fi
-	leader="$(nixcage_scope_leader "$name")" || {
+	local unit
+	unit="$(nixcage_scope_active_unit "$name")" || {
 		echo stopped
 		return 0
 	}
-	printf 'running %s %s\n' "$leader" "$(nixcage_scope_cgroup "$name")"
+	leader="$(nixcage_scope_leader "$unit")" || {
+		echo stopped
+		return 0
+	}
+	printf 'running %s %s\n' "$leader" "$(nixcage_scope_cgroup "$unit")"
 }
 
 ## The path enter --network ns: takes.

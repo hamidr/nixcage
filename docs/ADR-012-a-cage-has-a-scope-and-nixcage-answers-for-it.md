@@ -27,8 +27,11 @@ cages' memory with it.
 Two facts, from nspawn's own manual, decide the shape. A container runs in
 a transient scope unit unless `--keep-unit` is passed; `--register=no`
 disables registration with machined and nothing else, so every cage
-nixcage starts already runs in `machine-<name>.scope` under
-`machine.slice`. And `--property=` sets unit properties on exactly that
+nixcage starts already runs in a scope of its name under `machine.slice`:
+`machine-<name>.scope` when machined registers it, `<name>.scope` under
+systemd 261 with `--register=no`. nixcage asks which is active rather
+than assume one; a caller reads the cgroup from `status` and composes
+nothing. And `--property=` sets unit properties on exactly that
 scope, "useful to set memory limits and similar for the container". The
 scope exists, has the cage's name, holds every process of the cage in its
 cgroup, and accepts limits. What is missing is nixcage saying so.
@@ -38,7 +41,7 @@ cgroup, and accepts limits. What is missing is nixcage saying so.
 **1. Three verbs over a running cage, from its scope.**
 
 - `nixcage-container status <name>` prints `running <leader-pid>` or
-  `stopped`, from `systemctl show machine-<name>.scope` and the scope's
+  `stopped`, from `systemctl show` on the cage's scope and the scope's
   `cgroup.procs`. The leader is the cage's first process: the one whose
   parent is nspawn, which is the one in the container's namespaces.
 - `nixcage-container netns <name>` prints `/proc/<leader>/ns/net`, the
@@ -53,9 +56,9 @@ becomes `--property=CPUQuota=<n*100>%`. A size is digits with an optional
 bounded as before, by the machine.
 
 **3. The scope is the cage's identity for the host.** Its cgroup path,
-`machine.slice/machine-<name>.scope`, is what a host that attributes
-events to cages keys on; nixcage prints it in `status` so a caller never
-composes it. Every process a cage starts is in it, whatever uid it takes.
+`machine.slice/<scope>`, is what a host that attributes events to cages
+keys on; nixcage prints it in `status` so a caller never composes it,
+and the spelling of the scope is nixcage's to know. Every process a cage starts is in it, whatever uid it takes.
 
 **4. A command inside a running cage.** `nixcage-container exec
 [--subject <name>] <name> [-- cmd...]` enters every namespace of the
