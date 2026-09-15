@@ -102,6 +102,21 @@ running_cage() {
 	assert_output "running 5001 machine.slice/bare.scope"
 }
 
+# systemd 261's nspawn also keeps itself outside the scope and puts the
+# cage under <scope>/payload/, so the scope's own cgroup.procs is empty and
+# nspawn is not in it at all; the leader is then the payload's first
+# process whose parent is nspawn, wherever nspawn sits.
+@test "a cage whose processes nspawn put under payload/ is running, and its leader is read from there" {
+	running_cage bare 5000 5001 bare.scope
+	rm "$NIXCAGE_CGROUP_ROOT/machine.slice/bare.scope/cgroup.procs"
+	mkdir -p "$NIXCAGE_CGROUP_ROOT/machine.slice/bare.scope/payload"
+	: >"$NIXCAGE_CGROUP_ROOT/machine.slice/bare.scope/cgroup.procs"
+	printf '%s\n' 5001 >"$NIXCAGE_CGROUP_ROOT/machine.slice/bare.scope/payload/cgroup.procs"
+	run nixcage_scope_status bare
+	assert_success
+	assert_output "running 5001 machine.slice/bare.scope"
+}
+
 @test "stop stops whichever spelling of the scope is active" {
 	running_cage bare 5000 5001 bare.scope
 	run nixcage_scope_stop bare

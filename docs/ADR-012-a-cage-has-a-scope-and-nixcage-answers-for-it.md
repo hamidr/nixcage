@@ -42,8 +42,10 @@ cgroup, and accepts limits. What is missing is nixcage saying so.
 
 - `nixcage-container status <name>` prints `running <leader-pid>` or
   `stopped`, from `systemctl show` on the cage's scope and the scope's
-  `cgroup.procs`. The leader is the cage's first process: the one whose
-  parent is nspawn, which is the one in the container's namespaces.
+  `cgroup.procs`, or `payload/cgroup.procs` under it where systemd 261's
+  nspawn puts the cage. The leader is the cage's first process: the one
+  whose parent is nspawn, which is the one in the container's namespaces;
+  nspawn itself may sit in the scope or outside it.
 - `nixcage-container netns <name>` prints `/proc/<leader>/ns/net`, the
   path `enter --network ns:` takes, or fails when the cage is not running.
 - `nixcage-container stop <name>` stops the scope, which ends every

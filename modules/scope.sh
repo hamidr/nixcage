@@ -58,21 +58,24 @@ nixcage_scope_proc_field() {
 }
 
 ## The cage's first process: the one in the scope whose parent is nspawn.
-## nspawn itself is in the scope too, in the host's namespaces; its child
-## is the one whose namespaces are the cage's.
+## Older nspawn sits in the scope itself beside its child; systemd 261's
+## stays outside and puts the cage under <scope>/payload/. Both places are
+## read, the scope's own first; nspawn is known by its name, wherever it is.
 nixcage_scope_leader() {
-	local cgroup pid parent
+	local cgroup pid parent procs
 	cgroup="$(nixcage_scope_cgroup "$1")" || return 1
-	[ -r "$NIXCAGE_CGROUP_ROOT/$cgroup/cgroup.procs" ] || return 1
-	while IFS= read -r pid; do
-		[ -n "$pid" ] || continue
-		parent="$(nixcage_scope_proc_field "$pid" PPid)"
-		[ -n "$parent" ] || continue
-		if [ "$(nixcage_scope_proc_field "$parent" Name)" = systemd-nspawn ]; then
-			printf '%s\n' "$pid"
-			return 0
-		fi
-	done <"$NIXCAGE_CGROUP_ROOT/$cgroup/cgroup.procs"
+	for procs in "$NIXCAGE_CGROUP_ROOT/$cgroup/cgroup.procs" "$NIXCAGE_CGROUP_ROOT/$cgroup/payload/cgroup.procs"; do
+		[ -r "$procs" ] || continue
+		while IFS= read -r pid; do
+			[ -n "$pid" ] || continue
+			parent="$(nixcage_scope_proc_field "$pid" PPid)"
+			[ -n "$parent" ] || continue
+			if [ "$(nixcage_scope_proc_field "$parent" Name)" = systemd-nspawn ]; then
+				printf '%s\n' "$pid"
+				return 0
+			fi
+		done <"$procs"
+	done
 	return 1
 }
 
