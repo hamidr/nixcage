@@ -65,7 +65,7 @@ and the spelling of the scope is nixcage's to know. Every process a cage starts 
 **4. A command inside a running cage.** `nixcage-container exec
 [--subject <name>] <name> [-- cmd...]` enters every namespace of the
 leader, the user one included, where joining grants full capabilities,
-and runs the command with the leader's own `HOME` and `PATH` in
+and runs the command with the leader's own environment in
 `/workspace`, as cage root or, with a subject, as that subject's offset
 through `setpriv` the way a session becomes it. A hand beside a running
 actor is then inside the actor's cage, not beside it.
