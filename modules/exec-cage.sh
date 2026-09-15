@@ -20,6 +20,14 @@ nixcage_exec_env() {
 	tr '\0' '\n' <"$NIXCAGE_PROC/$leader/environ" 2>/dev/null | grep -E '^(HOME|PATH)='
 }
 
+## Where env and setpriv are, by store path: nsenter looks the command up
+## after entering, with the caller's PATH, in a filesystem where that PATH
+## names nothing, and the cage's profile has no setpriv at all. The store
+## is the same inside, so a store path is the same file. The wrapper sets
+## these from its own inputs; the suite from a fixture.
+NIXCAGE_EXEC_ENV="${NIXCAGE_EXEC_ENV:-env}"
+NIXCAGE_EXEC_SETPRIV="${NIXCAGE_EXEC_SETPRIV:-setpriv}"
+
 ## The words, one per line: nsenter into the leader, then setpriv to the
 ## subject when an offset is given, then env -i with the leader's HOME and
 ## PATH, then the command or the cage's shell. The working directory is
@@ -33,9 +41,9 @@ nixcage_exec_words() {
 	[ "${1:-}" = "--" ] && shift
 	printf '%s\n' nsenter "--target=$leader" --mount --uts --ipc --net --pid --user --wdns=/workspace --
 	if [ -n "$offset" ]; then
-		printf '%s\n' setpriv "--reuid=$offset" "--regid=$offset" --clear-groups --
+		printf '%s\n' "$NIXCAGE_EXEC_SETPRIV" "--reuid=$offset" "--regid=$offset" --clear-groups --
 	fi
-	printf '%s\n' env -i
+	printf '%s\n' "$NIXCAGE_EXEC_ENV" -i
 	nixcage_exec_env "$leader"
 	if [ $# -gt 0 ]; then
 		printf '%s\n' "$@"

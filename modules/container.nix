@@ -571,7 +571,8 @@ let
         local word
         while IFS= read -r word; do
           words+=("$word")
-        done < <(nixcage_exec_words "$leader" "$offset" -- "$@")
+        done < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \
+          nixcage_exec_words "$leader" "$offset" -- "$@")
         exec "''${words[@]}"
       }
 
