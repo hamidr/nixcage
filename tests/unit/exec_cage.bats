@@ -24,12 +24,17 @@ teardown() {
 	teardown_temp_dir
 }
 
-@test "the leader's own HOME and PATH are what the command gets, and nothing of the caller's" {
+# A session's environment is the cage's: where pi reads its directory,
+# which bus to speak on, who the role is. A hand that got HOME and PATH
+# alone read an empty PI_CODING_AGENT_DIR and answered for nobody.
+@test "the leader's whole environment is what the command gets, and nothing of the caller's" {
 	run nixcage_exec_env 4001
 	assert_success
 	assert_line "HOME=/home/builder"
 	assert_line "PATH=$PROFILE"
-	refute_line --partial "TERM="
+	assert_line "NIX_CONFIG=experimental-features = nix-command flakes"
+	assert_line "TERM=xterm"
+	refute_line --partial "TEST_TEMP_DIR="
 }
 
 # nsenter looks the command up with the caller's PATH inside the cage's
@@ -62,8 +67,8 @@ teardown() {
 	assert_line --index 11 "-i"
 	assert_line --index 12 "HOME=/home/builder"
 	assert_line --index 13 "PATH=$PROFILE"
-	assert_line --index 14 "git"
-	assert_line --index 15 "status"
+	assert_line --index 16 "git"
+	assert_line --index 17 "status"
 }
 
 @test "given a subject's offset, the command becomes that subject after entering" {
@@ -83,12 +88,12 @@ teardown() {
 @test "a separator the caller wrote is taken off as well as the verb's own" {
 	run nixcage_exec_words 4001 "" -- -- git status
 	assert_success
-	assert_line --index 14 "git"
-	assert_line --index 15 "status"
+	assert_line --index 16 "git"
+	assert_line --index 17 "status"
 }
 
 @test "no command means the cage's shell" {
 	run nixcage_exec_words 4001 "" --
 	assert_success
-	assert_line --index 14 "bash"
+	assert_line --index 16 "bash"
 }
