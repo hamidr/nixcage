@@ -22,14 +22,16 @@ nixcage_exec_env() {
 
 ## The words, one per line: nsenter into the leader, then setpriv to the
 ## subject when an offset is given, then env -i with the leader's HOME and
-## PATH, then the command or the cage's shell.
+## PATH, then the command or the cage's shell. The working directory is
+## --wdns, resolved inside the cage's mount namespace: util-linux 2.42's
+## --wd opens the path on the host first, where /workspace is nothing.
 ##
 ## nixcage_exec_words <leader> <subject-offset-or-empty> -- [cmd...]
 nixcage_exec_words() {
 	local leader="$1" offset="$2"
 	shift 2
 	[ "${1:-}" = "--" ] && shift
-	printf '%s\n' nsenter "--target=$leader" --mount --uts --ipc --net --pid --user --wd=/workspace --
+	printf '%s\n' nsenter "--target=$leader" --mount --uts --ipc --net --pid --user --wdns=/workspace --
 	if [ -n "$offset" ]; then
 		printf '%s\n' setpriv "--reuid=$offset" "--regid=$offset" --clear-groups --
 	fi
