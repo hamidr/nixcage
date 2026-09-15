@@ -18,6 +18,7 @@ setup() {
 printf '%s\n' "\$*" >>"$CALLS"
 case "\$*" in
 *"show -p ActiveState --value machine-builder.scope"*) echo active ;;
+*"show -p ActiveState --value bare.scope"*) echo active ;;
 *"show -p ActiveState --value "*) echo inactive ;;
 esac
 STUB
@@ -32,9 +33,9 @@ teardown() {
 ## A running cage as the kernel shows it: nspawn and its payload in one
 ## cgroup, each pid with a status file naming its parent.
 running_cage() {
-	local name="$1" nspawn="$2" leader="$3"
-	mkdir -p "$NIXCAGE_CGROUP_ROOT/machine.slice/machine-$name.scope"
-	printf '%s\n%s\n' "$nspawn" "$leader" >"$NIXCAGE_CGROUP_ROOT/machine.slice/machine-$name.scope/cgroup.procs"
+	local name="$1" nspawn="$2" leader="$3" unit="${4:-machine-$1.scope}"
+	mkdir -p "$NIXCAGE_CGROUP_ROOT/machine.slice/$unit"
+	printf '%s\n%s\n' "$nspawn" "$leader" >"$NIXCAGE_CGROUP_ROOT/machine.slice/$unit/cgroup.procs"
 	mkdir -p "$NIXCAGE_PROC/$nspawn" "$NIXCAGE_PROC/$leader"
 	printf 'Name:\tsystemd-nspawn\nPPid:\t1\n' >"$NIXCAGE_PROC/$nspawn/status"
 	printf 'Name:\tbash\nPPid:\t%s\n' "$nspawn" >"$NIXCAGE_PROC/$leader/status"
@@ -88,6 +89,25 @@ running_cage() {
 	assert_success
 	run cat "$CALLS"
 	assert_line "stop machine-builder.scope"
+}
+
+# systemd 261's nspawn, told --register=no, names the scope <name>.scope
+# rather than machine-<name>.scope; a machine whose cages all ran answered
+# stopped for every one, and enter started a second cage into the first's
+# unit: "Failed to allocate scope: Unit backend.scope was already loaded".
+@test "a cage whose scope nspawn named without the machine- prefix is running, with that cgroup" {
+	running_cage bare 5000 5001 bare.scope
+	run nixcage_scope_status bare
+	assert_success
+	assert_output "running 5001 machine.slice/bare.scope"
+}
+
+@test "stop stops whichever spelling of the scope is active" {
+	running_cage bare 5000 5001 bare.scope
+	run nixcage_scope_stop bare
+	assert_success
+	run cat "$CALLS"
+	assert_line "stop bare.scope"
 }
 
 @test "a name outside the cage alphabet is refused before it reaches a unit name" {
