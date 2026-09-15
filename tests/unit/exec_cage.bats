@@ -40,7 +40,7 @@ teardown() {
 	assert_line --index 5 "--net"
 	assert_line --index 6 "--pid"
 	assert_line --index 7 "--user"
-	assert_line --index 8 "--wd=/workspace"
+	assert_line --index 8 "--wdns=/workspace"
 	assert_line --index 9 -- "--"
 	assert_line --index 10 "env"
 	assert_line --index 11 "-i"
