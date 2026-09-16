@@ -300,3 +300,87 @@ teardown() {
 	assert_failure
 	assert_output --partial "not a store path: /etc/nixcage/profile"
 }
+
+# What a private-network cage resolves with (ADR-016). The rootfs used to
+# carry the host's file, which names a resolver a cage on a bridge cannot
+# reach, so every lookup waited out the resolver's timeout and then failed.
+
+@test "given a bridge placement and --dns none, the session records no resolver" {
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 --dns none myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_DNS" = none ]
+	[ "${NIXCAGE_ENTER_ARGV[0]}" = myproj ]
+}
+
+@test "given a bridge placement and a resolver address, the session records that address" {
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 --dns 10.77.0.1 myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_DNS" = 10.77.0.1 ]
+}
+
+@test "given a namespace path and a resolver address, the session records that address" {
+	nixcage_enter_parse --network ns:/proc/4242/ns/net --dns 10.77.0.1 myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_DNS" = 10.77.0.1 ]
+}
+
+@test "a resolver that is a name, a port, or an IPv6 address is refused" {
+	for dns in resolver.example 10.77.0.1:53 fd00::1 300.1.1.1; do
+		run nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 --dns "$dns" myproj /srv/myproj
+		[ "$status" -ne 0 ]
+		[[ "$output" == *"not a resolver address: $dns"* ]]
+	done
+}
+
+@test "--dns without --network is refused in either order, because the host's resolver would contradict it" {
+	run nixcage_enter_parse --dns none myproj /srv/myproj
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"--dns needs --network"* ]]
+	run nixcage_enter_parse --dns 10.77.0.1 --no-nix-daemon myproj /srv/myproj
+	[ "$status" -ne 0 ]
+}
+
+@test "a private-network session with no --dns resolves nothing, in either shape" {
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_DNS" = none ]
+	nixcage_enter_parse --network ns:/proc/4242/ns/net myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_DNS" = none ]
+}
+
+@test "a session in the host's namespace records no resolver choice, so it keeps the host's" {
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_DNS" ]
+}
+
+@test "a parse inherits no resolver from the last one" {
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 --dns 10.77.0.1 myproj /srv/myproj
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_DNS" ]
+}
+
+# The file the rootfs gets, written from the parse rather than copied.
+@test "a host-namespace rootfs carries the host's resolv.conf byte for byte" {
+	printf 'nameserver 192.0.2.53\nsearch example.test\n# a comment\n' >"$TEST_TEMP_DIR/host.conf"
+	nixcage_enter_parse myproj /srv/myproj
+	nixcage_enter_resolv_conf "$TEST_TEMP_DIR/host.conf" "$TEST_TEMP_DIR/resolv.conf"
+	cmp "$TEST_TEMP_DIR/host.conf" "$TEST_TEMP_DIR/resolv.conf"
+}
+
+@test "a host without a resolv.conf leaves the rootfs without one, as before" {
+	nixcage_enter_parse myproj /srv/myproj
+	nixcage_enter_resolv_conf "$TEST_TEMP_DIR/absent.conf" "$TEST_TEMP_DIR/resolv.conf"
+	[ ! -e "$TEST_TEMP_DIR/resolv.conf" ]
+}
+
+@test "a private-network rootfs carries an empty resolv.conf" {
+	printf 'nameserver 192.0.2.53\n' >"$TEST_TEMP_DIR/host.conf"
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 myproj /srv/myproj
+	nixcage_enter_resolv_conf "$TEST_TEMP_DIR/host.conf" "$TEST_TEMP_DIR/resolv.conf"
+	[ -f "$TEST_TEMP_DIR/resolv.conf" ]
+	[ ! -s "$TEST_TEMP_DIR/resolv.conf" ]
+}
+
+@test "a rootfs told a resolver carries one nameserver line and nothing else" {
+	printf 'nameserver 192.0.2.53\nsearch example.test\n' >"$TEST_TEMP_DIR/host.conf"
+	nixcage_enter_parse --network cageworks-acme:10.77.0.4/24 --dns 10.77.0.1 myproj /srv/myproj
+	nixcage_enter_resolv_conf "$TEST_TEMP_DIR/host.conf" "$TEST_TEMP_DIR/resolv.conf"
+	run cat "$TEST_TEMP_DIR/resolv.conf"
+	assert_output "nameserver 10.77.0.1"
+}
