@@ -4,11 +4,11 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-09-15
+**Generated:** 2026-09-16
 
 **Next PRD number:** 001
 
-**Next ADR number:** 015
+**Next ADR number:** 016
 
 ## ADRs
 
@@ -28,3 +28,4 @@ document, then regenerate.
 | [ADR-012](ADR-012-a-cage-has-a-scope-and-nixcage-answers-for-it.md) | A cage has a scope, and nixcage answers for it | proposed | -- | ADR-009, ADR-011 | status, netns and stop for a running cage from the scope nspawn gives it; memory and cpu bounds set on it at enter |  |
 | [ADR-013](ADR-013-nixcage-makes-the-veth-and-names-it.md) | nixcage makes a cage's veth and names it, so a cage name is not bounded by an interface name | proposed | -- | ADR-011, ADR-012 | for a bridge placement nixcage makes the veth pair, names the host end from a hash, and tells the caller that name |  |
 | [ADR-014](ADR-014-a-cage-without-the-daemon-sees-only-its-closure.md) | A cage without the daemon sees the closure of its roots, not the store | implementing | -- | ADR-009, ADR-011 | enter --no-nix-daemon binds each path of its roots' closure and nothing else of /nix/store; --store-root names a root |  |
+| [ADR-015](ADR-015-a-bridged-cage-speaks-only-as-its-address-and-to-the-machine-alone.md) | A bridged cage speaks only as its address, and reaches the machine and never a peer | proposed | -- | ADR-011, ADR-013 | nixcage pins a placement address on its port and isolates the port; the two bridge rules a dependant wrote are its own |  |
