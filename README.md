@@ -152,6 +152,11 @@ not be able to reach each other: a principal is then allocated a contiguous
 block, one uid per subject beside cage root, and a session may run as one of
 them (ADR-010). Declaring no subjects is a block of one and a session that is
 cage root, which is what ADR-004 built.
+A bridge a cage is placed on with `enter --network` is declared as
+`nixcage.bridges.<name> = { address; prefix; }` on either module (ADR-018):
+nixcage renders the bridge with no static ports, its address, and the two
+settings an empty bridge needs to be usable before its first cage arrives;
+what a cage may reach on that address is your firewall's to open.
 [cageworks](https://github.com/hamidr/cageworks) is built on exactly this.
 
 ## Secrets
