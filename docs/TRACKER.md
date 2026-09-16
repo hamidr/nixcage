@@ -8,7 +8,7 @@ document, then regenerate.
 
 **Next PRD number:** 001
 
-**Next ADR number:** 017
+**Next ADR number:** 018
 
 ## ADRs
 
@@ -30,3 +30,4 @@ document, then regenerate.
 | [ADR-014](ADR-014-a-cage-without-the-daemon-sees-only-its-closure.md) | A cage without the daemon sees the closure of its roots, not the store | implementing | -- | ADR-009, ADR-011 | enter --no-nix-daemon binds each path of its roots' closure and nothing else of /nix/store; --store-root names a root |  |
 | [ADR-015](ADR-015-a-bridged-cage-speaks-only-as-its-address-and-to-the-machine-alone.md) | A bridged cage speaks only as its address, and reaches the machine and never a peer | proposed | -- | ADR-011, ADR-013 | nixcage pins a placement address on its port and isolates the port; the two bridge rules a dependant wrote are its own |  |
 | [ADR-016](ADR-016-a-bridged-cage-resolves-nothing-unless-told-where.md) | A bridged cage resolves nothing unless told where | proposed | -- | ADR-011 | enter --dns none\|<address> decides the cage's resolver; a private-network session defaults to none, not the host's file |  |
+| [ADR-017](ADR-017-nixcage-lists-what-runs-with-what-it-was-given.md) | nixcage lists what runs, with what each cage was given | proposed | -- | ADR-011, ADR-012 | list --json reports each cage's name, uid, subject, placement, scope and leader from state nixcage recorded at enter |  |
