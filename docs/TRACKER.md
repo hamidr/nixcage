@@ -8,7 +8,7 @@ document, then regenerate.
 
 **Next PRD number:** 001
 
-**Next ADR number:** 018
+**Next ADR number:** 019
 
 ## ADRs
 
@@ -31,3 +31,4 @@ document, then regenerate.
 | [ADR-015](ADR-015-a-bridged-cage-speaks-only-as-its-address-and-to-the-machine-alone.md) | A bridged cage speaks only as its address, and reaches the machine and never a peer | proposed | -- | ADR-011, ADR-013 | nixcage pins a placement address on its port and isolates the port; the two bridge rules a dependant wrote are its own |  |
 | [ADR-016](ADR-016-a-bridged-cage-resolves-nothing-unless-told-where.md) | A bridged cage resolves nothing unless told where | proposed | -- | ADR-011 | enter --dns none\|<address> decides the cage's resolver; a private-network session defaults to none, not the host's file |  |
 | [ADR-017](ADR-017-nixcage-lists-what-runs-with-what-it-was-given.md) | nixcage lists what runs, with what each cage was given | proposed | -- | ADR-011, ADR-012 | list --json reports each cage's name, uid, subject, placement, scope and leader from state nixcage recorded at enter |  |
+| [ADR-018](ADR-018-the-host-module-owns-a-bridge-a-cage-may-be-placed-on.md) | The host module owns a bridge a cage may be placed on | proposed | -- | ADR-003, ADR-011, ADR-015 | nixcage.bridges.<name> declares a bridge with its address and the two settings an empty bridge needs to be usable |  |
