@@ -1,7 +1,7 @@
 ---
 id: ADR-016
 title: A bridged cage resolves nothing unless told where
-status: proposed
+status: implemented
 date: 2026-09-16
 status_date: 2026-09-16
 summary: enter --dns none|<address> decides the cage's resolver; a private-network session defaults to none, not the host's file
@@ -70,3 +70,12 @@ a parse inherits no resolver from the last one. The rootfs check the
 no-daemon suite already does is extended: a private-network rootfs carries
 an empty file, a named one carries one `nameserver` line, and a
 host-namespace rootfs carries the host's file byte for byte.
+
+Implemented 2026-09-16: `modules/enter-args.sh` parses `--dns`, refuses
+a resolver that is not one IPv4 address and `--dns` without `--network`,
+defaults a private-network session to `none`, and writes the rootfs's
+file from the parse in `nixcage_enter_resolv_conf`; `modules/container.nix`
+calls that where it copied the host's file. All of it in
+`tests/unit/enter_args.bats`, the file scenarios included, since the
+writer is a function the suite can point at a file; the guest script
+builds on a Linux builder.
