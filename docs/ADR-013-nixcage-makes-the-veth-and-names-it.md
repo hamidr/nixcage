@@ -41,12 +41,12 @@ for any name, no collision in practice, the same name every time for the
 same cage. The cage end is the same with a `c` in place of `n` and lives
 only until nspawn renames it.
 
-**3. The caller is told the name.** `nixcage-container veth <name>` prints
-the host end's name, a pure function of the cage's name that needs no
-running cage; the flake exports the same function as `lib.vethHostName`
-for a host that writes its rules at build time, and the suite holds the
-two equal. A host's rules key on what nixcage said, never on a prefix
-they assume.
+**3. The caller is told the name** (withdrawn 2026-09-16 by ADR-015).
+`nixcage-container veth <name>` printed the host end's name, a pure
+function of the cage's name that needs no running cage, and the flake
+exported the same function as `lib.vethHostName` for a host that wrote
+its rules at build time. The rules that keyed on the name are nixcage's
+now, so nobody outside is told it; the hash and the reason for it stay.
 
 **4. The bound on a cage's name is nspawn's, not an interface's.** A cage
 name is a machine name: the alphabet `check_name` allows, at most
@@ -68,9 +68,9 @@ deleted by the trap like a rootfs is. A pair whose cage end nspawn moved
 back is a pair with both ends on the host until the trap runs, which is
 the session's own exit.
 
-The host end's name carries no hint of the cage; `veth <name>` is how a
-person reading `ip link` finds out. That is the price
-of a name that fits, and the two verbs are the receipt.
+The host end's name carries no hint of the cage; a person reading `ip
+link` finds out from the placement record `list --json` shows (ADR-017),
+once it exists. That is the price of a name that fits.
 
 ## Verification
 

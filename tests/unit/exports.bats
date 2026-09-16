@@ -210,3 +210,13 @@ teardown() {
 	run grep -q '\. ${./store-closure.sh}' "$(CONTAINER_NIX)"
 	assert_success
 }
+
+@test "veth is not a verb, and the flake exports no vethHostName: nobody outside is told the port's name" {
+	# The name was told so a dependant could write the bridge's rules on
+	# it. The rules are here now (ADR-015), and a name nobody needs is a
+	# coupling waiting for the hash to change.
+	run grep -qE "^      veth\)" "$(CONTAINER_NIX)"
+	assert_failure
+	run grep -q 'vethHostName' "$NIXCAGE_ROOT/flake.nix"
+	assert_failure
+}
