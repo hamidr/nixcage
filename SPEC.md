@@ -159,7 +159,10 @@ module); the host CLI only ever calls it over SSH.
   table named `nixcage`, made by `nixcage-container` at runtime and declared
   to no NixOS module, so `nft list ruleset` shows a table the host's
   configuration does not mention: it is nixcage's. A caller that wants two
-  cages to talk runs a service on the bridge that both reach.
+  cages to talk runs a service on the bridge that both reach. Such a cage
+  resolves nothing unless `--dns <address>` names a resolver it can reach
+  (ADR-016): its `/etc/resolv.conf` is empty by default, one `nameserver`
+  line when told; a session in the host's namespace keeps the host's file.
 - `list`: names under `/var/lib/nixcage/containers`.
 - `rm <name>`: removes the container directory and home.
 

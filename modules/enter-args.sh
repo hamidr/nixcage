@@ -28,6 +28,7 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_NETWORK_BRIDGE=""
 	NIXCAGE_ENTER_NETWORK_ADDR=""
 	NIXCAGE_ENTER_NETWORK_NS=""
+	NIXCAGE_ENTER_DNS=""
 	NIXCAGE_ENTER_NO_NIX_DAEMON=""
 	NIXCAGE_ENTER_MEMORY=""
 	NIXCAGE_ENTER_CPUS=""
@@ -78,6 +79,10 @@ nixcage_enter_parse() {
 			;;
 		--network)
 			nixcage_enter_network_arg "${2:-}" || return 1
+			shift 2 || return 1
+			;;
+		--dns)
+			nixcage_enter_dns_arg "${2:-}" || return 1
 			shift 2 || return 1
 			;;
 		--no-nix-daemon)
@@ -143,6 +148,22 @@ nixcage_enter_parse() {
 	if [ -n "$NIXCAGE_ENTER_SHELL" ] && [ -n "$NIXCAGE_ENTER_NO_NIX_DAEMON" ]; then
 		echo "nixcage: --shell and --no-nix-daemon are mutually exclusive" >&2
 		return 1
+	fi
+
+	## A session in the host's namespace resolves as the host does; a caller
+	## that wants otherwise has a different question, and refusing beats a
+	## file the host's resolver would contradict (ADR-016). A session on a
+	## private network that names no resolver gets none: the host's file
+	## names one it cannot reach, and a lookup that fails at once beats one
+	## that waits out the resolver's timeout first.
+	if [ -n "$NIXCAGE_ENTER_DNS" ] &&
+		[ -z "$NIXCAGE_ENTER_NETWORK_BRIDGE" ] && [ -z "$NIXCAGE_ENTER_NETWORK_NS" ]; then
+		echo "nixcage: --dns needs --network" >&2
+		return 1
+	fi
+	if [ -z "$NIXCAGE_ENTER_DNS" ] &&
+		{ [ -n "$NIXCAGE_ENTER_NETWORK_BRIDGE" ] || [ -n "$NIXCAGE_ENTER_NETWORK_NS" ]; }; then
+		NIXCAGE_ENTER_DNS=none
 	fi
 
 	if [ -n "$NIXCAGE_ENTER_UID" ] &&
@@ -216,6 +237,42 @@ nixcage_enter_network_arg() {
 	fi
 	NIXCAGE_ENTER_NETWORK_BRIDGE="$bridge"
 	NIXCAGE_ENTER_NETWORK_ADDR="$addr"
+}
+
+## What a private-network cage resolves with (ADR-016): none, or one IPv4
+## address that reaches /etc/resolv.conf as a nameserver line. A name, a
+## port or an IPv6 address is refused here rather than written into a file
+## glibc would read differently from what the caller meant.
+nixcage_enter_dns_arg() {
+	local dns="$1"
+	if [ "$dns" != none ] && ! nixcage_enter_ipv4_ok "$dns"; then
+		echo "nixcage: not a resolver address: $dns" >&2
+		return 1
+	fi
+	NIXCAGE_ENTER_DNS="$dns"
+}
+
+nixcage_enter_ipv4_ok() {
+	local octet
+	[[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+	for octet in ${1//./ }; do
+		[ "$octet" -le 255 ] || return 1
+	done
+}
+
+## The rootfs's /etc/resolv.conf, written from the parse: the host's file
+## byte for byte, and none where the host has none, when the session is in
+## the host's namespace; empty for a cage told to resolve nothing; one
+## nameserver line for a cage told where. Empty rather than absent, so
+## glibc falls back to loopback, which in a private namespace answers
+## nothing and the failure is immediate.
+nixcage_enter_resolv_conf() {
+	local host_file="$1" dest="$2"
+	case "$NIXCAGE_ENTER_DNS" in
+	"") cp "$host_file" "$dest" 2>/dev/null || true ;;
+	none) : >"$dest" ;;
+	*) printf 'nameserver %s\n' "$NIXCAGE_ENTER_DNS" >"$dest" ;;
+	esac
 }
 
 ## The bounds as nspawn takes them, one argument per line: properties of
