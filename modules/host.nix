@@ -16,6 +16,9 @@ let
   };
 in
 {
+  ## The bridges a cage may be placed on (ADR-018), shared with the VM module.
+  imports = [ ./bridges.nix ];
+
   options.nixcage = {
     workspaceRoots = lib.mkOption {
       type = lib.types.listOf lib.types.str;

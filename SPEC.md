@@ -81,6 +81,7 @@ machines (the nixos-rebuild hostname convention). A starter is scaffolded with
 | `nixcage.vm.cpus`       | positive int    | 4          | vCPUs                                      |
 | `nixcage.vm.mem`        | positive int    | 4096       | MiB RAM                                    |
 | `nixcage.vm.diskSize`   | positive int    | 20480      | MiB per persistent volume                  |
+| `nixcage.bridges.<name>`| `{ address; prefix; }` | `{}` | A bridge a cage may be placed on: no static ports, the address, `ConfigureWithoutCarrier`, `net.ipv4.ip_nonlocal_bind` (ADR-018); on the host module too |
 
 Everything must be evaluable at build time; the CLI holds no configuration of
 its own. Values the CLI needs at runtime (`sshPort`, `workspaceRoots`) are

@@ -49,6 +49,11 @@ factory of roles over one repository, is built entirely on those. Architecture:
 - `modules/principal-uid.sh` -- allocation of the uid a cage is mapped onto.
   A principal is whatever a caller wants a durable number for; nixcage promises
   only that one name always answers with one number and that none is reissued.
+- `modules/bridges.nix` -- `nixcage.bridges.<name>` (ADR-018), imported by
+  both the host module and the VM module: a bridge a cage may be placed on,
+  with no static ports, its address, and the two settings an empty bridge
+  needs; the name refused at evaluation by the check `enter --network`
+  applies. `tests/command/modules.bats` evaluates both modules for real.
 - `modules/scope.sh` -- the verbs over a running cage, read from the scope
   nspawn allocates for it (ADR-012): status, the leader's namespace path,
   stop; and the cage's record (ADR-017): what enter was given, written

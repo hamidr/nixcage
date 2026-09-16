@@ -24,6 +24,10 @@ let
   stateDataset = "nixcage/state";
 in
 {
+  ## The bridges a cage may be placed on (ADR-018), rendered into the
+  ## guest, shared with the host module.
+  imports = [ ./bridges.nix ];
+
   options.nixcage = {
     workspaceRoots = lib.mkOption {
       type = lib.types.listOf lib.types.str;
