@@ -153,6 +153,13 @@ module); the host CLI only ever calls it over SSH.
   - `PATH` from a minimal container profile (bash, coreutils, nix, git,
     cacert) linked at `/etc/nixcage/profile`;
   - command `nix develop` (interactive) or `nix develop --command ...`.
+- `enter --network <bridge>:<address>/<prefix> ...`: the cage sends as that
+  address and no other, and reaches the bridge's own address and no other
+  port (ADR-015). The pin and the two rules live in a bridge-family nftables
+  table named `nixcage`, made by `nixcage-container` at runtime and declared
+  to no NixOS module, so `nft list ruleset` shows a table the host's
+  configuration does not mention: it is nixcage's. A caller that wants two
+  cages to talk runs a service on the bridge that both reach.
 - `list`: names under `/var/lib/nixcage/containers`.
 - `rm <name>`: removes the container directory and home.
 
