@@ -85,7 +85,9 @@ grows one conditional block before the nspawn line and one on it. The
 bridge has to exist before the session starts, and what may cross it is
 the host's ruleset and not nixcage's: the rules cageworks needs are keyed
 on the veth name nspawn chooses and the address the caller passed, so both
-are the caller's to know. `iproute2` and `util-linux` enter the guest
+are the caller's to know (amended 2026-09-16: the two rules about a
+placement are nixcage's, ADR-015; what a cage may reach on the bridge's
+own address stays the host's). `iproute2` and `util-linux` enter the guest
 script's closure by store path and not the session's profile.
 
 A cage on a private network cannot reach anything on the host's loopback.

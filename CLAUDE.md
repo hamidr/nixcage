@@ -56,7 +56,10 @@ factory of roles over one repository, is built entirely on those. Architecture:
   nsenter, setpriv and env words from the leader's own environment.
 - `modules/veth.sh` -- the veth pair a bridge placement gets (ADR-013): the
   host end named from a hash of the cage's name, the ip words to make and
-  delete it, and the argument nspawn takes.
+  delete it, and the argument nspawn takes; and the port's pin and
+  isolation (ADR-015): the bridge-family table `nixcage` made at runtime,
+  the nft words that pin the port to its address, and the bridge word that
+  isolates it.
 - `modules/storage.sh` -- a path given to a uid: a dataset where there is a
   pool and an ordinary directory where there is not (ADR-017 in cageworks,
   whose behaviour this inherited). Callers name paths, never datasets.

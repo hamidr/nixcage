@@ -74,8 +74,10 @@ let
       coreutils
       systemd
       gnugrep
-      ## The veth pair a bridge placement gets is made here (ADR-013).
+      ## The veth pair a bridge placement gets is made here (ADR-013), and
+      ## its port is pinned and isolated here (ADR-015).
       iproute2
+      nftables
       ## exec enters a running cage's namespaces and becomes a subject.
       util-linux
       ## Resolving a linked worktree's git directories, which the project bind
@@ -381,13 +383,15 @@ let
           network_args=("--network-namespace-path=$network_ns")
         elif [ -n "$network_bridge" ]; then
           ## The pair is nixcage's (ADR-013): made here, its host end on
-          ## the bridge under a name that fits any cage name, its cage end
-          ## handed to nspawn to rename host0. Deleted with the rootfs,
-          ## whichever way the session ends.
-          nixcage_veth_make "$name" "$network_bridge" ||
+          ## the bridge under a name that fits any cage name, pinned to the
+          ## placement's address and isolated from every other port
+          ## (ADR-015), its cage end handed to nspawn to rename host0.
+          ## Deleted with the rootfs, pin first, whichever way the session
+          ## ends.
+          nixcage_veth_make "$name" "$network_bridge" "$network_addr" ||
             die "could not make the veth pair for $name on $network_bridge"
           # shellcheck disable=SC2064
-          trap "rm -rf '$rootfs'; ip link del '$(nixcage_veth_host_name "$name")' 2>/dev/null" EXIT
+          trap "rm -rf '$rootfs'; nixcage_veth_delete '$name' 2>/dev/null" EXIT
           network_args=("$(nixcage_veth_nspawn_arg "$name")")
           session_user=()
           session_cmd_env=("--setenv=NIXCAGE_SESSION_CMD=$shell_cmd")
