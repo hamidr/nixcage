@@ -141,6 +141,7 @@ exported primitives, which are the whole interface (ADR-009):
 | `nixcage-container uid <principal> [<subject>]` | A durable uid for a name, never reissued |
 | `nixcage-container storage ensure <path> <uid> [quota]` | That path owned by that uid, bounded where it can be |
 | `nixcage-container status <name>`, `netns <name>`, `stop <name>` | A running cage from its scope: its leader and cgroup, the namespace path `enter --network ns:` takes, and an end to it (ADR-012) |
+| `nixcage-container list [--json]` | Every cage entered and not removed; with `--json`, one object per cage with what enter was given (uid, subject, placement, roots) and, while it runs, its scope and leader (ADR-017) |
 | `nixcage-container exec [--subject <name>] <name> [-- cmd]` | A command inside a running cage: its leader's namespaces, its HOME and PATH, as cage root or as a declared subject (ADR-012) |
 | `nixcage exec [--tty] [--agent] -- <cmd>` | A way to reach the other three from your own machine |
 

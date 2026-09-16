@@ -104,7 +104,9 @@ let
       . ${./veth.sh}
       . ${./exec-cage.sh}
 
-      STATE_DIR=/var/lib/nixcage
+      ## scope.sh names the same directory for the records it reads; one
+      ## spelling, taken from there.
+      STATE_DIR="$NIXCAGE_STATE_DIR"
       ## Rendered by the platform module: the uid range principals are
       ## allocated from, and the dataset holding nixcage's state where there is
       ## one. Absent on a host that declares neither.
@@ -119,7 +121,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--memory <size>] [--cpus <n>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -333,6 +335,12 @@ let
         local cdir="$STATE_DIR/containers/$name"
         [ -n "$home" ] || home="$STATE_DIR/homes/$name"
         mkdir -p "$cdir" "$home"
+        ## What this session was given, for list --json to show while it
+        ## runs and after (ADR-017). Written before anything else of the
+        ## session exists, so a session that dies on the way still left it.
+        nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns" \
+          ''${store_roots[@]+"''${store_roots[@]}"} ||
+          die "could not record the placement of $name"
         ## The home holds whatever the session writes there, so it is private
         ## to the subject running. If its contents belong to someone else the
         ## whole tree is re-owned rather than left unusable: a principal's uid
@@ -619,9 +627,17 @@ let
         exec "''${words[@]}"
       }
 
+      ## Names, or with --json what each was given and whether it runs
+      ## (ADR-017).
       cmd_list() {
-        [ -d "$STATE_DIR/containers" ] || return 0
-        ls -1 "$STATE_DIR/containers"
+        case "''${1:-}" in
+        --json) nixcage_scope_list_json ;;
+        "")
+          [ -d "$STATE_DIR/containers" ] || return 0
+          ls -1 "$STATE_DIR/containers"
+          ;;
+        *) die "usage: nixcage-container list [--json]" ;;
+        esac
       }
 
       cmd_rm() {
@@ -640,7 +656,7 @@ let
       netns) cmd_netns "$@" ;;
       stop) cmd_stop "$@" ;;
       exec) cmd_exec "$@" ;;
-      list) cmd_list ;;
+      list) cmd_list "$@" ;;
       rm) cmd_rm "$@" ;;
       *) die "$(usage)" ;;
       esac
