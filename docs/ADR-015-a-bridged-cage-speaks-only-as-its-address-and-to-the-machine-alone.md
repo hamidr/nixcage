@@ -1,7 +1,7 @@
 ---
 id: ADR-015
 title: A bridged cage speaks only as its address, and reaches the machine and never a peer
-status: proposed
+status: implementing
 date: 2026-09-16
 status_date: 2026-09-16
 summary: nixcage pins a placement address on its port and isolates the port; the two bridge rules a dependant wrote are its own
@@ -130,3 +130,11 @@ it: `tests/manual/isolation.sh` in the dependant, two cages on one bridge;
 from the first, a frame as the second's address is not seen on the bridge,
 a packet to the second's address gets no reply, and a packet to the
 bridge's address does. Recorded here when run.
+
+Implemented 2026-09-16: `modules/veth.sh` makes the table, pins and
+isolates the port and releases the pin, driven by `tests/unit/veth.bats`
+with `ip`, `nft` and `bridge` stubbed; `modules/container.nix` passes the
+placement's address to the make, releases the pin from the session's trap,
+carries `nftables` and dispatches no `veth`; `flake.nix` exports no
+`vethHostName`, which `tests/unit/exports.bats` asserts. The guest script
+builds on a Linux builder. Open: the dependant's measurement above.
