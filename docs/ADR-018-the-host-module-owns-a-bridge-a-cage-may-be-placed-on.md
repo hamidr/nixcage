@@ -1,7 +1,7 @@
 ---
 id: ADR-018
 title: The host module owns a bridge a cage may be placed on
-status: proposed
+status: implementing
 date: 2026-09-16
 status_date: 2026-09-16
 summary: nixcage.bridges.<name> declares a bridge with its address and the two settings an empty bridge needs to be usable
@@ -58,3 +58,11 @@ bridge's network unit, and the sysctl; a name of sixteen characters is
 refused at evaluation. On a machine: the bridge's address is present with
 no cage running, and a service bound to it answers before the first cage
 enters.
+
+Implemented 2026-09-16: `modules/bridges.nix` holds the option and the
+four settings, imported by `modules/host.nix` and `modules/nixcage.nix`;
+`tests/command/modules.bats` evaluates both as NixOS systems with one
+bridge and with none, reads the address, the carrier setting and the
+sysctl back, and sees a sixteen-character name and one outside the
+alphabet refused. Open: the machine half above, which the dependant's
+machine will show when it adopts the option.
