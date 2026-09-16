@@ -1,7 +1,7 @@
 ---
 id: ADR-017
 title: nixcage lists what runs, with what each cage was given
-status: proposed
+status: implemented
 date: 2026-09-16
 status_date: 2026-09-16
 summary: list --json reports each cage's name, uid, subject, placement, scope and leader from state nixcage recorded at enter
@@ -63,3 +63,15 @@ cage without a record lists with its name; the output is one JSON object per
 line, parseable by `jq -c`. `tests/command/enter.bats`: the record exists
 after enter with the fields the argv named, is still there after the
 session, and is gone after `rm`.
+
+Implemented 2026-09-16: `modules/scope.sh` writes the record
+(`nixcage_scope_record_write`) and lists it with the scope
+(`nixcage_scope_list_json`), both over a state directory the suite
+points at fixtures in `tests/unit/scope.bats`, the fixture scenarios above
+included; `modules/container.nix` writes the record as soon as the cage's
+directory exists, before nspawn, and dispatches `list --json`, which
+`tests/unit/exports.bats` asserts by shape, since the guest script's
+`enter` needs root and nspawn and `tests/command/enter.bats` drives the
+host CLI, not it. A session joining a running cage's namespace records
+the namespace path rather than an address, since the path is what it was
+given. The guest script builds on a Linux builder.
