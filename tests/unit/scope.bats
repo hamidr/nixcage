@@ -11,6 +11,7 @@ setup() {
 	source "$NIXCAGE_ROOT/modules/scope.sh"
 	export NIXCAGE_CGROUP_ROOT="$TEST_TEMP_DIR/cgroup"
 	export NIXCAGE_PROC="$TEST_TEMP_DIR/proc"
+	export NIXCAGE_STATE_DIR="$TEST_TEMP_DIR/var"
 	CALLS="$TEST_TEMP_DIR/systemctl.calls"
 	mkdir -p "$TEST_TEMP_DIR/bin"
 	cat >"$TEST_TEMP_DIR/bin/systemctl" <<STUB
@@ -129,4 +130,98 @@ running_cage() {
 	run nixcage_scope_status "../etc"
 	assert_failure
 	[ ! -e "$CALLS" ]
+}
+
+# What each cage was given, recorded at enter and read back by list --json
+# (ADR-017). The dependant kept a table of its own for every one of these
+# facts, which nixcage had at enter and threw away.
+
+@test "enter's record holds what it was given, as one JSON object under the cage's state directory" {
+	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 "" /nix/store/aaaa-profile /nix/store/bbbb-tool
+	local record="$NIXCAGE_STATE_DIR/containers/builder/placement"
+	[ -f "$record" ]
+	[ "$(wc -l <"$record")" -eq 1 ]
+	[ "$(jq -r .name "$record")" = builder ]
+	[ "$(jq .uid "$record")" = 700000 ]
+	[ "$(jq -r .subject "$record")" = agent ]
+	[ "$(jq -r .bridge "$record")" = fabriek0 ]
+	[ "$(jq -r .address "$record")" = 10.77.0.10/24 ]
+	[ "$(jq -c .roots "$record")" = '["/nix/store/aaaa-profile","/nix/store/bbbb-tool"]' ]
+	[ "$(jq 'has("netns")' "$record")" = false ]
+}
+
+@test "a record for an ordinary session names the cage and its uid and nothing it was not given" {
+	nixcage_scope_record_write builder 700000 "" "" "" ""
+	run jq -c 'keys' "$NIXCAGE_STATE_DIR/containers/builder/placement"
+	assert_output '["name","uid"]'
+}
+
+@test "a session joining a running cage's namespace records that path, since it has no address of its own" {
+	nixcage_scope_record_write builder-hand 700000 "" "" "" /proc/4001/ns/net
+	run jq -r .netns "$NIXCAGE_STATE_DIR/containers/builder-hand/placement"
+	assert_output /proc/4001/ns/net
+}
+
+@test "the next enter under the name overwrites the record" {
+	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 ""
+	nixcage_scope_record_write builder 700000 "" "" "" ""
+	run jq -c 'keys' "$NIXCAGE_STATE_DIR/containers/builder/placement"
+	assert_output '["name","uid"]'
+}
+
+@test "list --json shows a running cage with a record with every field, its scope and its leader" {
+	running_cage builder 4000 4001
+	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 "" /nix/store/aaaa-profile
+	run nixcage_scope_list_json
+	assert_success
+	[ "$(jq -r .name <<<"$output")" = builder ]
+	[ "$(jq .uid <<<"$output")" = 700000 ]
+	[ "$(jq -r .subject <<<"$output")" = agent ]
+	[ "$(jq -r .bridge <<<"$output")" = fabriek0 ]
+	[ "$(jq -r .address <<<"$output")" = 10.77.0.10/24 ]
+	[ "$(jq -c .roots <<<"$output")" = '["/nix/store/aaaa-profile"]' ]
+	[ "$(jq -r .scope <<<"$output")" = machine.slice/machine-builder.scope ]
+	[ "$(jq .leader <<<"$output")" = 4001 ]
+}
+
+@test "a stopped cage with a record lists without scope and leader" {
+	nixcage_scope_record_write reviewer 700010 "" fabriek0 10.77.0.11/24 ""
+	run nixcage_scope_list_json
+	assert_success
+	[ "$(jq -r .name <<<"$output")" = reviewer ]
+	[ "$(jq -r .address <<<"$output")" = 10.77.0.11/24 ]
+	[ "$(jq 'has("scope")' <<<"$output")" = false ]
+	[ "$(jq 'has("leader")' <<<"$output")" = false ]
+}
+
+@test "a cage without a record, entered before records were kept, lists with its name and its scope alone" {
+	mkdir -p "$NIXCAGE_STATE_DIR/containers/bare"
+	running_cage bare 5000 5001 bare.scope
+	run nixcage_scope_list_json
+	assert_success
+	run jq -c 'keys' <<<"$output"
+	assert_output '["leader","name","scope"]'
+}
+
+@test "the output is one object per line, one per name in order, each parseable by jq -c" {
+	running_cage builder 4000 4001
+	nixcage_scope_record_write builder 700000 "" fabriek0 10.77.0.10/24 ""
+	nixcage_scope_record_write reviewer 700010 "" fabriek0 10.77.0.11/24 ""
+	mkdir -p "$NIXCAGE_STATE_DIR/containers/bare"
+	run nixcage_scope_list_json
+	assert_success
+	[ "${#lines[@]}" -eq 3 ]
+	local line
+	for line in "${lines[@]}"; do
+		jq -c . <<<"$line" >/dev/null
+	done
+	[ "$(jq -r .name <<<"${lines[0]}")" = bare ]
+	[ "$(jq -r .name <<<"${lines[1]}")" = builder ]
+	[ "$(jq -r .name <<<"${lines[2]}")" = reviewer ]
+}
+
+@test "list --json with no cage ever entered prints nothing and succeeds" {
+	run nixcage_scope_list_json
+	assert_success
+	assert_output ""
 }

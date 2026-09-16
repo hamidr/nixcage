@@ -163,7 +163,12 @@ module); the host CLI only ever calls it over SSH.
   resolves nothing unless `--dns <address>` names a resolver it can reach
   (ADR-016): its `/etc/resolv.conf` is empty by default, one `nameserver`
   line when told; a session in the host's namespace keeps the host's file.
-- `list`: names under `/var/lib/nixcage/containers`.
+- `list`: names under `/var/lib/nixcage/containers`; `list --json`: one
+  JSON object per name, the `placement` record `enter` wrote there (name,
+  uid, subject, bridge and address or netns, roots, each only when given)
+  and, while the cage runs, its scope's cgroup path and leader pid
+  (ADR-017). The record is nixcage's: the next `enter` overwrites it, `rm`
+  removes it.
 - `rm <name>`: removes the container directory and home.
 
 Container names are `sanitized-basename-<8-char sha256 of abs path>`,

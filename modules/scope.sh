@@ -7,11 +7,19 @@
 ## bounds are set, so the verbs over a running cage read it and nothing
 ## else: no process table, no argv of nspawn's.
 ##
+## And a cage has a record of what enter was given (ADR-017), under its
+## state directory, which list --json joins with the scope: the uid and
+## subject the caller named, the placement, the roots. Written before nspawn
+## starts, overwritten by the next enter under the name, removed by rm, so
+## a stopped cage still says what it was given.
+##
 ## Sourced by store path into nixcage-container. The cgroup and proc roots
-## are variables so the suite drives these on a fixture tree.
+## and the state directory are variables so the suite drives these on a
+## fixture tree.
 
 NIXCAGE_CGROUP_ROOT="${NIXCAGE_CGROUP_ROOT:-/sys/fs/cgroup}"
 NIXCAGE_PROC="${NIXCAGE_PROC:-/proc}"
+NIXCAGE_STATE_DIR="${NIXCAGE_STATE_DIR:-/var/lib/nixcage}"
 
 ## The alphabet check_name allows is one systemd does not escape, so the
 ## unit name is the cage's name and no escaping is written.
@@ -124,4 +132,70 @@ nixcage_scope_stop() {
 		return 1
 	}
 	systemctl stop "$unit"
+}
+
+## A JSON string of a value the parse already held to an alphabet; the two
+## characters JSON cannot take bare are escaped anyway, since a path is
+## the one field whose alphabet is the filesystem's.
+nixcage_scope_json_string() {
+	local v="$1"
+	v="${v//\\/\\\\}"
+	v="${v//\"/\\\"}"
+	v="${v//$'\n'/\\n}"
+	v="${v//$'\t'/\\t}"
+	printf '"%s"' "$v"
+}
+
+## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> [root...]
+## One object on one line, so list --json can extend it without parsing it.
+## A field the session was not given is absent rather than empty.
+nixcage_scope_record_write() {
+	local name="$1" uid="$2" subject="$3" bridge="$4" address="$5" netns="$6"
+	shift 6
+	nixcage_scope_name_ok "$name" || return 1
+	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep
+	mkdir -p "$dir" || return 1
+	record="{\"name\":$(nixcage_scope_json_string "$name"),\"uid\":$uid"
+	[ -z "$subject" ] || record+=",\"subject\":$(nixcage_scope_json_string "$subject")"
+	[ -z "$bridge" ] || record+=",\"bridge\":$(nixcage_scope_json_string "$bridge")"
+	[ -z "$address" ] || record+=",\"address\":$(nixcage_scope_json_string "$address")"
+	[ -z "$netns" ] || record+=",\"netns\":$(nixcage_scope_json_string "$netns")"
+	if [ $# -gt 0 ]; then
+		record+=',"roots":['
+		sep=""
+		for root in "$@"; do
+			record+="$sep$(nixcage_scope_json_string "$root")"
+			sep=","
+		done
+		record+=']'
+	fi
+	printf '%s}\n' "$record" >"$dir/placement"
+}
+
+## Every name under the state directory, one object per line: the record
+## where there is one, the name alone where a cage was entered before
+## records were kept, and the scope's cgroup and the leader's pid while
+## the cage runs. The record is closed by its last byte, so the scope is
+## spliced in before it.
+nixcage_scope_list_json() {
+	local containers="$NIXCAGE_STATE_DIR/containers" dir name record status leader cgroup
+	[ -d "$containers" ] || return 0
+	for dir in "$containers"/*/; do
+		[ -d "$dir" ] || continue
+		name="$(basename "$dir")"
+		if [ -f "$dir/placement" ]; then
+			record="$(<"$dir/placement")"
+			record="${record%\}}"
+		else
+			record="{\"name\":$(nixcage_scope_json_string "$name")"
+		fi
+		status="$(nixcage_scope_status "$name" 2>/dev/null)" || status=stopped
+		case "$status" in
+		running\ *)
+			read -r _ leader cgroup <<<"$status"
+			record+=",\"scope\":$(nixcage_scope_json_string "$cgroup"),\"leader\":$leader"
+			;;
+		esac
+		printf '%s}\n' "$record"
+	done
 }

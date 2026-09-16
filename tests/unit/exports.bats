@@ -220,3 +220,16 @@ teardown() {
 	run grep -q 'vethHostName' "$NIXCAGE_ROOT/flake.nix"
 	assert_failure
 }
+
+@test "enter records what it was given before nspawn starts, and list --json reads the record with the scope" {
+	# The record is nixcage's memory of a session (ADR-017): a dependant
+	# that had to keep its own table of uids and addresses reads it instead.
+	run grep -q 'nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns"' "$(CONTAINER_NIX)"
+	assert_success
+	local record nspawn
+	record="$(grep -n 'nixcage_scope_record_write "$name"' "$(CONTAINER_NIX)" | head -1 | cut -d: -f1)"
+	nspawn="$(grep -n 'systemd-nspawn' "$(CONTAINER_NIX)" | awk -F: -v r="$record" '$1 > r {print $1; exit}')"
+	[ -n "$nspawn" ]
+	run grep -q 'nixcage_scope_list_json' "$(CONTAINER_NIX)"
+	assert_success
+}
