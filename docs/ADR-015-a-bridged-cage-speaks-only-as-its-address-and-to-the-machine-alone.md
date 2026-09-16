@@ -1,7 +1,7 @@
 ---
 id: ADR-015
 title: A bridged cage speaks only as its address, and reaches the machine and never a peer
-status: implementing
+status: implemented
 date: 2026-09-16
 status_date: 2026-09-16
 summary: nixcage pins a placement address on its port and isolates the port; the two bridge rules a dependant wrote are its own
@@ -138,3 +138,14 @@ placement's address to the make, releases the pin from the session's trap,
 carries `nftables` and dispatches no `veth`; `flake.nix` exports no
 `vethHostName`, which `tests/unit/exports.bats` asserts. The guest script
 builds on a Linux builder. Open: the dependant's measurement above.
+
+Measured 2026-09-16 on a fabriek machine (fabriek `1af4e65`, this
+repository at `3cdcfe6`): `tests/manual/isolation.sh` against a factory of
+six roles on `fabriek0`, all six of the bridge's Thens passing. A cage
+sees `host0` and nothing else besides `lo`; two roles hold two addresses
+(`10.77.0.10`, `10.77.0.11`); a connection from one cage to the other's
+address fails and one to the proxy on the bridge's address answers; a
+request from the first cage's namespace forged as the second's address
+moves no count at the proxy, while an honest request moves the sender's
+and nobody else's. The dependant records the same run beside its bridge
+decision.
