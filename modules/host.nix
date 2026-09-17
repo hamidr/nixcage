@@ -239,6 +239,7 @@ in
         PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}
         PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
         STORAGE_DATASET=${lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset}
+        HOST_PLATFORM=linux
         SUBSTRATE_DEFAULT=${substrateDefault}
         ${lib.optionalString cfg.microvm.enable "MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}"}
       '';

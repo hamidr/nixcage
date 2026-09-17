@@ -43,14 +43,28 @@ nixcage_session_network() {
 ## the host captures is what argv wrote.
 nixcage_session_run() {
 	cd "$SESSION_CWD" || return 1
+	## env -i resolves what follows through the environment it just
+	## emptied, so the switch is named by its path.
+	local setpriv
+	setpriv="$(command -v setpriv)"
 	if [ -n "$SESSION_TTY" ]; then
-		env -i "${SESSION_ENV[@]}" setpriv --reuid="$SESSION_UID" --regid="$SESSION_GID" \
+		env -i "${SESSION_ENV[@]}" "$setpriv" --reuid="$SESSION_UID" --regid="$SESSION_GID" \
 			--clear-groups -- "${SESSION_ARGV[@]}"
 	else
 		stty -onlcr
-		env -i "${SESSION_ENV[@]}" setpriv --reuid="$SESSION_UID" --regid="$SESSION_GID" \
+		env -i "${SESSION_ENV[@]}" "$setpriv" --reuid="$SESSION_UID" --regid="$SESSION_GID" \
 			--clear-groups -- "${SESSION_ARGV[@]}" </dev/null
 	fi
+}
+
+## Ready: the session unit is up and argv is about to run. The host waits
+## for this file rather than for vmspawn's own READY=1, which reaches
+## vmspawn and nobody behind it; it crosses on the share the status does,
+## written the same way.
+nixcage_session_ready() {
+	local file="$SESSION_HOME/.nixcage-ready"
+	setpriv --reuid="$SESSION_UID" --regid="$SESSION_GID" --clear-groups -- touch "$file" &&
+		setpriv --reuid="$SESSION_UID" --regid="$SESSION_GID" --clear-groups -- sync "$file"
 }
 
 ## The status, written as the session's uid so the home stays its own, and
@@ -71,6 +85,7 @@ nixcage_session_main() {
 	trap 'systemctl poweroff' EXIT
 	nixcage_session_read "$CREDENTIALS_DIRECTORY/nixcage.session"
 	nixcage_session_network
+	nixcage_session_ready
 	local status=0
 	nixcage_session_run || status=$?
 	nixcage_session_exit "$status" || true

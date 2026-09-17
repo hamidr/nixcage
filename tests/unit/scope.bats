@@ -137,7 +137,7 @@ running_cage() {
 # facts, which nixcage had at enter and threw away.
 
 @test "enter's record holds what it was given, as one JSON object under the cage's state directory" {
-	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 "" /nix/store/aaaa-profile /nix/store/bbbb-tool
+	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 "" "" /nix/store/aaaa-profile /nix/store/bbbb-tool
 	local record="$NIXCAGE_STATE_DIR/containers/builder/placement"
 	[ -f "$record" ]
 	[ "$(wc -l <"$record")" -eq 1 ]
@@ -151,27 +151,48 @@ running_cage() {
 }
 
 @test "a record for an ordinary session names the cage and its uid and nothing it was not given" {
-	nixcage_scope_record_write builder 700000 "" "" "" ""
+	nixcage_scope_record_write builder 700000 "" "" "" "" ""
 	run jq -c 'keys' "$NIXCAGE_STATE_DIR/containers/builder/placement"
 	assert_output '["name","uid"]'
 }
 
+@test "a microvm session records its substrate, and the record answers for it afterwards" {
+	# The choice is fixed at the first enter (ADR-019); the next enter of
+	# the name reads it here before it reads its own flag.
+	nixcage_scope_record_write builder 700000 "" "" "" "" microvm
+	run jq -r .substrate "$NIXCAGE_STATE_DIR/containers/builder/placement"
+	assert_output microvm
+	run nixcage_scope_record_substrate builder
+	assert_output microvm
+}
+
+@test "an nspawn session records no substrate: absent is what every cage was before ADR-019" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" nspawn
+	[ "$(jq 'has("substrate")' "$NIXCAGE_STATE_DIR/containers/builder/placement")" = false ]
+	run nixcage_scope_record_substrate builder
+	assert_success
+	assert_output ""
+	run nixcage_scope_record_substrate never-entered
+	assert_success
+	assert_output ""
+}
+
 @test "a session joining a running cage's namespace records that path, since it has no address of its own" {
-	nixcage_scope_record_write builder-hand 700000 "" "" "" /proc/4001/ns/net
+	nixcage_scope_record_write builder-hand 700000 "" "" "" /proc/4001/ns/net ""
 	run jq -r .netns "$NIXCAGE_STATE_DIR/containers/builder-hand/placement"
 	assert_output /proc/4001/ns/net
 }
 
 @test "the next enter under the name overwrites the record" {
-	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 ""
-	nixcage_scope_record_write builder 700000 "" "" "" ""
+	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 "" ""
+	nixcage_scope_record_write builder 700000 "" "" "" "" ""
 	run jq -c 'keys' "$NIXCAGE_STATE_DIR/containers/builder/placement"
 	assert_output '["name","uid"]'
 }
 
 @test "list --json shows a running cage with a record with every field, its scope and its leader" {
 	running_cage builder 4000 4001
-	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 "" /nix/store/aaaa-profile
+	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 "" "" /nix/store/aaaa-profile
 	run nixcage_scope_list_json
 	assert_success
 	[ "$(jq -r .name <<<"$output")" = builder ]
@@ -185,7 +206,7 @@ running_cage() {
 }
 
 @test "a stopped cage with a record lists without scope and leader" {
-	nixcage_scope_record_write reviewer 700010 "" fabriek0 10.77.0.11/24 ""
+	nixcage_scope_record_write reviewer 700010 "" fabriek0 10.77.0.11/24 "" ""
 	run nixcage_scope_list_json
 	assert_success
 	[ "$(jq -r .name <<<"$output")" = reviewer ]
@@ -205,8 +226,8 @@ running_cage() {
 
 @test "the output is one object per line, one per name in order, each parseable by jq -c" {
 	running_cage builder 4000 4001
-	nixcage_scope_record_write builder 700000 "" fabriek0 10.77.0.10/24 ""
-	nixcage_scope_record_write reviewer 700010 "" fabriek0 10.77.0.11/24 ""
+	nixcage_scope_record_write builder 700000 "" fabriek0 10.77.0.10/24 "" ""
+	nixcage_scope_record_write reviewer 700010 "" fabriek0 10.77.0.11/24 "" ""
 	mkdir -p "$NIXCAGE_STATE_DIR/containers/bare"
 	run nixcage_scope_list_json
 	assert_success
