@@ -1,14 +1,14 @@
 ---
 id: PRD-001
 title: A cage per project, entered with one command, on the machine the developer already has
-status: implemented
+status: implementing
 date: 2026-09-17
 status_date: 2026-09-17
 summary: any flake directory enters an isolated container in one command, on Linux natively and on macOS in one shared VM
 depends_on: []
 supersedes: []
 superseded_by: []
-phases_total: 4
+phases_total: 5
 phases_done: 4
 ---
 
@@ -74,7 +74,8 @@ either.
 - Git works as on the host, including in a linked worktree (ADR-007) and
   with signing (ADR-008).
 - The same command and the same semantics on Linux and macOS; only the
-  transport differs (ADR-003). Measured: the suite runs the CLI under
+  transport differs (ADR-003). On Linux, the same command whether the cage
+  shares the kernel or has its own (ADR-019); only `netns` differs. Measured: the suite runs the CLI under
   `NIXCAGE_OS` for both.
 - A dependant needs nothing beyond four argv primitives (ADR-009) and can be
   pinned to them by `flake.lock`. Measured: cageworks builds on them and on
@@ -114,12 +115,10 @@ Out, explicitly:
   role, a task, a factory reaching this repository is a sign that
   something belongs on the other side of ADR-009's interface.
 - **Orchestration.** Several cages working one repository is cageworks.
-- **A cluster.** A cage on a machine the developer does not own is another
-  document.
-- **Process-level sandboxing.** Superseded by ADR-001 and not returned to;
-  on Linux the accepted trade is that host-versus-tool isolation rests on
-  the container boundary alone (ADR-003).
-- **A per-project VM.** ADR-001, superseded by ADR-002.
+- **A cluster.** A cage on a machine the developer does not own is PRD-002.
+- **Process-level sandboxing.** Superseded by ADR-001 and not returned to.
+- **A VM for every project.** ADR-001, superseded by ADR-002. A VM for a
+  project that asks for one is ADR-019 and in scope.
 - **Users without Nix.**
 
 ## Requirements
@@ -162,6 +161,10 @@ mechanism is decided.
   given [ADR-012, ADR-017].
 - R12. A session without the daemon sees the closure of its roots and
   nothing else of the store; `--store-root` names a root [ADR-014].
+- R13. A cage may run in a microVM with its own kernel, chosen when the
+  cage is defined (declared on the host, or at first enter, then fixed),
+  behind the same `enter`, with the same verbs; it never has a daemon, and
+  `netns` answers `none` [ADR-019].
 
 ## Phases
 
@@ -174,6 +177,10 @@ mechanism is decided.
    Done. Every requirement has its module and its tests (296 in the suite,
    0 failing on 2026-09-17), and the behaviour has been exercised on the
    Linux host repeatedly.
+5. **A kernel of its own, for the cage that asks** (ADR-019). Proposed
+   2026-09-17: a microVM substrate under `systemd-vmspawn` behind the same
+   `enter`, chosen when the cage is defined. Done when ADR-019's
+   measurement plan has run.
 
 ## Open questions
 
