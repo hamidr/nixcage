@@ -11,6 +11,8 @@ setup() {
 	source "$NIXCAGE_ROOT/modules/bind.sh"
 	# shellcheck source=../../modules/store-closure.sh
 	source "$NIXCAGE_ROOT/modules/store-closure.sh"
+	# shellcheck source=../../modules/substrate.sh
+	source "$NIXCAGE_ROOT/modules/substrate.sh"
 	# shellcheck source=../../modules/enter-args.sh
 	source "$NIXCAGE_ROOT/modules/enter-args.sh"
 }
@@ -267,6 +269,34 @@ teardown() {
 	assert_output --partial "not a cpu count: 1.5"
 	run nixcage_enter_parse --cpus 0 myproj /srv/myproj
 	assert_failure
+}
+
+# Which substrate the session asks for (ADR-019). The flag is one input to
+# the resolution substrate.sh does; here it is a word held to the two names.
+@test "given --substrate, a session asks for that substrate" {
+	nixcage_enter_parse --substrate microvm myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_SUBSTRATE" = microvm ]
+	nixcage_enter_parse --substrate nspawn myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_SUBSTRATE" = nspawn ]
+}
+
+@test "given no --substrate, a session asks for none and leaves the choice to the cage" {
+	nixcage_enter_parse myproj /srv/myproj
+	[ -z "$NIXCAGE_ENTER_SUBSTRATE" ]
+}
+
+@test "when the substrate is not one of the two, the session is refused" {
+	run nixcage_enter_parse --substrate firecracker myproj /srv/myproj
+	assert_failure
+	assert_output --partial "not a substrate: firecracker"
+}
+
+@test "a microvm session asked for a devShell is refused, as one without the daemon is" {
+	# A microVM never has the daemon (ADR-019 decision 4), and a devShell is
+	# realised by nix inside the session.
+	run nixcage_enter_parse --substrate microvm --shell default myproj /srv/myproj
+	assert_failure
+	assert_output --partial "--shell and --substrate microvm are mutually exclusive"
 }
 
 # The composed nspawn line as a contract a dependant can test against

@@ -8,7 +8,8 @@
 ##
 ## Sourced by store path into nixcage-container, beside bind.sh, whose checks
 ## every asked-for bind and variable goes through, and store-closure.sh,
-## whose check every store root goes through.
+## whose check every store root goes through, and substrate.sh, whose
+## alphabet the substrate word is held to.
 
 ## What a parse produced. Globals rather than a printed record because two of
 ## them are arrays, and a session command may hold newlines, spaces and
@@ -33,6 +34,7 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_MEMORY=""
 	NIXCAGE_ENTER_CPUS=""
 	NIXCAGE_ENTER_PRINT_ARGV=""
+	NIXCAGE_ENTER_SUBSTRATE=""
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
 	NIXCAGE_ENTER_STORE_ROOTS=()
@@ -101,6 +103,16 @@ nixcage_enter_parse() {
 			NIXCAGE_ENTER_PRINT_ARGV=1
 			shift
 			;;
+		--substrate)
+			## One input to the resolution (ADR-019); the record and the
+			## host's declaration are read where the cage is, not here.
+			if ! nixcage_substrate_word_ok "${2:-}"; then
+				echo "nixcage: not a substrate: ${2:-}" >&2
+				return 1
+			fi
+			NIXCAGE_ENTER_SUBSTRATE="$2"
+			shift 2 || return 1
+			;;
 		--bind)
 			arg="$(nixcage_bind_arg --bind "${2:-}")" || return 1
 			NIXCAGE_ENTER_BINDS+=("$arg")
@@ -147,6 +159,13 @@ nixcage_enter_parse() {
 	## its first command with an error about a socket nobody mentioned.
 	if [ -n "$NIXCAGE_ENTER_SHELL" ] && [ -n "$NIXCAGE_ENTER_NO_NIX_DAEMON" ]; then
 		echo "nixcage: --shell and --no-nix-daemon are mutually exclusive" >&2
+		return 1
+	fi
+	## A microVM never has the daemon (ADR-019), so the same refusal; the
+	## cage's record or declaration may make a session microvm without the
+	## flag, and that case is refused where they are read.
+	if [ -n "$NIXCAGE_ENTER_SHELL" ] && [ "$NIXCAGE_ENTER_SUBSTRATE" = microvm ]; then
+		echo "nixcage: --shell and --substrate microvm are mutually exclusive" >&2
 		return 1
 	fi
 
