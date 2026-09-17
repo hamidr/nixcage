@@ -35,6 +35,7 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_CPUS=""
 	NIXCAGE_ENTER_PRINT_ARGV=""
 	NIXCAGE_ENTER_SUBSTRATE=""
+	NIXCAGE_ENTER_DISK=""
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
 	NIXCAGE_ENTER_STORE_ROOTS=()
@@ -111,6 +112,10 @@ nixcage_enter_parse() {
 				return 1
 			fi
 			NIXCAGE_ENTER_SUBSTRATE="$2"
+			shift 2 || return 1
+			;;
+		--disk)
+			NIXCAGE_ENTER_DISK="${2:-}"
 			shift 2 || return 1
 			;;
 		--bind)
@@ -211,6 +216,22 @@ nixcage_enter_parse() {
 	if [ -n "$NIXCAGE_ENTER_CPUS" ] &&
 		! [[ "$NIXCAGE_ENTER_CPUS" =~ ^[1-9][0-9]*$ ]]; then
 		echo "nixcage: not a cpu count: $NIXCAGE_ENTER_CPUS" >&2
+		return 1
+	fi
+
+	## A persistent image for what virtiofs is too slow for, handed to the
+	## guest as a drive (ADR-019); its size is its quota, in systemd's
+	## spelling. Only a microVM has a kernel to mount it with, so on nspawn
+	## it is refused here rather than ignored. Whether the cage's record
+	## makes a session microvm without the flag is known where the record
+	## is read, and a disk asked for there is refused there.
+	if [ -n "$NIXCAGE_ENTER_DISK" ] &&
+		! [[ "$NIXCAGE_ENTER_DISK" =~ ^[0-9]+[KMGT]?$ ]]; then
+		echo "nixcage: not a disk size: $NIXCAGE_ENTER_DISK" >&2
+		return 1
+	fi
+	if [ -n "$NIXCAGE_ENTER_DISK" ] && [ "$NIXCAGE_ENTER_SUBSTRATE" = nspawn ]; then
+		echo "nixcage: --disk needs --substrate microvm" >&2
 		return 1
 	fi
 

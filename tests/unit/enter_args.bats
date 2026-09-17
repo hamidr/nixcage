@@ -299,6 +299,23 @@ teardown() {
 	assert_output --partial "--shell and --substrate microvm are mutually exclusive"
 }
 
+@test "given --disk, a microvm session asks for a persistent image of that size" {
+	nixcage_enter_parse --substrate microvm --disk 2G myproj /srv/myproj
+	[ "$NIXCAGE_ENTER_DISK" = 2G ]
+}
+
+@test "when the disk is not a size, the session is refused" {
+	run nixcage_enter_parse --substrate microvm --disk big myproj /srv/myproj
+	assert_failure
+	assert_output --partial "not a disk size: big"
+}
+
+@test "a disk on nspawn is refused: the image is a microvm's, mounted by its kernel" {
+	run nixcage_enter_parse --substrate nspawn --disk 2G myproj /srv/myproj
+	assert_failure
+	assert_output --partial "--disk needs --substrate microvm"
+}
+
 # The composed nspawn line as a contract a dependant can test against
 # (ADR-012 consequence): asked for, the session is printed and not run.
 @test "given --print-argv, a session records that it is to be printed, not run" {

@@ -133,8 +133,10 @@ kind on a bridge, extended, not extracted.
 
 **7. Refusals before boot.** No `/dev/kvm`; `systemd-vmspawn --version`
 below 258 or absent; a conflicting substrate; a missing bridge; a
-credential over the size vmspawn's credential path carries (measured in
-the plan, then a constant here); the second `enter` on a running name.
+credential over 32768 bytes, since the SMBIOS structure that carries every
+credential holds 64 KiB base64-encoded in all and a 49000-byte one was
+measured to take vmspawn's own down with it, silently; the second `enter`
+on a running name.
 After boot: no `READY=1` from the session unit within `--boot-timeout`
 (30 s) is `stop`, exit 124, last console lines on stderr, unless the scope
 is already gone when the timeout fires, in which case the VM finished
@@ -256,9 +258,12 @@ traces. A simulation, not a proof: Apalache is not in the dev shell.
 
 Implementing 2026-09-17: `modules/substrate.sh` holds the resolution and
 `tests/unit/substrate.bats` its table and refusals; `--substrate` is in
-the parse, held to the two names, and refused beside `--shell`. To come:
-`tests/unit/vmspawn_args.bats` (parse to words, binds equal to nspawn's,
-credential shape and size, `--disk`), `tests/command/modules.bats` (guest
+the parse, held to the two names, and refused beside `--shell`.
+`modules/vmspawn-args.sh` assembles the line and the credential from the
+parse, `tests/unit/vmspawn_args.bats` reads both back word by word;
+`--disk` is in the parse, a size, refused on nspawn. Measured on the way:
+48000 bytes of credential reach the guest beside vmspawn's own, 49000 do
+not, and none of the others do either. To come: `tests/command/modules.bats` (guest
 evaluates, session unit present, systemd assertion), `veth.bats` (tap on
 a bridge), `scope.bats` and `exec_cage.bats` (microvm record: `netns`
 none, `exec` words), an exit-status fixture suite, the guest built on a
