@@ -1,7 +1,7 @@
 ---
 id: ADR-019
 title: A cage may run in a microVM under systemd-vmspawn, chosen when the cage is defined, behind the same enter
-status: proposed
+status: implementing
 date: 2026-09-17
 status_date: 2026-09-17
 summary: enter --substrate microvm boots a NixOS guest with vmspawn from the same parse; own kernel, no daemon, same verbs
@@ -254,9 +254,12 @@ violation; each of three mutants (success reported without a status, rm
 of a running cage, a stop that leaves the scope) is found within 5000
 traces. A simulation, not a proof: Apalache is not in the dev shell.
 
-To come: `tests/unit/substrate.bats` (resolution table and refusals), `tests/unit/vmspawn_args.bats` (parse to words, binds equal to
-nspawn's, credential shape and size, `--disk`), `tests/command/modules.bats`
-(guest evaluates, session unit present, systemd assertion), `veth.bats` (tap
-on a bridge), `scope.bats` and `exec_cage.bats` (microvm record: `netns`
+Implementing 2026-09-17: `modules/substrate.sh` holds the resolution and
+`tests/unit/substrate.bats` its table and refusals; `--substrate` is in
+the parse, held to the two names, and refused beside `--shell`. To come:
+`tests/unit/vmspawn_args.bats` (parse to words, binds equal to nspawn's,
+credential shape and size, `--disk`), `tests/command/modules.bats` (guest
+evaluates, session unit present, systemd assertion), `veth.bats` (tap on
+a bridge), `scope.bats` and `exec_cage.bats` (microvm record: `netns`
 none, `exec` words), an exit-status fixture suite, the guest built on a
 Linux builder, and the measurement plan on a machine.
