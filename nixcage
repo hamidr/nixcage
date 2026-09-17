@@ -417,17 +417,19 @@ cmd_enter() {
   local name
   name="$(container_name_for "$project_dir")"
 
-  # The substrate the cage runs on (ADR-019), handed through as a word:
-  # whether it is allowed, and whether the cage already has one, is
-  # nixcage-container's to say.
+  # The substrate the cage runs on and the disk a microVM keeps (ADR-019),
+  # handed through as words in either order: whether they are allowed, and
+  # whether the cage already has a substrate, is nixcage-container's to say.
   local -a substrate=()
-  if [[ "${1:-}" == "--substrate" ]]; then
-    case "${2:-}" in
-      nspawn|microvm) substrate=(--substrate "$2") ;;
-      *) log_err "--substrate needs nspawn or microvm"; exit 1 ;;
+  while [[ "${1:-}" == --substrate || "${1:-}" == --disk ]]; do
+    case "$1 ${2:-}" in
+      "--substrate nspawn"|"--substrate microvm") substrate+=(--substrate "$2") ;;
+      "--substrate "*) log_err "--substrate needs nspawn or microvm"; exit 1 ;;
+      "--disk "[0-9]*) substrate+=(--disk "$2") ;;
+      "--disk "*) log_err "--disk needs a size such as 2G"; exit 1 ;;
     esac
     shift 2
-  fi
+  done
 
   # Accept both 'enter -- cmd...' and 'enter cmd...'.
   [[ "${1:-}" == "--" ]] && shift
@@ -666,10 +668,11 @@ ${BOLD}Usage:${NC}
   nixcage [--flake <ref>] <command> [args...]
 
 ${BOLD}Commands:${NC}
-  enter [--substrate nspawn|microvm] [-- cmd...]
+  enter [--substrate nspawn|microvm] [--disk <size>] [-- cmd...]
                      Enter this project's cage (macOS: starts the VM if needed).
                      The substrate is fixed at the cage's first enter; a microVM
-                     needs the host's nixcage.microvm.enable (ADR-019).
+                     needs the host's nixcage.microvm.enable, and --disk gives
+                     it a persistent image at /var/lib (ADR-019).
   exec [--tty] [--agent] -- <cmd...>
                      Run a command as root where the cages are: here on Linux,
                      inside the VM on macOS. This is how a tool built on
