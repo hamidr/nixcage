@@ -20,9 +20,11 @@ let
     name = "nixcage-session";
     runtimeInputs = with pkgs; [
       coreutils
+      gnugrep
       jq
       iproute2
       util-linux
+      e2fsprogs
       systemd
     ];
     excludeShellChecks = [ "SC1091" ];

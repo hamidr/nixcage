@@ -330,6 +330,28 @@ let
           bind_words+=("$bind")
         done
 
+        ## The image --disk asks for (decision 5): in a directory storage
+        ## gave the session's uid under the state directory with the size
+        ## as its quota (ADR-017), so it is owned and bounded like every
+        ## other thing a cage keeps; sparse, made once, its size fixed then.
+        ## Once the cage has one it is attached to every session, asked for
+        ## or not: it is the cage's, as the home is.
+        local disk=""
+        if [ -f "$STATE_DIR/disks/$name/disk.img" ]; then
+          disk="$STATE_DIR/disks/$name/disk.img"
+        fi
+        if [ -n "$NIXCAGE_ENTER_DISK" ]; then
+          local disk_dir
+          disk_dir="$(nixcage_storage_ensure "$STATE_DIR" "''${STORAGE_DATASET:-}" \
+            "$STATE_DIR/disks/$name" "$session_uid" "$NIXCAGE_ENTER_DISK")" ||
+            die "could not give $name a place for its disk"
+          disk="$disk_dir/disk.img"
+          if [ ! -f "$disk" ]; then
+            truncate -s "$NIXCAGE_ENTER_DISK" "$disk" || die "could not make the disk image for $name"
+            chown "$session_uid:$session_gid" "$disk"
+          fi
+        fi
+
         local cred
         cred="$(nixcage_vmspawn_credential "$session_uid" "$session_gid" "$session_home" /workspace \
           "$tty" "$network_addr" "$agent" "''${env_words[@]}" -- "$PROFILE/bin/bash" -c "$shell_cmd" "$@")"
@@ -339,7 +361,7 @@ let
         while IFS= read -r word; do
           vmspawn_words+=("$word")
         done < <(nixcage_vmspawn_args "$name" "$skeleton" "$MICROVM_GUEST" "$credential" \
-          "$owner_uid" "$block" "$tty" "$NIXCAGE_ENTER_MEMORY" "$NIXCAGE_ENTER_CPUS" "" \
+          "$owner_uid" "$block" "$tty" "$NIXCAGE_ENTER_MEMORY" "$NIXCAGE_ENTER_CPUS" "$disk" \
           "''${bind_words[@]}")
         if [ -n "$NIXCAGE_ENTER_PRINT_ARGV" ]; then
           printf '%s\n' "''${vmspawn_words[@]}"
@@ -429,7 +451,6 @@ let
           [ -z "$shell_name" ] || die "--shell is not available on a microvm cage: it has no nix daemon"
           [ -z "$network_ns" ] || die "--network ns: is not available on a microvm cage: a VM has no namespace to join"
           [ -z "$network_bridge" ] || die "--network on a microvm cage is not implemented yet"
-          [ -z "$NIXCAGE_ENTER_DISK" ] || die "--disk is not implemented yet"
           no_nix_daemon=1
         elif [ -n "$NIXCAGE_ENTER_DISK" ]; then
           die "--disk needs a microvm cage"
@@ -872,7 +893,7 @@ let
       cmd_rm() {
         local name="$1"
         check_name "$name"
-        rm -rf "$STATE_DIR/containers/''${name:?}" "$STATE_DIR/homes/''${name:?}"
+        rm -rf "$STATE_DIR/containers/''${name:?}" "$STATE_DIR/homes/''${name:?}" "$STATE_DIR/disks/''${name:?}"
       }
 
       cmd="''${1:-}"

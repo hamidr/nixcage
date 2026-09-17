@@ -308,8 +308,13 @@ status", 255. The `nixcage` CLI hands `--substrate` through. Agent forwarding, l
 inside the session through `/run/ssh-agent.sock`, and a commit made as
 the session's uid, which the guest names from the login name (`nixcage`
 without one) in its own passwd, since git refuses a committer that does
-not exist. Open: `--network` and `--disk` on a microvm cage are refused
-as not implemented; `exec` does not carry what enter was asked by
+not exist. `--disk 1G`, live: the image is made sparse under
+`disks/<name>` by `storage ensure` with the size as quota, the guest
+makes ext4 on it once and mounts it at `/var/lib` for the session's uid,
+a file written there is read by the next session, and the image is
+attached to every later session of the cage whether asked for or not,
+since it is the cage's as the home is; `rm` removes it with the rest.
+Open: `--network` on a microvm cage is refused as not implemented; `exec` does not carry what enter was asked by
 `--setenv`, since the record holds no values; the measurement plan.
 `nixcage.cages.<path>.substrate` is rendered as one line per cage into
 the container config and read by the project's exact path; live, a
