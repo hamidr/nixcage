@@ -49,6 +49,28 @@ running_cage() {
 	assert_output "machine.slice/machine-builder.scope"
 }
 
+@test "a microvm cage's scope is found under the spelling vmspawn escapes, dashes as \\x2d" {
+	# nspawn registers the name as it is; vmspawn escapes it as a unit
+	# name, so a cage with a dash, which every derived name has, lives
+	# under machine-a\x2db.scope.
+	mkdir -p "$NIXCAGE_CGROUP_ROOT/machine.slice/machine-builder\\x2dhand.scope" "$NIXCAGE_PROC/5000" "$NIXCAGE_PROC/5001"
+	printf '5001\n' >"$NIXCAGE_CGROUP_ROOT/machine.slice/machine-builder\\x2dhand.scope/cgroup.procs"
+	printf 'Name:\tsystemd-vmspawn\nPPid:\t1\n' >"$NIXCAGE_PROC/5000/status"
+	printf 'Name:\tqemu-kvm\nPPid:\t5000\n' >"$NIXCAGE_PROC/5001/status"
+	cat >"$TEST_TEMP_DIR/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+*"machine-builder\\x2dhand.scope"*) echo active ;;
+*) echo inactive ;;
+esac
+STUB
+	chmod +x "$TEST_TEMP_DIR/bin/systemctl"
+	run nixcage_scope_unit builder-hand
+	assert_output 'machine-builder\x2dhand.scope'
+	run nixcage_scope_status builder-hand
+	assert_output 'running 5001 machine.slice/machine-builder\x2dhand.scope'
+}
+
 @test "a running microvm cage's leader is qemu, the process whose parent is vmspawn" {
 	# vmspawn registers the scope as nspawn does and stays outside it; the
 	# VM is one process in it, and status, stop and list read it the same.

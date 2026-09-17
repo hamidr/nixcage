@@ -29,16 +29,22 @@ nixcage_scope_name_ok() {
 
 ## nspawn names the scope machine-<name>.scope when machined registers the
 ## cage and <name>.scope when told --register=no, and which depends on the
-## systemd at hand (261 does the latter). Both are asked, and the one that
-## is active is the cage's; when neither is, the registered spelling stands
-## for what the name would be.
+## systemd at hand (261 does the latter); vmspawn registers it under the
+## name escaped as a unit name, a dash as \x2d, which for the alphabet
+## check_name allows is the one character that changes (ADR-019). All
+## three are asked, and the one that is active is the cage's; when none
+## is, the registered nspawn spelling stands for what the name would be.
 nixcage_scope_unit() {
 	nixcage_scope_name_ok "$1" || return 1
-	if [ "$(systemctl show -p ActiveState --value "$1.scope" 2>/dev/null)" = active ]; then
-		printf '%s.scope\n' "$1"
-	else
-		printf 'machine-%s.scope\n' "$1"
-	fi
+	local unit escaped="machine-${1//-/\\x2d}.scope"
+	[ "$escaped" != "machine-$1.scope" ] || escaped=""
+	for unit in "$1.scope" $escaped; do
+		if [ "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null)" = active ]; then
+			printf '%s\n' "$unit"
+			return 0
+		fi
+	done
+	printf 'machine-%s.scope\n' "$1"
 }
 
 ## The cgroup of a unit, or of the cage's unit when given a name.
