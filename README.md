@@ -1,12 +1,42 @@
 # nixcage
 
-One cage per project, driven by the project's own `devShells.default` -- no
-nixcage files in the project, a boundary between projects. A cage is a
-systemd-nspawn container, or, chosen per cage on Linux, a microVM under
-systemd-vmspawn with a kernel of its own. On Linux the cages run natively on
-the host. On macOS, which has no containers, they run inside one shared NixOS
-microVM that exists purely to provide a Linux kernel (and adds VM-level
-isolation from the host).
+Run an AI coding agent on your own machine without handing it your machine.
+
+## Why
+
+Coding agents such as Claude Code want to run commands, edit files and
+install things, and they want to do it fast, without asking. Given the run
+of your laptop, that means your ssh keys, your cloud tokens, your other
+repositories, your home directory. Given nothing, they are useless.
+
+nixcage gives each project a cage: a small Linux world in which the agent
+sees that one project, a persistent home of its own, and the tools the
+project declares, and nothing else. It cannot see other projects, your
+files, or your keys. Commits still get signed, because your ssh-agent is
+forwarded in as a socket while the key stays outside. Secrets the agent
+needs (an API token, say) reach it as environment variables from your
+existing sops-nix setup, never from your shell.
+
+## What you get
+
+- **Nothing to add to a project.** A project is any flake directory under a
+  workspace root you name. The project's own `devShells.default` is the
+  environment inside the cage, so what the agent gets is what the project
+  already says it needs. No Dockerfile, no image, no nixcage file in the
+  repo.
+- **One command.** `cd` into a project and `nixcage enter`; you are in the
+  cage, in the devShell, in the project. `nixcage enter -- claude` runs the
+  agent straight away. The home persists, so `claude login` is done once.
+- **A boundary you choose.** By default a cage is a systemd-nspawn
+  container: fast to enter, sharing the host's kernel and Nix store. On a
+  Linux host you can instead give a cage a microVM with a kernel of its own,
+  for a tool you trust less or one that needs its own kernel; same command,
+  one flag, decided once per cage. On macOS every cage runs inside one
+  shared Linux VM, which is a boundary of its own.
+- **Something to build on.** nixcage runs cages and has no opinion about
+  what runs in them. A tool that wants several agents sharing one
+  repository, each as its own user on its own private network, gets four
+  primitives and nothing else; see "Building on nixcage" below.
 
 ## How it works
 
