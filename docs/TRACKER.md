@@ -8,13 +8,13 @@ document, then regenerate.
 
 **Next PRD number:** 003
 
-**Next ADR number:** 019
+**Next ADR number:** 020
 
 ## PRDs
 
 | # | Title | Status | Phases | Depends On | Summary | Flags |
 | --- | --- | --- | --- | --- | --- | --- |
-| [PRD-001](PRD-001-a-cage-per-project.md) | A cage per project, entered with one command, on the machine the developer already has | implemented | 4/4 | -- | any flake directory enters an isolated container in one command, on Linux natively and on macOS in one shared VM |  |
+| [PRD-001](PRD-001-a-cage-per-project.md) | A cage per project, entered with one command, on the machine the developer already has | implementing | 4/5 | -- | any flake directory enters an isolated container in one command, on Linux natively and on macOS in one shared VM |  |
 | [PRD-002](PRD-002-a-flake-closure-as-a-kubernetes-volume.md) | A flake's closure reaches a Kubernetes pod as a volume, not as an image | proposed | 0/3 | PRD-001, ADR-009, ADR-011, ADR-014 | one flake root runs in a cage locally and, via nixkube, in a pod; nixcage pushes it and emits the fragment |  |
 
 ## ADRs
@@ -39,3 +39,4 @@ document, then regenerate.
 | [ADR-016](ADR-016-a-bridged-cage-resolves-nothing-unless-told-where.md) | A bridged cage resolves nothing unless told where | implemented | -- | ADR-011 | enter --dns none\|<address> decides the cage's resolver; a private-network session defaults to none, not the host's file |  |
 | [ADR-017](ADR-017-nixcage-lists-what-runs-with-what-it-was-given.md) | nixcage lists what runs, with what each cage was given | implemented | -- | ADR-011, ADR-012 | list --json reports each cage's name, uid, subject, placement, scope and leader from state nixcage recorded at enter |  |
 | [ADR-018](ADR-018-the-host-module-owns-a-bridge-a-cage-may-be-placed-on.md) | The host module owns a bridge a cage may be placed on | implementing | -- | ADR-003, ADR-011, ADR-015 | nixcage.bridges.<name> declares a bridge with its address and the two settings an empty bridge needs to be usable |  |
+| [ADR-019](ADR-019-a-cage-may-run-in-a-microvm-behind-the-same-enter.md) | A cage may run in a microVM under systemd-vmspawn, chosen when the cage is defined, behind the same enter | proposed | -- | ADR-003, ADR-009, ADR-010, ADR-011, ADR-012, ADR-014, ADR-017 | enter --substrate microvm boots a NixOS guest with vmspawn from the same parse; own kernel, no daemon, same verbs |  |
