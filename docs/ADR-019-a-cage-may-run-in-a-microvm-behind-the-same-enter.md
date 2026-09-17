@@ -136,7 +136,9 @@ with store paths and a host key made at boot. User and `--setenv` values
 come from the record, and
 `secretEnv` values are resolved from `/run/secrets` at exec time by the
 same path enter uses, since the record holds names and there is no leader
-on the host whose environment could be read. A
+on the host whose environment could be read; what enter was asked by
+`--setenv` is kept beside the record, readable by root alone since a
+value may be a token, and given to exec as well. A
 placement (`--network`) is a tap nixcage makes under its own name
 (ADR-013), on the bridge, pinned and isolated (ADR-015) before the guest
 boots, and handed to qemu by name through the same extra words the
@@ -325,8 +327,9 @@ since it is the cage's as the home is; `rm` removes it with the rest.
 live: eth0 carries the address, `resolv.conf` the nameserver, the
 bridge's address answers a ping, 1.1.1.1 does not, a ping sent as
 10.99.0.9 is dropped by the pin, the port is isolated, and the pin and
-the tap are gone after the session. Open: `exec` does not carry what enter was asked by
-`--setenv`, since the record holds no values; the measurement plan.
+the tap are gone after the session. `exec` gives what the last enter was
+asked by `--setenv`, kept in `session-env` beside the record, mode 0600,
+seen live. Open: the measurement plan.
 `nixcage.cages.<path>.substrate` is rendered as one line per cage into
 the container config and read by the project's exact path; live, a
 declaration of nspawn ran the cage on nspawn over a record of microvm,

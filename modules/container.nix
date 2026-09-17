@@ -390,6 +390,9 @@ let
         esac
 
         (umask 077 && printf '%s\n' "$cred" >"$credential") || die "could not write the session credential"
+        ## What this session was asked by --setenv, for exec to give as well.
+        nixcage_microvm_env_write "$cdir/session-env" ''${asked_env[@]+"''${asked_env[@]}"} ||
+          die "could not keep the session environment for exec"
         local ready="$home/$NIXCAGE_MICROVM_READY" exit_file="$home/$NIXCAGE_MICROVM_EXIT"
         local stopped="$cdir/session-$$.stopped"
         rm -f "$ready" "$exit_file" "$stopped"
@@ -856,8 +859,8 @@ let
       ## exec on a microvm cage (ADR-019 decision 6): ssh over vsock to the
       ## guest's root, becoming the session's uid there. There is no leader
       ## whose environment could be read, so the command gets what a session
-      ## is given, secrets resolved now; what enter was asked by --setenv is
-      ## not in the record and does not reach it. The uid is the record's
+      ## is given, secrets resolved now, and what the last enter was asked
+      ## by --setenv, kept beside the record for this. The uid is the record's
       ## plus the subject's offset; the gid is the home's, which enter gave
       ## the last session's, so an exec as another subject than the last
       ## session's carries that session's group.
@@ -884,6 +887,9 @@ let
         done < <(microvm_env_words "$session_home" "")
         ## Where the session's forwarded agent is, when there is one.
         env_words+=(--setenv=SSH_AUTH_SOCK=/run/ssh-agent.sock)
+        local -a asked=()
+        mapfile -d "" -t asked < <(nixcage_microvm_env_read "$STATE_DIR/containers/$name/session-env")
+        env_words+=(''${asked[@]+"''${asked[@]}"})
         while IFS= read -r word; do
           words+=("$word")
         done < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \
