@@ -64,7 +64,15 @@ nixcage_vmspawn_credential_ok() {
 ## The line as it would run, one word per line, from the environment word
 ## on: vmspawn writes its own -append and has no flag to extend it, so
 ## init= reaches the kernel by repeating its three words through the qemu
-## extra, and qemu keeps the last -append. The skeleton is the root share,
+## extra, and qemu keeps the last -append. The console is the session's
+## output: the kernel is told to print nothing on it from the start (the
+## guest pins that level again by sysctl, since something in its boot
+## raises it back to 4), systemd to show no status on it and to log
+## nowhere, since a shutdown that logs to kmsg raises the level to
+## warnings and the power-down line would end every captured session;
+## and its init is told the console is dumb, or it would reset the
+## terminal and mark the boot with OSC sequences. argv's own TERM comes
+## from the credential. The skeleton is the root share,
 ## shifted onto the cage's block so guest root's writes into it land there;
 ## every other share is the host uid unshifted (decision 5). Registered so
 ## machined records the address and key exec reaches the guest with.
@@ -73,7 +81,7 @@ nixcage_vmspawn_args() {
 	local uid="$5" block="$6" tty="$7" memory="$8" cpus="$9" disk="${10}"
 	shift 10
 	printf '%s\n' env \
-		"SYSTEMD_VMSPAWN_QEMU_EXTRA=-append 'root=root rootfstype=virtiofs rw init=$toplevel/init console=hvc0'" \
+		"SYSTEMD_VMSPAWN_QEMU_EXTRA=-append 'root=root rootfstype=virtiofs rw init=$toplevel/init console=hvc0 loglevel=0 systemd.show_status=0 systemd.log_target=null TERM=dumb'" \
 		systemd-vmspawn \
 		--quiet --register=yes \
 		"--machine=$name" \

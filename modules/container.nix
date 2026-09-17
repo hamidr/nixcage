@@ -11,6 +11,10 @@
   ## reconstructing a profile path the caller does not know. Empty by default,
   ## so a host that asks for nothing gets exactly what it got before.
   extraPackages ? [ ],
+  ## What systemd-vmspawn runs a microVM with (ADR-019): qemu and virtiofsd,
+  ## found on the script's path. Empty where the host builds no guest, and
+  ## then a microvm session is refused before vmspawn is looked for.
+  microvmPackages ? [ ],
 }:
 let
   ## Minimal userland for project containers. Containers hold no system of
@@ -70,7 +74,7 @@ let
     ## directly, so following them here would add nothing and the unfollowable
     ## source is what fails the build.
     excludeShellChecks = [ "SC1091" ];
-    runtimeInputs = with pkgs; [
+    runtimeInputs = microvmPackages ++ (with pkgs; [
       coreutils
       systemd
       gnugrep
@@ -89,7 +93,7 @@ let
       ## The closure a session without the daemon is bound is queried here,
       ## on the host, where the store's db is (ADR-014).
       nix
-    ];
+    ]);
     text = ''
       ## Sourced by store path: the file is a real shell file so shellcheck
       ## and the bats suite can read it, and the store is available here.

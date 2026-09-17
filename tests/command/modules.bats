@@ -85,3 +85,81 @@ RENDERED='{
 	run eval_module host '{ nixcage.bridges."br/acme" = { address = "10.77.0.1"; prefix = 24; }; }' 'sys.config.networking.bridges'
 	assert_failure
 }
+
+# The guest a microvm session boots (ADR-019): one NixOS system per host,
+# built by the host module from its own pkgs when asked, never otherwise.
+MICROVM='{ nixcage.microvm.enable = true; nixcage.principalUidRange.base = 700000; }'
+GUEST='sys.config.nixcage.microvm.guest.config'
+
+@test "with microvm enabled, the host module names the guest it built in the container config" {
+	run eval_module host "$MICROVM" 'sys.config.environment.etc."nixcage/container".text'
+	assert_success
+	[[ "$(jq -r . <<<"$output")" == *"MICROVM_GUEST=/nix/store/"*"-nixos-system-nixcage-guest-"* ]]
+	[[ "$(jq -r . <<<"$output")" == *"SUBSTRATE_DEFAULT=nspawn"* ]]
+}
+
+@test "the host's default substrate is what the config carries" {
+	run eval_module host '{ nixcage.microvm.enable = true; nixcage.substrate.default = "microvm"; nixcage.principalUidRange.base = 700000; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_success
+	[[ "$(jq -r . <<<"$output")" == *"SUBSTRATE_DEFAULT=microvm"* ]]
+}
+
+@test "with microvm off, no guest is built and the config names none" {
+	run eval_module host '{ nixcage.principalUidRange.base = 700000; }' 'sys.config.environment.etc."nixcage/container".text'
+	assert_success
+	[[ "$(jq -r . <<<"$output")" != *"MICROVM_GUEST"* ]]
+	[[ "$(jq -r . <<<"$output")" == *"SUBSTRATE_DEFAULT=nspawn"* ]]
+}
+
+@test "a default of microvm with microvm off is refused at evaluation" {
+	run eval_module host '{ nixcage.substrate.default = "microvm"; nixcage.principalUidRange.base = 700000; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_failure
+	assert_output --partial "nixcage.substrate.default is microvm but nixcage.microvm.enable is false"
+}
+
+@test "the guest's root is the virtiofs tag vmspawn exports, and what it writes dies with the session" {
+	run eval_module host "$MICROVM" "{
+	  root = $GUEST.fileSystems.\"/\";
+	  etc = $GUEST.fileSystems.\"/etc\".fsType;
+	  var = $GUEST.fileSystems.\"/var\".fsType;
+	  tmp = $GUEST.fileSystems.\"/tmp\".fsType;
+	  initrd = $GUEST.boot.initrd.kernelModules;
+	}"
+	assert_success
+	[ "$(jq -r .root.device <<<"$output")" = root ]
+	[ "$(jq -r .root.fsType <<<"$output")" = virtiofs ]
+	[ "$(jq -r '[.etc,.var,.tmp] | unique | .[]' <<<"$output")" = tmpfs ]
+	# Credentials come as SMBIOS strings, which the kernel shows only with
+	# dmi_sysfs, and the initrd's mounts come as one of them.
+	[[ "$(jq -c .initrd <<<"$output")" == *'"dmi_sysfs"'* ]]
+	[[ "$(jq -c .initrd <<<"$output")" == *'"virtiofs"'* ]]
+}
+
+@test "the guest has no nix daemon and no getty on the console the session owns" {
+	run eval_module host "$MICROVM" "{
+	  nix = $GUEST.nix.enable;
+	  getty = $GUEST.systemd.services.\"serial-getty@hvc0\".enable;
+	}"
+	assert_success
+	[ "$(jq .nix <<<"$output")" = false ]
+	[ "$(jq .getty <<<"$output")" = false ]
+}
+
+@test "the session unit reads the credential, runs as part of boot, and the guest's sshd answers on vsock with store paths" {
+	run eval_module host "$MICROVM" "{
+	  cred = $GUEST.systemd.services.nixcage-session.serviceConfig.LoadCredential;
+	  wanted = $GUEST.systemd.services.nixcage-session.wantedBy;
+	  sshdPre = $GUEST.systemd.services.\"sshd-vsock@\".serviceConfig.ExecStartPre;
+	  sshd = $GUEST.systemd.services.\"sshd-vsock@\".serviceConfig.ExecStart;
+	  strategy = $GUEST.systemd.services.\"sshd-vsock@\".overrideStrategy;
+	}"
+	assert_success
+	[ "$(jq -r '.cred' <<<"$output")" = "nixcage.session" ]
+	[[ "$(jq -c .wanted <<<"$output")" == *'"multi-user.target"'* ]]
+	[ "$(jq -r '.sshdPre[0]' <<<"$output")" = "" ]
+	[[ "$(jq -r '.sshdPre[1]' <<<"$output")" == "+/nix/store/"* ]]
+	[[ "$(jq -r '.sshd[1]' <<<"$output")" == "-/nix/store/"*"/bin/sshd -i"* ]]
+	[ "$(jq -r .strategy <<<"$output")" = asDropin ]
+}

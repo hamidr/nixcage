@@ -13,7 +13,18 @@ let
   container = import ./container.nix {
     inherit pkgs;
     extraPackages = cfg.containerPackages;
+    microvmPackages = lib.optionals cfg.microvm.enable [
+      pkgs.qemu_kvm
+      pkgs.virtiofsd
+    ];
   };
+  ## Refused at evaluation of anything rendered from it: a default nothing
+  ## can boot is not a default.
+  substrateDefault =
+    if cfg.substrate.default == "microvm" && !cfg.microvm.enable then
+      throw "nixcage.substrate.default is microvm but nixcage.microvm.enable is false"
+    else
+      cfg.substrate.default;
 in
 {
   ## The bridges a cage may be placed on (ADR-018), shared with the VM module.
@@ -62,6 +73,58 @@ in
       };
       default = { };
       description = "Where nixcage keeps its state on this host.";
+    };
+
+    microvm = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = ''
+              Build the guest a microvm session boots (ADR-019) and put
+              qemu and virtiofsd where systemd-vmspawn finds them. Off, a
+              session asking for the microvm substrate is refused before
+              anything boots, and nothing is built.
+            '';
+          };
+          guestModules = lib.mkOption {
+            type = lib.types.listOf lib.types.deferredModule;
+            default = [ ];
+            description = ''
+              NixOS modules added to the guest, for what a host wants in
+              every microVM that a session's own line does not carry.
+              nixcage has no opinion about what belongs here.
+            '';
+          };
+          guest = lib.mkOption {
+            type = lib.types.raw;
+            readOnly = true;
+            description = "The guest as evaluated: its config, and its toplevel under config.system.build.";
+          };
+        };
+      };
+      default = { };
+      description = "The microVM substrate a cage may run on (ADR-019).";
+    };
+
+    substrate = lib.mkOption {
+      type = lib.types.submodule {
+        options.default = lib.mkOption {
+          type = lib.types.enum [
+            "nspawn"
+            "microvm"
+          ];
+          default = "nspawn";
+          description = ''
+            What a cage runs on when neither its declaration, its record nor
+            the enter flag says (ADR-019). The choice is made when the cage
+            is defined and then fixed.
+          '';
+        };
+      };
+      default = { };
+      description = "The substrate a cage runs on when nothing closer decides.";
     };
 
     principalUidRange = lib.mkOption {
@@ -176,8 +239,13 @@ in
         PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}
         PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
         STORAGE_DATASET=${lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset}
+        SUBSTRATE_DEFAULT=${substrateDefault}
+        ${lib.optionalString cfg.microvm.enable "MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}"}
       '';
     };
+
+    ## One guest per host, from this host's pkgs (ADR-019 decision 3).
+    nixcage.microvm.guest = pkgs.nixos ([ ./guest.nix ] ++ cfg.microvm.guestModules);
 
     environment.etc."nixcage/profile".source = container.profile;
     environment.etc."nixcage/secret-env".text = lib.concatStrings (
