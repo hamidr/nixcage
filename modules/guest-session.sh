@@ -22,6 +22,7 @@ nixcage_session_read() {
 	SESSION_TTY="$(jq -r 'if .tty then 1 else "" end' "$cred")"
 	SESSION_ADDRESS="$(jq -r '.address // ""' "$cred")"
 	SESSION_AGENT="$(jq -r 'if .agent then 1 else "" end' "$cred")"
+	SESSION_DNS="$(jq -r '.dns // ""' "$cred")"
 	mapfile -d '' -t SESSION_ENV < <(jq -j '.env | to_entries[] | "\(.key)=\(.value)\u0000"' "$cred")
 	mapfile -d '' -t SESSION_ARGV < <(jq -j '.argv[] | . + "\u0000"' "$cred")
 }
@@ -29,8 +30,15 @@ nixcage_session_read() {
 ## The one interface a placed guest has is the tap vmspawn made; it is
 ## given the placement's address here, as the first process of a placed
 ## nspawn session gives host0 its own.
+## The interface is there once udev has named it, which is not
+## necessarily before this unit runs; waited for, briefly.
 nixcage_session_network() {
 	[ -n "$SESSION_ADDRESS" ] || return 0
+	local waited=0
+	while [ ! -e /sys/class/net/eth0 ] && [ "$waited" -lt 10 ]; do
+		sleep 1
+		waited=$((waited + 1))
+	done
 	ip addr add "$SESSION_ADDRESS" dev eth0
 	ip link set eth0 up
 }
@@ -56,6 +64,20 @@ nixcage_session_run() {
 		env -i "${SESSION_ENV[@]}" "$setpriv" --reuid="$SESSION_UID" --regid="$SESSION_GID" \
 			--clear-groups -- "${SESSION_ARGV[@]}" </dev/null
 	fi
+}
+
+## nixcage_session_resolv_conf <file>
+## What a placed guest resolves with (ADR-016), as the nspawn rootfs is
+## given it: none is an empty file, so glibc falls back to loopback and
+## fails at once; an address is one nameserver line; told nothing, the
+## guest's own file stands, which names nothing on a private network.
+nixcage_session_resolv_conf() {
+	local file="$1"
+	case "$SESSION_DNS" in
+	"") ;;
+	none) : >"$file" ;;
+	*) printf 'nameserver %s\n' "$SESSION_DNS" >"$file" ;;
+	esac
 }
 
 ## nixcage_session_account <passwd> <group>
@@ -141,6 +163,7 @@ nixcage_session_main() {
 	trap 'systemctl poweroff' EXIT
 	nixcage_session_read "$CREDENTIALS_DIRECTORY/nixcage.session"
 	nixcage_session_network
+	nixcage_session_resolv_conf /etc/resolv.conf
 	nixcage_session_account /etc/passwd /etc/group
 	nixcage_session_disk /dev/vda /var/lib
 	nixcage_session_ready
