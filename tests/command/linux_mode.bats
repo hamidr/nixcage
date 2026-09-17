@@ -83,6 +83,20 @@ write_host_config() {
 	[[ "$output" == nixcage-container\ enter\ --substrate\ microvm\ proj-*\ "$TEST_TEMP_DIR/src/proj"\ true ]]
 }
 
+@test "enter --disk hands the size through beside the substrate, in either order" {
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	touch "$TEST_TEMP_DIR/src/proj/flake.nix"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter --disk 2G --substrate microvm -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/sudo-calls"
+	[[ "$output" == nixcage-container\ enter\ --disk\ 2G\ --substrate\ microvm\ proj-*\ "$TEST_TEMP_DIR/src/proj"\ true ]]
+	run_nixcage enter --disk big
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"--disk needs a size"* ]]
+}
+
 @test "enter --substrate without a word is refused" {
 	write_host_config
 	mkdir -p "$TEST_TEMP_DIR/src/proj"
