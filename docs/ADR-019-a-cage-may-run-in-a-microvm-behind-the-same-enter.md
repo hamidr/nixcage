@@ -58,8 +58,19 @@ the shared VM cannot nest another without hardware and kernel support that
 this document does not assume.
 
 **3. One guest system per host, not per cage.** `modules/guest.nix` is a
-NixOS configuration the host module builds at rebuild: kernel, initrd, a
-root store path handed to `--directory`. It carries one unit,
+NixOS configuration the host module builds at rebuild, from the host's own
+`pkgs` so the guest's systemd is the host's vmspawn's: kernel, initrd, and
+the toplevel. `--directory` gets an empty skeleton per session, owned by
+the cage's first uid, since virtiofsd runs in a user namespace and cannot
+create in a directory it does not own; the store is a `--bind-ro`, which
+the initrd mounts under `/sysroot` before it looks for the closure.
+vmspawn writes its own `-append` and has no flag to extend it, so
+`init=<toplevel>/init` reaches the kernel through
+`SYSTEMD_VMSPAWN_QEMU_EXTRA="-append '...'"` repeating vmspawn's three
+words, because qemu keeps the last `-append`; `--print-argv` shows the
+line and the probe checks it. Credentials arrive as SMBIOS type 11
+strings, which the NixOS kernel exposes only once `dmi_sysfs` is loaded,
+so the initrd loads it. The guest carries one unit,
 `nixcage-session.service`, which reads the credential `nixcage.session`
 (JSON: uid, gid, home, cwd, env, argv, tty, address), configures its
 interface when given an address, binds `SSH_AUTH_SOCK` at
@@ -77,10 +88,17 @@ exists to draw. `--no-nix-daemon` is implied; `--shell` is refused as
 ADR-011 refuses it without the daemon.
 
 **5. What crosses.** Read-only over virtiofs: `/nix/store` whole, and every
-`--bind-ro`. Read-write over virtiofs, uid-shifted by `--private-users`
-from the cage's block (ADR-010): the project at its path, the home at
-`/root`, every `--bind`. Once, as bytes in guest memory: the credential,
-with `secretEnv` values resolved on the host. As channels: the console, and
+`--bind-ro`. Read-write over virtiofs, as the host uid: the project at its
+path, the home at `/root`, every `--bind`. `--private-users` shifts only the root
+share, and virtiofsd for every other share runs as host root and hands
+uids through unchanged, so the session runs argv as the project owner's
+host uid inside the guest (ADR-004 by identity, not by ADR-010's block),
+and the block is what the skeleton's owner is drawn from. A process that
+becomes root in the guest writes the shares as host root, which ADR-010
+prevents on nspawn; stated here as the substrate's edge, to be closed by
+an idmapped mount of the shares in the guest when its kernel allows it.
+Once, as bytes in guest memory: the credential, with `secretEnv` values
+resolved on the host. As channels: the console, and
 vsock ssh for `exec` and `ssh -A`; a socket reaches the guest, a key never
 does (ADR-008). Never: the daemon socket, the host's network namespace,
 `/proc`, `/sys`, devices, other cages. Guest root is read-only; `/etc`,
@@ -97,8 +115,15 @@ under `machine.slice` and `modules/scope.sh` reads it. `--memory` becomes
 guest kernel kills the process that exceeds it and the session survives,
 which is ADR-012's promise. A `MemoryMax=` on the scope would bound qemu
 itself and kill the whole VM instead. `netns` answers `none`, exit 0: a VM
-has no namespace on the host. `exec` runs `machinectl shell <name>` over
-vmspawn's vsock ssh; user and `--setenv` values come from the record, and
+has no namespace on the host. `exec` is ssh over vsock:
+machined records `SSHAddress` and `SSHPrivateKeyPath` for the VM, and
+NixOS installs `systemd-ssh-proxy` into `ssh_config`, so
+`ssh -i <key> root@<address>` is the whole transport; `machinectl shell`
+answers "Operation not supported" for a VM. Guest side, the sshd dropin
+vmspawn ships names `systemd-tmpfiles` and `sshd` bare, which NixOS's
+systemd does not find, so `guest.nix` overrides that unit as a dropin
+with store paths and a host key made at boot. User and `--setenv` values
+come from the record, and
 `secretEnv` values are resolved from `/run/secrets` at exec time by the
 same path enter uses, since the record holds names and there is no leader
 on the host whose environment could be read. A
@@ -130,19 +155,17 @@ and stated here so it is revisited if a store secret ever matters.
 A dependant sees one new flag and one new answer (`netns` says `none`). The
 four primitives keep their vocabulary. Nothing here knows what runs inside.
 
-`systemd-vmspawn` is young and NixOS has no module for it. Each flag above
-exists in 258; four things the design rests on are unverified and are a
-spike on the Linux host before any code or model: a NixOS guest booting
-with its root over virtiofs from `--directory` by `--linux`/`--initrd`
-(stage 1 must mount the `root` tag); `machinectl shell` reaching a VM
-(sshd on AF_VSOCK in the guest via `systemd-ssh-generator`, the key vmspawn
-generates); the scope name machined gives a VM (`scope.sh` assumes
-`machine-<name>.scope` under `machine.slice`); and whether
-`--private-users` shifts `--bind` shares as well as the root, without
-which project files are owned by an unshifted uid and ADR-004 does not
-hold on this substrate. If vmspawn fails any of them, the fallback is
-writing the qemu line by hand, and the parse, the credential, the guest
-unit and the verbs stay.
+`systemd-vmspawn` is young and NixOS has no module for it. Four things the
+design rested on were a spike on the Linux host before any code or model,
+and its answers are in the Verification section: the guest boots with its
+root over virtiofs, with the three conditions decision 3 now states;
+`machinectl shell` does not reach a VM and ssh over vsock does; the scope
+is `machine-<name>.scope` under `machine.slice`, so `scope.sh` holds; and
+`--private-users` does not shift `--bind` shares, which is why decision 5
+maps by identity. The boot measured 6.7 s for an untrimmed NixOS with a
+getty and logind; the claim of under three seconds is against a guest
+that carries the session unit and little else, and is checked in the
+measurement plan.
 
 ADR-003's statement that host-versus-tool isolation on Linux rests on the
 container boundary alone becomes true of the nspawn substrate only. ADR-003
@@ -180,13 +203,6 @@ nixcage enter --substrate microvm --setenv BIG=$(head -c 200000 /dev/zero | tr '
   /path/to/project true                                           # credential bound
 ```
 
-Spike, before the plan and before any code: a hand-written `systemd-vmspawn
---directory=<nixos root> --linux=<kernel> --initrd=<initrd>
---bind=/tmp/probe --private-users=<shift>:65536 --register=yes` on the
-host, then `machinectl shell <name>`, `systemctl status
-machine-<name>.scope`, and `stat` of a file the guest writes under
-`/tmp/probe`. Four answers, recorded here.
-
 The claim: a `true` session boots and exits under three seconds with KVM;
 the hog is killed and the session returns; a file the guest writes in the
 project is owned by the project owner on the host; the credential line
@@ -196,8 +212,37 @@ document's Verification section when run.
 
 ## Verification
 
-Proposed 2026-09-17. `tests/unit/substrate.bats` (resolution table and
-refusals), `tests/unit/vmspawn_args.bats` (parse to words, binds equal to
+Proposed 2026-09-17.
+
+Spike 2026-09-17, on a NixOS host with systemd 261.2, `/dev/kvm`, qemu
+10.2 and virtiofsd from the host's nixpkgs on `PATH`, a guest built from
+the same nixpkgs, `systemd-vmspawn --directory=<skeleton>
+--linux=<kernel> --initrd=<initrd> --firmware=none --bind=<probe>
+--bind-ro=/nix/store --private-users=100000:65536 --register=yes
+--set-credential=nixcage.session:hello` with
+`SYSTEMD_VMSPAWN_QEMU_EXTRA="-append 'root=root rootfstype=virtiofs rw
+init=<toplevel>/init console=hvc0'"`. Four answers. The guest boots:
+stage 1 mounts the `root` tag, the `fstab.extra` credential mounts the
+store and the probe under `/sysroot` before the closure lookup, stage 2
+receives `nixcage.session` and `systemd-creds --system cat` reads it
+back; three things were needed for that and are in decision 3 (`init=`
+through the qemu extra, `dmi_sysfs` in the initrd, the skeleton owned by
+the shift uid). `machinectl shell spike` fails with "Failed to get shell
+PTY: Operation not supported"; `ssh -i /run/systemd/vmspawn/spike/ed25519
+root@vsock/<cid>` reaches the guest once the sshd dropin is overridden
+as decision 6 says, with the cid from `machinectl show -p VSockCID`. The
+scope is `machine-spike.scope` in `machine.slice`, leader qemu, and
+`machinectl terminate` stops it. virtiofsd got `--translate-uid
+map:0:100000:65536` for the root share only; a file guest root wrote into
+the probe bind is host uid 0, and guest `nobody` was refused in a host
+directory mode 0755 owned by 1000. `systemd-analyze` in the guest: 555 ms
+kernel, 2.7 s initrd, 3.4 s userspace. Two things seen on the way: the
+host's vmspawn dropin used `systemd-tmpfiles --inline`, which a 258 guest
+lacks, so the guest must come from the host's pkgs; and the initrd's
+fstab generator logs a duplicate `/sysroot` entry between NixOS's fstab
+and vmspawn's, harmless, to be quieted when the guest is written.
+
+To come: `tests/unit/substrate.bats` (resolution table and refusals), `tests/unit/vmspawn_args.bats` (parse to words, binds equal to
 nspawn's, credential shape and size, `--disk`), `tests/command/modules.bats`
 (guest evaluates, session unit present, systemd assertion), `veth.bats` (tap
 on a bridge), `scope.bats` and `exec_cage.bats` (microvm record: `netns`
