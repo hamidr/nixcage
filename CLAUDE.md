@@ -4,9 +4,11 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## What is nixcage
 
-nixcage is a single-file Bash tool that runs one systemd-nspawn container per
-project. On Linux the containers run natively on the host (config via
-`nixosModules.host` in the host's NixOS configuration). On macOS they run in
+nixcage is a single-file Bash tool that runs one cage per project: a
+systemd-nspawn container, or on Linux, chosen per cage, a microVM under
+systemd-vmspawn with a kernel of its own (ADR-019). On Linux the cages run
+natively on the host (config via `nixosModules.host` in the host's NixOS
+configuration). On macOS they run in
 one shared NixOS microVM (microvm.nix + qemu) that exists to provide a Linux
 kernel. A project is any flake directory under a
 configured workspace root (`devShells.default` is optional; see ADR-005) -- there are no nixcage-specific files in projects.
@@ -71,11 +73,27 @@ factory of roles over one repository, is built entirely on those. Architecture:
 - `modules/storage.sh` -- a path given to a uid: a dataset where there is a
   pool and an ordinary directory where there is not (ADR-017 in cageworks,
   whose behaviour this inherited). Callers name paths, never datasets.
+- `modules/substrate.sh` -- which substrate a cage runs on (ADR-019): a
+  table over the host's declaration, the record of the first enter, the
+  flag and the host's default, and the refusal naming the winner.
+- `modules/vmspawn-args.sh` -- the vmspawn line and the session credential
+  a microvm session is built from, assembled from the same parse as the
+  nspawn line; the credential's size bound.
+- `modules/microvm-session.sh` -- the host side of a microvm session: what
+  is refused before boot, the watch over a boot, the status enter exits
+  with, the ssh-over-vsock words `exec` and the agent forward use, and the
+  asked environment kept for `exec`.
+- `modules/guest.nix` -- the NixOS guest a microvm session boots, one per
+  host, built by the host module from the host's own pkgs; and
+  `modules/guest-session.sh`, its one unit: reads the credential, runs
+  argv as the host uid on the console, leaves the status in the home,
+  powers off.
 - `modules/nixcage.nix` -- the VM module (macOS path): nixcage options
   (`workspaceRoots`, `authorizedKeys`, `sshPort`, `shareProto`, `secretEnv`,
   `git.*`, `vm.*`, `principalUidRange`) and the VM base config.
 - `modules/host.nix` -- the Linux host module: `workspaceRoots`, `secretEnv`,
-  `git.*`, `storage.dataset` and `principalUidRange`; renders
+  `git.*`, `storage.dataset`, `principalUidRange`, `microvm.*`,
+  `substrate.default` and `cages.<path>.substrate`; renders
   `/etc/nixcage/config` for the CLI and `/etc/nixcage/container` for the guest,
   installs the container layer on the host.
 - `templates/config/` -- the flake template users instantiate at
@@ -167,6 +185,25 @@ rendered to `/etc/nixcage/gitconfig`, and signing goes through the user's
 ssh-agent: `enter` forwards `SSH_AUTH_SOCK` (`ssh -A` on macOS, an explicit
 `--auth-sock` past sudo on Linux) and the guest binds it at
 `/run/ssh-agent.sock`. No key material enters a container (ADR-008).
+
+**MicroVM substrate** (ADR-019) -- `enter --substrate microvm` on a Linux
+host with `nixcage.microvm.enable`: `enter_microvm` in `container.nix`
+takes over from the point the cage's uid, home and record exist. The root
+share is an empty skeleton owned by the cage's first uid, the store a
+read-only share whole, every other share the host uid unshifted, so the
+session runs as the owner's uid by identity (not ADR-010's block). argv
+and its environment go in as one credential; `init=` and the console
+settings go in through `SYSTEMD_VMSPAWN_QEMU_EXTRA`, since vmspawn writes
+its own `-append` and the guest's kernel parameters never reach a direct
+boot. Readiness and the exit status are files the guest writes and syncs
+into the home; a watch stops a guest nobody heard from within 30 s. The
+scope is registered under the name escaped as a unit name (`\x2d` for a
+dash), which `scope.sh` asks for beside nspawn's spellings. `exec` and the
+agent are ssh over vsock with the key vmspawn made. A placement is a tap
+nixcage makes under its veth name and hands to qemu. The lifecycle is
+modelled in `models/microvm-session.qnt`. To debug a boot, take the line
+`--print-argv` prints, replace `systemd.log_target=null` with
+`journal-or-kmsg` and add `--forward-journal=<dir>`.
 
 **Secrets** -- sops-nix in the user's config flake; age key generated on the
 VM data volume at first boot; `nixcage.secretEnv` maps env vars to secret

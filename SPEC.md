@@ -4,9 +4,11 @@ Version: 2.0.0
 
 ## 1. Purpose
 
-nixcage runs one systemd-nspawn container per project. A project is any flake
-directory with a `devShells.default` located under a configured workspace
-root; `nixcage enter` runs that devShell inside the project's container.
+nixcage runs one cage per project: a systemd-nspawn container, or on Linux,
+chosen per cage, a microVM under systemd-vmspawn with a kernel of its own
+(ADR-019). A project is any flake directory with a `devShells.default`
+located under a configured workspace root; `nixcage enter` runs that
+devShell inside the project's cage.
 
 On Linux the containers run natively on the host (container boundary between
 projects and toward the host). On macOS, which has no containers, they run in
@@ -48,7 +50,12 @@ On Linux there is no VM and no config flake. `nixosModules.host` is imported
 into the host's NixOS configuration; it declares `nixcage.workspaceRoots` and
 `nixcage.secretEnv`, installs `nixcage-container` and the container profile,
 and renders `/etc/nixcage/config` (`WORKSPACE_ROOTS=a:b`) for the CLI
-(override path with `NIXCAGE_HOST_CONFIG`, used by tests). Containers bind
+(override path with `NIXCAGE_HOST_CONFIG`, used by tests). With
+`nixcage.microvm.enable` it also builds the guest a microVM cage boots, from
+the host's own pkgs, and renders its path with `HOST_PLATFORM`,
+`SUBSTRATE_DEFAULT` and `CAGE_SUBSTRATES` into `/etc/nixcage/container`;
+the substrate options are `nixcage.substrate.default` (`nspawn`) and
+`nixcage.cages.<path>.substrate`, and they are the host module's alone. Containers bind
 the host store read-only and build through the host nix-daemon; `secretEnv`
 resolves against the host's own sops-nix `/run/secrets`. The CLI commands on
 Linux are `enter`, `rm`, and `status`, executing `sudo nixcage-container`
@@ -82,6 +89,10 @@ machines (the nixos-rebuild hostname convention). A starter is scaffolded with
 | `nixcage.vm.mem`        | positive int    | 4096       | MiB RAM                                    |
 | `nixcage.vm.diskSize`   | positive int    | 20480      | MiB per persistent volume                  |
 | `nixcage.bridges.<name>`| `{ address; prefix; }` | `{}` | A bridge a cage may be placed on: no static ports, the address, `ConfigureWithoutCarrier`, `net.ipv4.ip_nonlocal_bind` (ADR-018); on the host module too |
+| `nixcage.microvm.enable` | bool | `false` | Host module only: build the microVM guest and put qemu, virtiofsd and ssh on the container script's path (ADR-019) |
+| `nixcage.microvm.guestModules` | list of modules | `[]` | Host module only: NixOS modules added to the guest |
+| `nixcage.substrate.default` | `nspawn` or `microvm` | `nspawn` | Host module only: what a cage runs on when neither declaration, record nor flag says |
+| `nixcage.cages.<path>.substrate` | `nspawn` or `microvm` | -- | Host module only: fixes a cage's substrate by project path, over its record and the flag |
 
 Everything must be evaluable at build time; the CLI holds no configuration of
 its own. Values the CLI needs at runtime (`sshPort`, `workspaceRoots`) are
@@ -109,7 +120,7 @@ nixcage [--flake <ref>] <command> [args...]
 
 | Command            | Description                                                        |
 | ------------------ | ------------------------------------------------------------------ |
-| `enter [-- cmd...]`| Enter this project's container; auto-builds and auto-starts the VM. With a command: non-interactive `nix develop --command`. |
+| `enter [--substrate nspawn\|microvm] [--disk <size>] [-- cmd...]`| Enter this project's cage; auto-builds and auto-starts the VM on macOS. With a command: non-interactive `nix develop --command`. The two flags are handed to `nixcage-container` as they are; `--substrate` needs `nspawn` or `microvm`, `--disk` a size such as `2G`. |
 | `down`             | Stop the VM.                                                       |
 | `rebuild`          | `nix build` the runner from the config flake, refresh the cache, restart the VM if running (interrupts all sessions). |
 | `rm [name]`        | Delete a container and its persistent home; confirms first. Without a name, resolves the current project. |
@@ -170,7 +181,27 @@ module); the host CLI only ever calls it over SSH.
   and, while the cage runs, its scope's cgroup path and leader pid
   (ADR-017). The record is nixcage's: the next `enter` overwrites it, `rm`
   removes it.
-- `rm <name>`: removes the container directory and home.
+- `rm <name>`: removes the container directory, home and disk image.
+- `enter --substrate microvm ...` (Linux, ADR-019): the session boots the
+  host's guest under `systemd-vmspawn` (261 or newer, `/dev/kvm`) instead of
+  nspawn. The substrate is resolved as declaration, then the record of the
+  first enter, then the flag, then the host's default; a flag that loses is
+  refused naming the winner. The root share is an empty skeleton owned by the
+  cage's first uid; the store is a read-only share whole; the project, the
+  home (at `/home/<subject>`, `/home/nixcage` with none) and every `--bind`
+  are shares as the host uid, so the session runs as the project owner's uid
+  by identity. argv, its environment (secrets resolved on the host) and the
+  placement go in as one credential the guest's session unit reads, bounded
+  at 32768 bytes; the unit marks itself ready and leaves argv's status in the
+  home, and the host reports that status, 124 when the guest was not ready
+  within 30 s, 255 when it ended without one. `--memory` and `--cpus` bound
+  the guest itself; `--shell` and `--network ns:` are refused; `--network`
+  places a tap nixcage makes; `--disk <size>` attaches a persistent image at
+  `/var/lib`, made once and attached to every later session; the agent
+  arrives as a remote socket forward over vsock ssh. `status`, `stop` and
+  `list` read the scope as for nspawn (registered under the name escaped as
+  a unit name); `netns` answers `none`; `exec` is ssh over vsock as the
+  session's uid with the session's environment.
 
 Container names are `sanitized-basename-<8-char sha256 of abs path>`,
 computed on the host (`container_name_for`).
