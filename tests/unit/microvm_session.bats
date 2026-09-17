@@ -184,3 +184,29 @@ STUB
 	assert_line "root@vsock/1340938338"
 	refute_line "-A"
 }
+
+# nixcage_microvm_env_write <file> [--setenv=K=V...] / nixcage_microvm_env_read <file>:
+# what enter was asked by --setenv, kept beside the record for exec, root
+# only, since a value may be a token and the record is readable by all.
+
+@test "the asked environment is kept for exec as it was given, values with newlines included, and read back" {
+	nixcage_microvm_env_write "$TEST_TEMP_DIR/env" --setenv=TOKEN=secret --setenv=MSG=$'two\nlines'
+	[ "$(stat -c %a "$TEST_TEMP_DIR/env")" = 600 ]
+	# bash drops NULs from a substitution, so the words are read as exec
+	# reads them, into an array.
+	local -a words=()
+	mapfile -d '' -t words < <(nixcage_microvm_env_read "$TEST_TEMP_DIR/env")
+	[ "${#words[@]}" -eq 2 ]
+	[ "${words[0]}" = "--setenv=TOKEN=secret" ]
+	[ "${words[1]}" = $'--setenv=MSG=two\nlines' ]
+}
+
+@test "a session asked nothing keeps an empty file, and exec reads nothing from it or from none" {
+	nixcage_microvm_env_write "$TEST_TEMP_DIR/env"
+	run nixcage_microvm_env_read "$TEST_TEMP_DIR/env"
+	assert_success
+	assert_output ""
+	run nixcage_microvm_env_read "$TEST_TEMP_DIR/none"
+	assert_success
+	assert_output ""
+}

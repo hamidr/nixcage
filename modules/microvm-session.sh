@@ -175,3 +175,22 @@ nixcage_agent_forward() {
 	done
 	return 1
 }
+
+## nixcage_microvm_env_write <file> [--setenv=K=V...]
+## What enter was asked by --setenv, kept for exec beside the record and
+## readable by root alone: a value may be a token, and the record is
+## readable by all. One word per NUL, so a value carrying a newline comes
+## back as it was given. Written empty when nothing was asked, so exec
+## reads the session's answer rather than the file's absence.
+nixcage_microvm_env_write() {
+	local file="$1"
+	shift
+	(umask 077 && : >"$file") || return 1
+	[ $# -eq 0 ] || printf '%s\0' "$@" >"$file"
+}
+
+## The words back, NUL-terminated, or nothing.
+nixcage_microvm_env_read() {
+	[ -f "$1" ] || return 0
+	cat "$1"
+}
