@@ -361,3 +361,9 @@ path carries 32768", and 200000 bytes never reach nixcage, since sudo
 refuses an argument that long first; `netns` of a running microvm cage
 is `none`; the placement lines are above. Implemented 2026-09-17.
 
+Found on the installed host the same day: vmspawn registers the scope
+under the name escaped as a unit name, a dash as `\x2d`, where nspawn
+registers it as it is; every derived cage name has a dash, so `status`,
+`exec` and `stop` saw a running microvm cage as stopped. `scope.sh` asks
+for that spelling too.
+
