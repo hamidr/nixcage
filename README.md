@@ -1,10 +1,12 @@
 # nixcage
 
-One systemd-nspawn container per project, driven by the project's own
-`devShells.default` -- no nixcage files in the project, a container boundary
-between projects. On Linux the containers run natively on the host. On macOS,
-which has no containers, they run inside one shared NixOS microVM that exists
-purely to provide a Linux kernel (and adds VM-level isolation from the host).
+One cage per project, driven by the project's own `devShells.default` -- no
+nixcage files in the project, a boundary between projects. A cage is a
+systemd-nspawn container, or, chosen per cage on Linux, a microVM under
+systemd-vmspawn with a kernel of its own. On Linux the cages run natively on
+the host. On macOS, which has no containers, they run inside one shared NixOS
+microVM that exists purely to provide a Linux kernel (and adds VM-level
+isolation from the host).
 
 ## How it works
 
@@ -44,6 +46,24 @@ sees only its own project directory, its own persistent home, and the Nix store
 read-only. The first enter per project builds the devShell; later enters hit the
 cache. On macOS the VM boots once and serves every project.
 
+### A cage with its own kernel
+
+On a Linux host with `nixcage.microvm.enable = true`, a cage may run in a
+microVM instead: `nixcage enter --substrate microvm`. The choice is made at
+the cage's first enter (or declared in the host config) and then fixed; a
+flag against it is refused naming what fixed it. Everything else is the
+same `enter`: the project at `/workspace`, the persistent home (at
+`/home/nixcage`, since the guest owns `/root`), the store read-only, your
+ssh-agent forwarded, secrets injected, `exec`, `status`, `stop`, `list`.
+What differs: a kernel boundary toward the host and toward other cages, no
+nix daemon and no builds inside (the session sees the store and cannot add
+to it, so put the toolchain in the devShell or realise it elsewhere), a
+boot of about seven seconds instead of a tenth, and memory reserved rather
+than shared. `--disk 2G` adds a persistent image at `/var/lib` for what
+virtiofs is too slow for. This is for a tool you trust less than the rest,
+or one that needs a kernel of its own (eBPF, mount namespaces, modules).
+See `docs/ADR-019-a-cage-may-run-in-a-microvm-behind-the-same-enter.md`.
+
 ## Install
 
 ```bash
@@ -63,6 +83,13 @@ nixcage = {
   workspaceRoots = [ "/home/me/Src" ];
   ## Env vars from this host's sops-nix secrets, per container session.
   # secretEnv.ANTHROPIC_API_KEY = "anthropic";
+  ## Let a cage run in a microVM of its own (needs /dev/kvm and systemd 261).
+  # microvm.enable = true;
+  # principalUidRange = { base = 700000; size = 64; };
+  ## Fix a cage's substrate from here, over its record and the flag.
+  # cages."/home/me/Src/untrusted".substrate = "microvm";
+  ## What a cage runs on when nothing closer decides.
+  # substrate.default = "nspawn";
 };
 ```
 
@@ -120,7 +147,7 @@ devShell (see `examples/project/`). nixcage installs nothing into containers.
 
 | Command | Description |
 |---|---|
-| `nixcage enter [-- cmd]` | Enter this project's container (on macOS, auto-starts the VM); with a command, run it non-interactively |
+| `nixcage enter [--substrate nspawn\|microvm] [--disk SIZE] [-- cmd]` | Enter this project's cage (on macOS, auto-starts the VM); with a command, run it non-interactively. The substrate is fixed at the first enter; `--disk` gives a microVM a persistent image at `/var/lib` |
 | `nixcage exec [--tty] [--agent] -- cmd` | Run a command as root where the cages are: on this host on Linux, inside the VM on macOS |
 | `nixcage rm [name]` | Delete a project's container and persistent home |
 | `nixcage status` | Configuration in use, containers, and on macOS the VM state and age public key |
@@ -137,12 +164,12 @@ exported primitives, which are the whole interface (ADR-009):
 
 | Primitive | What it gives |
 |---|---|
-| `nixcage-container enter [--uid n] [--user name] [--subject name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] [--network BRIDGE:ADDR/PREFIX\|ns:PATH] [--dns none\|ADDR] [--no-nix-daemon] [--memory SIZE] [--cpus N] [--print-argv] <name> <project> [cmd]` | A session built out of what you asked for, bounded on its scope when asked; with `--print-argv`, the nspawn line it would run, one word per line, and no session |
+| `nixcage-container enter [--uid n] [--user name] [--subject name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] [--network BRIDGE:ADDR/PREFIX\|ns:PATH] [--dns none\|ADDR] [--no-nix-daemon] [--memory SIZE] [--cpus N] [--substrate nspawn\|microvm] [--disk SIZE] [--print-argv] <name> <project> [cmd]` | A session built out of what you asked for, bounded on its scope when asked; with `--print-argv`, the nspawn or vmspawn line it would run, one word per line, and no session. On a microVM cage (ADR-019) `--memory` and `--cpus` are the guest's own, `--shell` and `ns:` are refused, and `--network` places a tap nixcage makes |
 | `nixcage-container uid <principal> [<subject>]` | A durable uid for a name, never reissued |
 | `nixcage-container storage ensure <path> <uid> [quota]` | That path owned by that uid, bounded where it can be |
-| `nixcage-container status <name>`, `netns <name>`, `stop <name>` | A running cage from its scope: its leader and cgroup, the namespace path `enter --network ns:` takes, and an end to it (ADR-012) |
+| `nixcage-container status <name>`, `netns <name>`, `stop <name>` | A running cage from its scope: its leader and cgroup, the namespace path `enter --network ns:` takes (`none` for a microVM, which has no namespace on the host), and an end to it (ADR-012) |
 | `nixcage-container list [--json]` | Every cage entered and not removed; with `--json`, one object per cage with what enter was given (uid, subject, placement, roots) and, while it runs, its scope and leader (ADR-017) |
-| `nixcage-container exec [--subject <name>] <name> [-- cmd]` | A command inside a running cage: its leader's namespaces, its HOME and PATH, as cage root or as a declared subject (ADR-012) |
+| `nixcage-container exec [--subject <name>] <name> [-- cmd]` | A command inside a running cage: its leader's namespaces, its HOME and PATH, as cage root or as a declared subject (ADR-012); over vsock ssh into a microVM cage, as the session's uid with the session's environment (ADR-019) |
 | `nixcage exec [--tty] [--agent] -- <cmd>` | A way to reach the other three from your own machine |
 
 You name paths and principals; nixcage names datasets and numbers. Set
@@ -207,7 +234,7 @@ applies unchanged.
 | | Linux | macOS |
 |---|---|---|
 | Containers run | on the host | in a shared VM |
-| Host isolation | container boundary (nspawn) | VM boundary + container |
+| Host isolation | container boundary (nspawn), or a microVM per cage with `--substrate microvm` | VM boundary + container |
 | Nix store | host store, shared | VM-owned store |
 | Hypervisor | -- | qemu (Apple HVF) |
 | Secrets | host sops-nix | VM sops-nix + age key |
