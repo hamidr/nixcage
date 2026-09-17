@@ -301,5 +301,8 @@ session's environment and secrets and returns the command's status, and
 status", 255. The `nixcage` CLI hands `--substrate` through. Open:
 `--network`, `--disk` and agent forwarding on a microvm cage are refused
 as not implemented; `exec` does not carry what enter was asked by
-`--setenv`, since the record holds no values; the host's
-`nixcage.cages.<path>.substrate` declaration; the measurement plan.
+`--setenv`, since the record holds no values; the measurement plan.
+`nixcage.cages.<path>.substrate` is rendered as one line per cage into
+the container config and read by the project's exact path; live, a
+declaration of nspawn ran the cage on nspawn over a record of microvm,
+and one of microvm refused `--substrate nspawn` naming the declaration.

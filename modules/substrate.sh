@@ -50,3 +50,18 @@ nixcage_substrate_resolve() {
 	fi
 	echo "${flag:-${default:-nspawn}}"
 }
+
+## nixcage_substrate_declared <project> <declarations>
+## The word the host declared for a project path, from the lines it
+## rendered (one "<path> <substrate>" per line), or nothing. The path is
+## matched whole: a declaration for a directory says nothing about the
+## directories under it, which are other cages.
+nixcage_substrate_declared() {
+	local project="$1" declarations="$2" path word
+	while read -r path word; do
+		if [ "$path" = "$project" ]; then
+			echo "$word"
+			return 0
+		fi
+	done <<<"$declarations"
+}
