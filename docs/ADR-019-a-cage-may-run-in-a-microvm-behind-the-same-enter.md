@@ -103,8 +103,14 @@ prevents on nspawn; stated here as the substrate's edge, to be closed by
 an idmapped mount of the shares in the guest when its kernel allows it.
 Once, as bytes in guest memory: the credential, with `secretEnv` values
 resolved on the host. As channels: the console, and
-vsock ssh for `exec` and `ssh -A`; a socket reaches the guest, a key never
-does (ADR-008). Never: the daemon socket, the host's network namespace,
+vsock ssh for `exec` and for the agent, which arrives as a remote unix
+socket forward (`ssh -N -R /run/ssh-agent.sock:<host socket>`) held for
+the session's life, so what appears in the guest is a socket sshd made;
+`-A` would give it to root's login only, under a path only root reaches.
+A socket reaches the guest, a key never does (ADR-008). The guest's
+session unit waits up to 15 s for the socket before argv runs, since the
+forward can only hold once the guest's sshd answers, and goes on without
+it aloud. Never: the daemon socket, the host's network namespace,
 `/proc`, `/sys`, devices, other cages. Guest root is read-only; `/etc`,
 `/var`, `/tmp` are tmpfs and die with the session, except that `--disk
 <size>` (new flag) gives the cage a persistent image, handed in with
@@ -298,8 +304,11 @@ the substrate with the scope, `netns` answers `none`, `exec` reaches the
 guest over vsock ssh as the session's uid in `/workspace` with the
 session's environment and secrets and returns the command's status, and
 `stop` ends the VM, after which enter reports "session ended without
-status", 255. The `nixcage` CLI hands `--substrate` through. Open:
-`--network`, `--disk` and agent forwarding on a microvm cage are refused
+status", 255. The `nixcage` CLI hands `--substrate` through. Agent forwarding, live: a throwaway agent's key listed by `ssh-add -l`
+inside the session through `/run/ssh-agent.sock`, and a commit made as
+the session's uid, which the guest names from the login name (`nixcage`
+without one) in its own passwd, since git refuses a committer that does
+not exist. Open: `--network` and `--disk` on a microvm cage are refused
 as not implemented; `exec` does not carry what enter was asked by
 `--setenv`, since the record holds no values; the measurement plan.
 `nixcage.cages.<path>.substrate` is rendered as one line per cage into

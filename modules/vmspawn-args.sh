@@ -19,20 +19,22 @@
 ## vmspawn's own and their growth.
 NIXCAGE_VMSPAWN_CREDENTIAL_MAX=32768
 
-## nixcage_vmspawn_credential <uid> <gid> <home> <cwd> <tty> <address> [--setenv=K=V...] -- <argv...>
+## nixcage_vmspawn_credential <uid> <gid> <home> <cwd> <tty> <address> <agent> [--setenv=K=V...] -- <argv...>
 ## One JSON object, one line: who argv runs as, where, with what
-## environment, on a tty or captured, and the address to set when the
-## session was placed. The environment words are the parse's own, so a
-## caller hands them over unchanged.
+## environment, on a tty or captured, the address to set when the session
+## was placed, and whether an agent socket is on its way, so the guest
+## waits for it before argv runs. The environment words are the parse's
+## own, so a caller hands them over unchanged.
 nixcage_vmspawn_credential() {
-	local uid="$1" gid="$2" home="$3" cwd="$4" tty="$5" address="$6"
-	shift 6
+	local uid="$1" gid="$2" home="$3" cwd="$4" tty="$5" address="$6" agent="$7"
+	shift 7
 	local cred sep="" word
 	cred="{\"uid\":$uid,\"gid\":$gid"
 	cred+=",\"home\":$(nixcage_scope_json_string "$home")"
 	cred+=",\"cwd\":$(nixcage_scope_json_string "$cwd")"
 	cred+=",\"tty\":$([ "$tty" = 1 ] && echo true || echo false)"
 	[ -z "$address" ] || cred+=",\"address\":$(nixcage_scope_json_string "$address")"
+	cred+=",\"agent\":$([ -n "$agent" ] && echo true || echo false)"
 	cred+=',"env":{'
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do
 		word="${1#--setenv=}"

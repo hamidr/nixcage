@@ -21,6 +21,7 @@ nixcage_session_read() {
 	SESSION_CWD="$(jq -r '.cwd' "$cred")"
 	SESSION_TTY="$(jq -r 'if .tty then 1 else "" end' "$cred")"
 	SESSION_ADDRESS="$(jq -r '.address // ""' "$cred")"
+	SESSION_AGENT="$(jq -r 'if .agent then 1 else "" end' "$cred")"
 	mapfile -d '' -t SESSION_ENV < <(jq -j '.env | to_entries[] | "\(.key)=\(.value)\u0000"' "$cred")
 	mapfile -d '' -t SESSION_ARGV < <(jq -j '.argv[] | . + "\u0000"' "$cred")
 }
@@ -57,6 +58,44 @@ nixcage_session_run() {
 	fi
 }
 
+## nixcage_session_account <passwd> <group>
+## A name for the session's uid in the guest: tools ask getpwuid, and git
+## refuses a committer that does not exist. The name is the login name
+## the session was entered with, else nixcage; a uid the guest already
+## names keeps its name. The guest's /etc is a tmpfs, so this is written,
+## not rendered.
+nixcage_session_account() {
+	local passwd="$1" group="$2" name=nixcage word
+	for word in ${SESSION_ENV[@]+"${SESSION_ENV[@]}"}; do
+		case "$word" in
+		USER=*) name="${word#USER=}" ;;
+		esac
+	done
+	if ! grep -q "^[^:]*:[^:]*:$SESSION_UID:" "$passwd"; then
+		printf '%s:x:%s:%s::%s:/bin/sh\n' "$name" "$SESSION_UID" "$SESSION_GID" "$SESSION_HOME" >>"$passwd"
+	fi
+	if ! grep -q "^[^:]*:[^:]*:$SESSION_GID:" "$group"; then
+		printf '%s:x:%s:\n' "$name" "$SESSION_GID" >>"$group"
+	fi
+}
+
+## nixcage_session_agent_wait <socket> <timeout>
+## The host forwards its agent as a socket over vsock ssh (ADR-008: a
+## socket reaches the guest, a key never does), which it can only do once
+## the guest's sshd answers, so the socket lands after this unit starts.
+## Waited for, then given up on aloud: a session without an agent fails to
+## sign, which is the nspawn outcome as well.
+nixcage_session_agent_wait() {
+	local sock="$1" timeout="$2" waited=0
+	[ -n "$SESSION_AGENT" ] || return 0
+	while [ ! -S "$sock" ] && [ "$waited" -lt "$timeout" ]; do
+		sleep 1
+		waited=$((waited + 1))
+	done
+	[ -S "$sock" ] || echo "nixcage: no agent socket after ${timeout}s; commits cannot be signed" >&2
+	return 0
+}
+
 ## Ready: the session unit is up and argv is about to run. The host waits
 ## for this file rather than for vmspawn's own READY=1, which reaches
 ## vmspawn and nobody behind it; it crosses on the share the status does,
@@ -85,7 +124,9 @@ nixcage_session_main() {
 	trap 'systemctl poweroff' EXIT
 	nixcage_session_read "$CREDENTIALS_DIRECTORY/nixcage.session"
 	nixcage_session_network
+	nixcage_session_account /etc/passwd /etc/group
 	nixcage_session_ready
+	nixcage_session_agent_wait /run/ssh-agent.sock 15
 	local status=0
 	nixcage_session_run || status=$?
 	nixcage_session_exit "$status" || true

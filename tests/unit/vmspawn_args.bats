@@ -17,23 +17,28 @@ teardown() {
 	teardown_temp_dir
 }
 
-# nixcage_vmspawn_credential <uid> <gid> <home> <cwd> <tty> <address> [--setenv=K=V...] -- <argv...>
+# nixcage_vmspawn_credential <uid> <gid> <home> <cwd> <tty> <address> <agent> [--setenv=K=V...] -- <argv...>
 
 @test "the credential carries who runs what where, as one JSON object" {
-	run nixcage_vmspawn_credential 700000 700000 /root /workspace 1 "" \
+	run nixcage_vmspawn_credential 700000 700000 /root /workspace 1 "" "" \
 		--setenv=HOME=/root --setenv=PATH=/nix/store/x/bin -- bash -c 'echo "hi"'
 	assert_success
-	assert_output '{"uid":700000,"gid":700000,"home":"/root","cwd":"/workspace","tty":true,"env":{"HOME":"/root","PATH":"/nix/store/x/bin"},"argv":["bash","-c","echo \"hi\""]}'
+	assert_output '{"uid":700000,"gid":700000,"home":"/root","cwd":"/workspace","tty":true,"agent":false,"env":{"HOME":"/root","PATH":"/nix/store/x/bin"},"argv":["bash","-c","echo \"hi\""]}'
 }
 
 @test "an address is in the credential only when the session was placed" {
-	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 10.0.0.2/24 -- true
-	assert_output '{"uid":1000,"gid":100,"home":"/root","cwd":"/workspace","tty":false,"address":"10.0.0.2/24","env":{},"argv":["true"]}'
+	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 10.0.0.2/24 "" -- true
+	assert_output '{"uid":1000,"gid":100,"home":"/root","cwd":"/workspace","tty":false,"address":"10.0.0.2/24","agent":false,"env":{},"argv":["true"]}'
+}
+
+@test "a session with an agent forwarded says so, and the guest waits for the socket" {
+	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" 1 -- true
+	assert_output '{"uid":1000,"gid":100,"home":"/root","cwd":"/workspace","tty":false,"agent":true,"env":{},"argv":["true"]}'
 }
 
 @test "a value with a newline or a quote survives the credential" {
-	run nixcage_vmspawn_credential 1 1 /root /w 0 "" --setenv=MSG=$'a\nb"c' -- true
-	assert_output '{"uid":1,"gid":1,"home":"/root","cwd":"/w","tty":false,"env":{"MSG":"a\nb\"c"},"argv":["true"]}'
+	run nixcage_vmspawn_credential 1 1 /root /w 0 "" "" --setenv=MSG=$'a\nb"c' -- true
+	assert_output '{"uid":1,"gid":1,"home":"/root","cwd":"/w","tty":false,"agent":false,"env":{"MSG":"a\nb\"c"},"argv":["true"]}'
 }
 
 @test "the credential is bounded by what the SMBIOS path carries" {

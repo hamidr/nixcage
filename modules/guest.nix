@@ -107,6 +107,11 @@ in
   services.openssh.startWhenNeeded = true;
   services.openssh.settings.PermitRootLogin = "prohibit-password";
   services.openssh.settings.PasswordAuthentication = false;
+  ## The host's agent arrives as a remote socket forward to
+  ## /run/ssh-agent.sock, made by sshd as root: open to every uid in the
+  ## guest, which is the one session, as the nspawn bind is to its uid.
+  services.openssh.settings.StreamLocalBindMask = "0000";
+  services.openssh.settings.StreamLocalBindUnlink = "yes";
   services.openssh.hostKeys = [ ];
   systemd.services."sshd-vsock@" = {
     overrideStrategy = "asDropin";
