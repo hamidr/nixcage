@@ -93,3 +93,49 @@ nixcage_microvm_outcome() {
 	echo 255
 	echo "nixcage: session ended without status" >&2
 }
+
+## nixcage_microvm_ssh_target <name>
+## The key vmspawn made for the VM and the address machined recorded for
+## it, one per line: exec's whole transport (decision 6). machinectl shell
+## does not reach a VM; ssh through systemd-ssh-proxy, which NixOS puts in
+## ssh_config, does.
+nixcage_microvm_ssh_target() {
+	local name="$1" key address
+	key="$(machinectl show "$name" -p SSHPrivateKeyPath --value 2>/dev/null)" &&
+		address="$(machinectl show "$name" -p SSHAddress --value 2>/dev/null)" &&
+		[ -n "$key" ] && [ -n "$address" ] || {
+		echo "nixcage: $name has no ssh address: not a running microvm cage" >&2
+		return 1
+	}
+	printf '%s\n' "$key" "$address"
+}
+
+## nixcage_exec_microvm_words <key> <address> <uid> <gid> <tty> [--setenv=K=V...] -- [cmd...]
+## The words, one per line: ssh over vsock as the guest's root, then one
+## remote line the guest's shell re-splits, so every word of it is quoted
+## for bash. It becomes the session's uid in the workspace with the
+## environment given and nothing else, as exec on nspawn becomes the
+## subject with the leader's. The guest's host key is made at each boot,
+## so none is kept or checked: the transport is vsock, which nothing but
+## this host and that guest are on. env and setpriv are named by store
+## path, which is the same file inside.
+nixcage_exec_microvm_words() {
+	local key="$1" address="$2" uid="$3" gid="$4" tty="$5"
+	shift 5
+	local -a env=()
+	while [ $# -gt 0 ] && [ "$1" != -- ]; do
+		env+=("${1#--setenv=}")
+		shift
+	done
+	while [ "${1:-}" = "--" ]; do shift; done
+	printf '%s\n' ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
+	[ -z "$tty" ] || printf '%s\n' -t
+	printf '%s\n' -i "$key" "root@$address" --
+	local remote="cd /workspace && exec"
+	local word
+	for word in "$NIXCAGE_EXEC_SETPRIV" "--reuid=$uid" "--regid=$gid" --clear-groups -- \
+		"$NIXCAGE_EXEC_ENV" -i ${env[@]+"${env[@]}"} "${@:-bash}"; do
+		remote+=" $(printf '%q' "$word")"
+	done
+	printf '%s\n' "$remote"
+}

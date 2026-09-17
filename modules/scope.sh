@@ -65,10 +65,11 @@ nixcage_scope_proc_field() {
 	sed -n "s/^$field:[[:space:]]*//p" "$NIXCAGE_PROC/$pid/status" 2>/dev/null
 }
 
-## The cage's first process: the one in the scope whose parent is nspawn.
-## Older nspawn sits in the scope itself beside its child; systemd 261's
-## stays outside and puts the cage under <scope>/payload/. Both places are
-## read, the scope's own first; nspawn is known by its name, wherever it is.
+## The cage's first process: the one in the scope whose parent is nspawn,
+## or vmspawn, whose one process in the scope is the VM (ADR-019). Older
+## nspawn sits in the scope itself beside its child; systemd 261's stays
+## outside and puts the cage under <scope>/payload/. Both places are read,
+## the scope's own first; the spawner is known by its name, wherever it is.
 nixcage_scope_leader() {
 	local cgroup pid parent procs
 	cgroup="$(nixcage_scope_cgroup "$1")" || return 1
@@ -78,10 +79,12 @@ nixcage_scope_leader() {
 			[ -n "$pid" ] || continue
 			parent="$(nixcage_scope_proc_field "$pid" PPid)"
 			[ -n "$parent" ] || continue
-			if [ "$(nixcage_scope_proc_field "$parent" Name)" = systemd-nspawn ]; then
+			case "$(nixcage_scope_proc_field "$parent" Name)" in
+			systemd-nspawn | systemd-vmspawn)
 				printf '%s\n' "$pid"
 				return 0
-			fi
+				;;
+			esac
 		done <"$procs"
 	done
 	return 1
@@ -113,6 +116,12 @@ nixcage_scope_netns() {
 	status="$(nixcage_scope_status "$name")" || return 1
 	case "$status" in
 	running\ *)
+		## A microVM's leader is qemu, in the host's own namespace: there
+		## is none to hand out, and the answer says so (ADR-019).
+		if [ "$(nixcage_scope_record_substrate "$name")" = microvm ]; then
+			echo none
+			return 0
+		fi
 		local leader
 		read -r _ leader _ <<<"$status"
 		printf '%s/%s/ns/net\n' "$NIXCAGE_PROC" "$leader"

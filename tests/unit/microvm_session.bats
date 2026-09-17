@@ -108,3 +108,63 @@ teardown() {
 	[ ! -f "$TEST_TEMP_DIR/stopped" ]
 	[ ! -f "$TEST_TEMP_DIR/machinectl.calls" ]
 }
+
+# nixcage_microvm_ssh_target <name>: the key and the address machined
+# recorded for the VM, one per line. machinectl answers, so a stub does here.
+
+@test "the ssh target is what machined recorded for the VM" {
+	mkdir -p "$TEST_TEMP_DIR/bin"
+	cat >"$TEST_TEMP_DIR/bin/machinectl" <<'STUB'
+#!/bin/sh
+case "$*" in
+*SSHPrivateKeyPath*) echo /run/systemd/vmspawn/myproj/ed25519 ;;
+*SSHAddress*) echo vsock/1340938338 ;;
+esac
+STUB
+	chmod +x "$TEST_TEMP_DIR/bin/machinectl"
+	PATH="$TEST_TEMP_DIR/bin:$PATH" run nixcage_microvm_ssh_target myproj
+	assert_success
+	assert_line --index 0 /run/systemd/vmspawn/myproj/ed25519
+	assert_line --index 1 vsock/1340938338
+}
+
+@test "a VM machined has no address for is not reachable, and says so" {
+	mkdir -p "$TEST_TEMP_DIR/bin"
+	printf '#!/bin/sh\nexit 1\n' >"$TEST_TEMP_DIR/bin/machinectl"
+	chmod +x "$TEST_TEMP_DIR/bin/machinectl"
+	PATH="$TEST_TEMP_DIR/bin:$PATH" run nixcage_microvm_ssh_target myproj
+	assert_failure
+	assert_output --partial "myproj has no ssh address: not a running microvm cage"
+}
+
+# nixcage_exec_microvm_words <key> <address> <uid> <gid> <tty> [--setenv=K=V...] -- [cmd...]
+# The words, one per line: ssh over vsock with the key vmspawn made, then
+# one remote line that becomes the uid in the workspace with the given
+# environment and nothing else.
+
+@test "exec on a microvm cage is ssh over vsock, becoming the session's uid in the workspace" {
+	NIXCAGE_EXEC_ENV=/nix/store/x-coreutils/bin/env NIXCAGE_EXEC_SETPRIV=/nix/store/y-util-linux/bin/setpriv
+	run nixcage_exec_microvm_words /run/systemd/vmspawn/myproj/ed25519 vsock/1340938338 700001 700001 "" \
+		--setenv=HOME=/home/agent --setenv=PATH=/nix/store/p/bin -- git status
+	assert_success
+	assert_line --index 0 ssh
+	refute_line "-t"
+	assert_line "-i"
+	assert_line "/run/systemd/vmspawn/myproj/ed25519"
+	assert_line "root@vsock/1340938338"
+	assert_line --index -1 "cd /workspace && exec /nix/store/y-util-linux/bin/setpriv --reuid=700001 --regid=700001 --clear-groups -- /nix/store/x-coreutils/bin/env -i HOME=/home/agent PATH=/nix/store/p/bin git status"
+}
+
+@test "with a tty, ssh is asked for one, and no command means the cage's shell" {
+	NIXCAGE_EXEC_ENV=env NIXCAGE_EXEC_SETPRIV=setpriv
+	run nixcage_exec_microvm_words /k vsock/1 1000 100 1 --setenv=HOME=/home/nixcage --
+	assert_success
+	assert_line "-t"
+	assert_line --index -1 "cd /workspace && exec setpriv --reuid=1000 --regid=100 --clear-groups -- env -i HOME=/home/nixcage bash"
+}
+
+@test "a word with a space or a quote reaches the guest as one word" {
+	NIXCAGE_EXEC_ENV=env NIXCAGE_EXEC_SETPRIV=setpriv
+	run nixcage_exec_microvm_words /k vsock/1 1000 100 "" --setenv=MSG='a b' -- sh -c 'echo "x y"'
+	assert_line --index -1 "cd /workspace && exec setpriv --reuid=1000 --regid=100 --clear-groups -- env -i MSG=a\\ b sh -c echo\\ \\\"x\\ y\\\""
+}

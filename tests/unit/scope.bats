@@ -49,6 +49,18 @@ running_cage() {
 	assert_output "machine.slice/machine-builder.scope"
 }
 
+@test "a running microvm cage's leader is qemu, the process whose parent is vmspawn" {
+	# vmspawn registers the scope as nspawn does and stays outside it; the
+	# VM is one process in it, and status, stop and list read it the same.
+	mkdir -p "$NIXCAGE_CGROUP_ROOT/machine.slice/machine-builder.scope" "$NIXCAGE_PROC/5000" "$NIXCAGE_PROC/5001"
+	printf '5001\n' >"$NIXCAGE_CGROUP_ROOT/machine.slice/machine-builder.scope/cgroup.procs"
+	printf 'Name:\tsystemd-vmspawn\nPPid:\t1\n' >"$NIXCAGE_PROC/5000/status"
+	printf 'Name:\tqemu-kvm\nPPid:\t5000\n' >"$NIXCAGE_PROC/5001/status"
+	run nixcage_scope_leader builder
+	assert_success
+	assert_output "5001"
+}
+
 @test "a running cage's leader is the process whose parent is nspawn, not nspawn itself" {
 	running_cage builder 4000 4001
 	run nixcage_scope_leader builder
@@ -76,6 +88,16 @@ running_cage() {
 	run nixcage_scope_netns builder
 	assert_success
 	assert_output "$NIXCAGE_PROC/4001/ns/net"
+}
+
+@test "netns of a running microvm cage is none: a VM has no namespace on the host" {
+	# The leader is qemu, whose namespace is the host's own; handing that
+	# out would put a second cage in the host's network (ADR-019).
+	running_cage builder 4000 4001
+	nixcage_scope_record_write builder 700000 "" "" "" "" microvm
+	run nixcage_scope_netns builder
+	assert_success
+	assert_output none
 }
 
 @test "netns of a cage that is not running fails naming the cage" {
