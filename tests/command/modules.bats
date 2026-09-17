@@ -154,8 +154,10 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	  sshdPre = $GUEST.systemd.services.\"sshd-vsock@\".serviceConfig.ExecStartPre;
 	  sshd = $GUEST.systemd.services.\"sshd-vsock@\".serviceConfig.ExecStart;
 	  strategy = $GUEST.systemd.services.\"sshd-vsock@\".overrideStrategy;
+	  oom = $GUEST.systemd.services.nixcage-session.serviceConfig.OOMPolicy;
 	}"
 	assert_success
+	[ "$(jq -r .oom <<<"$output")" = continue ]
 	[ "$(jq -r '.cred' <<<"$output")" = "nixcage.session" ]
 	[[ "$(jq -c .wanted <<<"$output")" == *'"multi-user.target"'* ]]
 	[ "$(jq -r '.sshdPre[0]' <<<"$output")" = "" ]

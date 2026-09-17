@@ -57,6 +57,23 @@ in
   nix.enable = false;
   boot.loader.grub.enable = false;
 
+  ## What a NixOS boot does that a session has no use for, each measured
+  ## by systemd-analyze blame on the untrimmed guest: the firewall (1.7 s)
+  ## on a machine whose one port the host pins and isolates; time sync
+  ## and oomd with no network and one process; resolvconf, whose file the
+  ## session unit writes itself (ADR-016); the console font; the journal
+  ## catalog; and a getty on a tty nobody has.
+  networking.firewall.enable = false;
+  networking.resolvconf.enable = false;
+  services.timesyncd.enable = false;
+  systemd.oomd.enable = false;
+  console.enable = false;
+  systemd.services.systemd-journal-catalog-update.enable = false;
+  systemd.services."getty@tty1".enable = false;
+  ## The initrd's default module set is for hardware this guest never
+  ## has; the modules named below are all it needs.
+  boot.initrd.includeDefaultModules = false;
+
   boot.initrd.systemd.enable = true;
   boot.initrd.availableKernelModules = [
     "virtiofs"
@@ -154,6 +171,11 @@ in
       TTYReset = false;
       TTYVHangup = true;
       Environment = "TERM=dumb";
+      ## The guest's memory is the bound (decision 6): the kernel kills the
+      ## process that exceeds it, and the session must survive to report
+      ## that. systemd's default stops a unit the OOM killer touched, which
+      ## would end the guest without a status.
+      OOMPolicy = "continue";
     };
   };
 }

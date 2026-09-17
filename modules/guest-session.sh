@@ -54,16 +54,20 @@ nixcage_session_run() {
 	cd "$SESSION_CWD" || return 1
 	## env -i resolves what follows through the environment it just
 	## emptied, so the switch is named by its path.
+	## Started as a job and waited for: bash reports a foreground child
+	## the kernel killed on the console, which is argv's output, and says
+	## nothing of a job. The status is the same either way.
 	local setpriv
 	setpriv="$(command -v setpriv)"
 	if [ -n "$SESSION_TTY" ]; then
 		env -i "${SESSION_ENV[@]}" "$setpriv" --reuid="$SESSION_UID" --regid="$SESSION_GID" \
-			--clear-groups -- "${SESSION_ARGV[@]}"
+			--clear-groups -- "${SESSION_ARGV[@]}" &
 	else
 		stty -onlcr
 		env -i "${SESSION_ENV[@]}" "$setpriv" --reuid="$SESSION_UID" --regid="$SESSION_GID" \
-			--clear-groups -- "${SESSION_ARGV[@]}" </dev/null
+			--clear-groups -- "${SESSION_ARGV[@]}" </dev/null &
 	fi
+	{ wait $!; } 2>/dev/null
 }
 
 ## nixcage_session_resolv_conf <file>
