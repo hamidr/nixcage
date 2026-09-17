@@ -79,6 +79,23 @@ nixcage_session_account() {
 	fi
 }
 
+## nixcage_session_disk <device> <mountpoint>
+## The image --disk gave the cage, handed in as the first virtio drive:
+## made a filesystem the first time, mounted at /var/lib for the session's
+## uid, for what virtiofs is too slow for and for what wants a block
+## device of its own. The image is the cage's and outlives the session;
+## the guest's /var around it does not.
+nixcage_session_disk() {
+	local device="$1" mountpoint="$2"
+	[ -b "$device" ] || return 0
+	if [ -z "$(blkid -o value -s TYPE "$device")" ]; then
+		mkfs.ext4 -q "$device"
+	fi
+	mkdir -p "$mountpoint"
+	mount "$device" "$mountpoint"
+	chown "$SESSION_UID:$SESSION_GID" "$mountpoint"
+}
+
 ## nixcage_session_agent_wait <socket> <timeout>
 ## The host forwards its agent as a socket over vsock ssh (ADR-008: a
 ## socket reaches the guest, a key never does), which it can only do once
@@ -125,6 +142,7 @@ nixcage_session_main() {
 	nixcage_session_read "$CREDENTIALS_DIRECTORY/nixcage.session"
 	nixcage_session_network
 	nixcage_session_account /etc/passwd /etc/group
+	nixcage_session_disk /dev/vda /var/lib
 	nixcage_session_ready
 	nixcage_session_agent_wait /run/ssh-agent.sock 15
 	local status=0

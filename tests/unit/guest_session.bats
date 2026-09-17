@@ -111,3 +111,15 @@ teardown() {
 	nixcage_session_account "$TEST_TEMP_DIR/passwd" "$TEST_TEMP_DIR/group"
 	[ "$(tail -1 "$TEST_TEMP_DIR/passwd")" = "nixcage:x:1000:100::/home/nixcage:/bin/sh" ]
 }
+
+# nixcage_session_disk <device> <mountpoint>: a persistent image handed in as
+# a drive is made a filesystem once and mounted where argv keeps what
+# virtiofs is too slow for. A session given no disk has no device.
+
+@test "without a drive, no filesystem is made and nothing is mounted" {
+	SESSION_UID=1000 SESSION_GID=100
+	run nixcage_session_disk "$TEST_TEMP_DIR/no-such-device" "$TEST_TEMP_DIR/var-lib"
+	assert_success
+	assert_output ""
+	[ ! -d "$TEST_TEMP_DIR/var-lib" ]
+}
