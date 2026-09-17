@@ -45,3 +45,17 @@ teardown() {
 	[ "${#SESSION_ENV[@]}" -eq 0 ]
 	[ "${SESSION_ARGV[*]}" = true ]
 }
+
+@test "the guest marks itself ready, and leaves its status, as the session's own uid in its home" {
+	# setpriv is what changes uid; a stub on PATH records what it was asked
+	# and runs the rest, so the files land and the uid asked for is seen.
+	mkdir -p "$TEST_TEMP_DIR/bin" "$TEST_TEMP_DIR/home"
+	printf '#!/bin/sh\necho "$1 $2" >>"%s/setpriv.calls"; shift 4; exec "$@"\n' "$TEST_TEMP_DIR" >"$TEST_TEMP_DIR/bin/setpriv"
+	chmod +x "$TEST_TEMP_DIR/bin/setpriv"
+	SESSION_UID=700001 SESSION_GID=700001 SESSION_HOME="$TEST_TEMP_DIR/home"
+	PATH="$TEST_TEMP_DIR/bin:$PATH" nixcage_session_ready
+	[ -f "$TEST_TEMP_DIR/home/.nixcage-ready" ]
+	PATH="$TEST_TEMP_DIR/bin:$PATH" nixcage_session_exit 7
+	[ "$(cat "$TEST_TEMP_DIR/home/.nixcage-exit")" = 7 ]
+	[ "$(sort -u "$TEST_TEMP_DIR/setpriv.calls")" = "--reuid=700001 --regid=700001" ]
+}

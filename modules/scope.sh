@@ -146,12 +146,14 @@ nixcage_scope_json_string() {
 	printf '"%s"' "$v"
 }
 
-## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> [root...]
+## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [root...]
 ## One object on one line, so list --json can extend it without parsing it.
-## A field the session was not given is absent rather than empty.
+## A field the session was not given is absent rather than empty; the
+## substrate is absent for nspawn, which every cage ran on before ADR-019,
+## so a record from before reads the same as one written now.
 nixcage_scope_record_write() {
-	local name="$1" uid="$2" subject="$3" bridge="$4" address="$5" netns="$6"
-	shift 6
+	local name="$1" uid="$2" subject="$3" bridge="$4" address="$5" netns="$6" substrate="$7"
+	shift 7
 	nixcage_scope_name_ok "$name" || return 1
 	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep
 	mkdir -p "$dir" || return 1
@@ -160,6 +162,8 @@ nixcage_scope_record_write() {
 	[ -z "$bridge" ] || record+=",\"bridge\":$(nixcage_scope_json_string "$bridge")"
 	[ -z "$address" ] || record+=",\"address\":$(nixcage_scope_json_string "$address")"
 	[ -z "$netns" ] || record+=",\"netns\":$(nixcage_scope_json_string "$netns")"
+	[ -z "$substrate" ] || [ "$substrate" = nspawn ] ||
+		record+=",\"substrate\":$(nixcage_scope_json_string "$substrate")"
 	if [ $# -gt 0 ]; then
 		record+=',"roots":['
 		sep=""
@@ -170,6 +174,20 @@ nixcage_scope_record_write() {
 		record+=']'
 	fi
 	printf '%s}\n' "$record" >"$dir/placement"
+}
+
+## The substrate a cage's record fixed, empty for a cage with none or with
+## no record: the one field enter reads back before it decides, so it is
+## read by its own spelling rather than through a JSON parser the script
+## does not carry.
+nixcage_scope_record_substrate() {
+	local record="$NIXCAGE_STATE_DIR/containers/$1/placement"
+	[ -f "$record" ] || return 0
+	local line
+	line="$(<"$record")"
+	if [[ "$line" =~ \"substrate\":\"([a-z]+)\" ]]; then
+		echo "${BASH_REMATCH[1]}"
+	fi
 }
 
 ## Every name under the state directory, one object per line: the record

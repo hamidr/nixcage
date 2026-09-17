@@ -109,6 +109,7 @@ let
       . ${./veth.sh}
       . ${./exec-cage.sh}
       . ${./vmspawn-args.sh}
+      . ${./microvm-session.sh}
 
       ## scope.sh names the same directory for the records it reads; one
       ## spelling, taken from there.
@@ -233,6 +234,116 @@ let
       ## caller: which uid the cage is mapped onto, what that uid is called
       ## inside it, where its home is kept, what else is mapped in, and what is
       ## in its environment. Nothing here knows why any of it was asked for.
+      ## The major version of the vmspawn on this path, or nothing.
+      vmspawn_version() {
+        command -v systemd-vmspawn >/dev/null 2>&1 || return 0
+        systemd-vmspawn --version 2>/dev/null | head -1 | grep -oE '[0-9]+' | head -1
+      }
+
+      ## The microvm session (ADR-019), from the point enter has the cage's
+      ## uid, home and record: reads cmd_enter's locals. The skeleton is the
+      ## root share, owned by the cage's first uid because virtiofsd in its
+      ## user namespace cannot create in a directory it does not own; the
+      ## store is a read-only share whole (decision 5, wider than ADR-014's
+      ## closure, and said so); every other share is the host uid as it is.
+      ## What nspawn is handed as argv and environment goes into the
+      ## credential the guest's session unit reads; secrets are resolved
+      ## into it here, since no file of the rootfs reaches the guest.
+      ## The guest marks itself ready in the home and leaves argv's status
+      ## there; a watch stops a guest nobody heard from within the boot
+      ## timeout, and the outcome is read from those files once vmspawn
+      ## returns (microvm-session.sh).
+      enter_microvm() {
+        local skeleton="$cdir/session-$$" credential="$cdir/session-$$.cred"
+        mkdir -p "$skeleton"
+        chown "$owner_uid:$owner_gid" "$skeleton"
+        # shellcheck disable=SC2064
+        trap "rm -rf '$skeleton' '$credential'" EXIT
+        trap 'exit 143' TERM HUP INT
+
+        ## bash -c consumes its first argument as $0, so a placeholder
+        ## precedes the command, as on nspawn.
+        local shell_cmd=". ${./dev-shell.sh}; nixcage_enter_shell \"\$@\""
+        set -- placeholder "$@"
+
+        local -a env_words=(
+          --setenv=HOME="$session_home"
+          --setenv=PATH="$PROFILE/bin"
+          --setenv=NIXCAGE_NO_NIX_DAEMON=1
+          --setenv=NIX_CONFIG='experimental-features = nix-command flakes'
+          --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt"
+          --setenv=NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc"
+          --setenv=TERM="''${TERM:-xterm}"
+        )
+        [ -n "$user" ] && env_words+=(--setenv=USER="$user" --setenv=LOGNAME="$user")
+        local var secret
+        if [ -f "$SECRET_ENV" ]; then
+          while IFS='=' read -r var secret; do
+            [ -n "$var" ] || continue
+            if [ -r "/run/secrets/$secret" ]; then
+              env_words+=(--setenv="$var=$(cat "/run/secrets/$secret")")
+            else
+              echo "nixcage-container: secret '$secret' for $var not found; skipping" >&2
+            fi
+          done <"$SECRET_ENV"
+        fi
+        env_words+=(''${asked_env[@]+"''${asked_env[@]}"})
+
+        local tty=""
+        if [ -t 0 ] && [ -t 1 ]; then tty=1; fi
+
+        ## A socket or a file cannot cross virtiofs; a bind that is not a
+        ## directory is refused here rather than mounted as nothing.
+        local -a bind_words=("--bind=$project:/workspace" "--bind=$home:$session_home")
+        local bind src
+        for bind in ''${git_binds[@]+"''${git_binds[@]}"} ''${asked_binds[@]+"''${asked_binds[@]}"}; do
+          src="''${bind#--bind=}"; src="''${src#--bind-ro=}"; src="''${src%%:*}"
+          [ -d "$src" ] || die "not a directory, and only a directory crosses into a microvm: $src"
+          bind_words+=("$bind")
+        done
+
+        local cred
+        cred="$(nixcage_vmspawn_credential "$session_uid" "$session_gid" "$session_home" /workspace \
+          "$tty" "$network_addr" "''${env_words[@]}" -- "$PROFILE/bin/bash" -c "$shell_cmd" "$@")"
+        nixcage_vmspawn_credential_ok "$cred" || exit 1
+
+        local -a vmspawn_words=()
+        local word
+        while IFS= read -r word; do
+          vmspawn_words+=("$word")
+        done < <(nixcage_vmspawn_args "$name" "$skeleton" "$MICROVM_GUEST" "$credential" \
+          "$owner_uid" "$block" "$tty" "$NIXCAGE_ENTER_MEMORY" "$NIXCAGE_ENTER_CPUS" "" \
+          "''${bind_words[@]}")
+        if [ -n "$NIXCAGE_ENTER_PRINT_ARGV" ]; then
+          printf '%s\n' "''${vmspawn_words[@]}"
+          exit 0
+        fi
+
+        ## Refused before boot: a second enter on a running name would
+        ## register a second machine under it (decision 7).
+        case "$(nixcage_scope_status "$name" 2>/dev/null)" in
+        running*) die "$name is running" ;;
+        esac
+
+        (umask 077 && printf '%s\n' "$cred" >"$credential") || die "could not write the session credential"
+        local ready="$home/$NIXCAGE_MICROVM_READY" exit_file="$home/$NIXCAGE_MICROVM_EXIT"
+        local stopped="$cdir/session-$$.stopped"
+        rm -f "$ready" "$exit_file" "$stopped"
+        # shellcheck disable=SC2064
+        trap "rm -rf '$skeleton' '$credential' '$stopped'" EXIT
+
+        nixcage_microvm_watch "$ready" "$name" "$NIXCAGE_MICROVM_BOOT_TIMEOUT" "$stopped" &
+        local watch=$!
+        "''${vmspawn_words[@]}" || true
+        kill "$watch" 2>/dev/null || true
+        wait "$watch" 2>/dev/null || true
+
+        local status
+        status="$(nixcage_microvm_outcome "$ready" "$exit_file" "$stopped")"
+        rm -f "$ready" "$exit_file"
+        return "$status"
+      }
+
       cmd_enter() {
         nixcage_enter_parse "$@" || exit 1
         set -- ''${NIXCAGE_ENTER_ARGV[@]+"''${NIXCAGE_ENTER_ARGV[@]}"}
@@ -262,6 +373,30 @@ let
         local -a store_roots=(''${NIXCAGE_ENTER_STORE_ROOTS[@]+"''${NIXCAGE_ENTER_STORE_ROOTS[@]}"})
         local -a asked_binds=(''${NIXCAGE_ENTER_BINDS[@]+"''${NIXCAGE_ENTER_BINDS[@]}"})
         local -a asked_env=(''${NIXCAGE_ENTER_ENV[@]+"''${NIXCAGE_ENTER_ENV[@]}"})
+
+        ## What the cage runs on (ADR-019), fixed by the host's declaration
+        ## or the record of its first enter, else asked for, else the host's
+        ## default. A flag against what is fixed is refused here, naming the
+        ## winner. A microVM never has the daemon and cannot join a namespace
+        ## or realise a devShell, so those are refused as the parse refuses
+        ## them for the flag, since the record may make a session microvm
+        ## without the flag.
+        local substrate
+        substrate="$(nixcage_substrate_resolve "$name" "" \
+          "$(nixcage_scope_record_substrate "$name")" \
+          "$NIXCAGE_ENTER_SUBSTRATE" "''${SUBSTRATE_DEFAULT:-}")" || exit 1
+        if [ "$substrate" = microvm ]; then
+          nixcage_microvm_refusal "''${HOST_PLATFORM:-linux}" "''${MICROVM_GUEST:-}" /dev/kvm \
+            "$(vmspawn_version)" || exit 1
+          [ -z "$shell_name" ] || die "--shell is not available on a microvm cage: it has no nix daemon"
+          [ -z "$network_ns" ] || die "--network ns: is not available on a microvm cage: a VM has no namespace to join"
+          [ -z "$network_bridge" ] || die "--network on a microvm cage is not implemented yet"
+          [ -z "$NIXCAGE_ENTER_DISK" ] || die "--disk is not implemented yet"
+          [ -z "$auth_sock" ] || echo "nixcage-container: agent forwarding into a microvm cage is not implemented yet; commits cannot be signed" >&2
+          no_nix_daemon=1
+        elif [ -n "$NIXCAGE_ENTER_DISK" ]; then
+          die "--disk needs a microvm cage"
+        fi
 
         ## The name is checked here as well as where it is declared, because
         ## this is the last point before it becomes part of a flake reference
@@ -332,6 +467,11 @@ let
             die "uid $owner_uid holds a block of $block; it has no subject $subject"
           session_home="/home/$subject"
         fi
+        ## A microVM session is never guest root, and the guest owns /root
+        ## as root's, re-owning a home bound there (ADR-019 decision 5).
+        if [ "$substrate" = microvm ] && [ -z "$subject" ]; then
+          session_home=/home/nixcage
+        fi
         local session_uid=$((owner_uid + subject_offset))
         local session_gid=$((owner_gid + subject_offset))
         local -a session_user=()
@@ -344,7 +484,7 @@ let
         ## What this session was given, for list --json to show while it
         ## runs and after (ADR-017). Written before anything else of the
         ## session exists, so a session that dies on the way still left it.
-        nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns" \
+        nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns" "$substrate" \
           ''${store_roots[@]+"''${store_roots[@]}"} ||
           die "could not record the placement of $name"
         ## The home holds whatever the session writes there, so it is private
@@ -358,6 +498,11 @@ let
           chown -R "$session_uid:$session_gid" "$home"
         fi
         chmod 700 "$home"
+
+        if [ "$substrate" = microvm ]; then
+          enter_microvm "$@"
+          exit $?
+        fi
 
         local rootfs="$cdir/session-$$"
         make_rootfs "$rootfs" "$user"

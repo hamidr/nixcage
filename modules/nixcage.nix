@@ -312,6 +312,7 @@ in
         PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}
         PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
         STORAGE_DATASET=${stateDataset}
+        HOST_PLATFORM=macos
       '';
     };
 

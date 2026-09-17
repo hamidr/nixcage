@@ -30,7 +30,9 @@ running cage read a systemd scope (ADR-012), not nspawn; the record
 
 `systemd-vmspawn` is nspawn's sibling for virtual machines. Checked in the
 pinned nixpkgs (`d6c71932`, systemd 258.3, `withVmspawn ? true`) and the
-v258 manual: `--directory` (root over virtiofs), `--linux`/`--initrd`
+v258 manual, and then against 261, which is the first that boots a kernel
+directly without UEFI firmware (`--firmware=none`; 258 wants an OVMF it
+does not find on NixOS), so 261 is the floor: `--directory` (root over virtiofs), `--linux`/`--initrd`
 (direct kernel boot), `--bind`/`--bind-ro` with nspawn's exact syntax,
 `--private-users=SHIFT[:RANGE]` (virtiofsd uid mapping), `--network-tap`,
 `--cpus`, `--ram`, `--slice`, `--property`, `--register` (machined),
@@ -134,16 +136,18 @@ pin and isolation, in `modules/veth.sh` beside the veth case: a second port
 kind on a bridge, extended, not extracted.
 
 **7. Refusals before boot.** No `/dev/kvm`; `systemd-vmspawn --version`
-below 258 or absent; a conflicting substrate; a missing bridge; a
+below 261 or absent; a conflicting substrate; a missing bridge; a
 credential over 32768 bytes, since the SMBIOS structure that carries every
 credential holds 64 KiB base64-encoded in all and a 49000-byte one was
 measured to take vmspawn's own down with it, silently; the second `enter`
 on a running name.
-After boot: no `READY=1` from the session unit within `--boot-timeout`
-(30 s) is `stop`, exit 124, last console lines on stderr, unless the scope
-is already gone when the timeout fires, in which case the VM finished
-before its readiness was seen and what it left is read like any other
-exit; a missing
+After boot: no readiness from the session unit within the boot timeout
+(30 s) is `stop`, exit 124, unless the scope is already gone when the
+timeout fires, in which case the VM finished before its readiness was
+seen and what it left is read like any other exit. Readiness is a marker
+the unit writes and syncs into the home before argv runs, on the share
+the status crosses on and by the same means: vmspawn's own `READY=1`
+reaches vmspawn and nobody behind it. A missing
 `.nixcage-exit` after poweroff is exit 255, "session ended without status";
 a scope alive 5 s after the status was read is stopped.
 
@@ -278,8 +282,16 @@ console carried argv's output and nothing else once the kernel was told
 `log_target=null` (a shutdown logging to kmsg raises the console level
 back to warnings and prints the power-down line) and `TERM=dumb` (its
 init resets the console and marks the boot with OSC sequences
-otherwise). To come: `tests/command/modules.bats` (guest
-evaluates, session unit present, systemd assertion), `veth.bats` (tap on
-a bridge), `scope.bats` and `exec_cage.bats` (microvm record: `netns`
-none, `exec` words), an exit-status fixture suite, the guest built on a
-Linux builder, and the measurement plan on a machine.
+otherwise). `enter` runs the microvm branch: `modules/microvm-session.sh`
+holds the refusals, the watch and the outcome, `tests/unit/microvm_session.bats`
+drives them on fixtures and a stub `machinectl`; the record carries the
+substrate and answers for it (`scope.bats`). On this host, through
+`nixcage-container enter --substrate microvm`: argv ran as the owner uid
+in `/workspace` with `HOME=/home/nixcage`, wrote a file the owner owns,
+saw no daemon socket, and its `exit 3` came back; `true` is 7.9 s wall
+against the claim of three, to be trimmed; a second enter with
+`--substrate nspawn` was refused naming the record, and one with no flag
+ran on microvm by it. Open: `--network`, `--disk`, agent forwarding and
+`exec` on a microvm cage are refused as not implemented; the host's
+`nixcage.cages.<path>.substrate` declaration; the `nixcage` CLI does not
+yet pass `--substrate` through; the measurement plan.
