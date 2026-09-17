@@ -70,6 +70,29 @@ write_host_config() {
 	[[ "$output" == nixcage-container\ enter\ proj-*\ "$TEST_TEMP_DIR/src/proj"\ true ]]
 }
 
+@test "enter --substrate hands the word to nixcage-container, which owns the choice" {
+	# The CLI knows nothing of substrates beyond the flag (ADR-019): what
+	# the cage's record or the host's declaration say is read there.
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	touch "$TEST_TEMP_DIR/src/proj/flake.nix"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter --substrate microvm -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/sudo-calls"
+	[[ "$output" == nixcage-container\ enter\ --substrate\ microvm\ proj-*\ "$TEST_TEMP_DIR/src/proj"\ true ]]
+}
+
+@test "enter --substrate without a word is refused" {
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	touch "$TEST_TEMP_DIR/src/proj/flake.nix"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter --substrate
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"--substrate needs nspawn or microvm"* ]]
+}
+
 @test "rm on linux removes the container locally" {
 	write_host_config
 	echo "$$" >"$XDG_STATE_HOME/nixcage/vm.pid"

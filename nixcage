@@ -417,6 +417,18 @@ cmd_enter() {
   local name
   name="$(container_name_for "$project_dir")"
 
+  # The substrate the cage runs on (ADR-019), handed through as a word:
+  # whether it is allowed, and whether the cage already has one, is
+  # nixcage-container's to say.
+  local -a substrate=()
+  if [[ "${1:-}" == "--substrate" ]]; then
+    case "${2:-}" in
+      nspawn|microvm) substrate=(--substrate "$2") ;;
+      *) log_err "--substrate needs nspawn or microvm"; exit 1 ;;
+    esac
+    shift 2
+  fi
+
   # Accept both 'enter -- cmd...' and 'enter cmd...'.
   [[ "${1:-}" == "--" ]] && shift
 
@@ -431,7 +443,7 @@ cmd_enter() {
 
   if [[ "$OS" == "linux" ]]; then
     [[ $# -eq 0 ]] && log_info "Entering container $name..."
-    sudo nixcage-container enter "${agent_fwd[@]}" "$name" "$project_dir" "$@"
+    sudo nixcage-container enter "${substrate[@]}" "${agent_fwd[@]}" "$name" "$project_dir" "$@"
     return
   fi
 
@@ -439,7 +451,7 @@ cmd_enter() {
 
   # Everything in the remote command is re-split by the remote shell, so
   # every word gets %q, not just the trailing command arguments.
-  local remote=(sudo nixcage-container enter)
+  local remote=(sudo nixcage-container enter "${substrate[@]}")
   # The forwarded socket lives in the VM and is named by the remote shell,
   # so the expansion is deliberately left for it to perform.
   local -a ssh_fwd=()
@@ -654,7 +666,10 @@ ${BOLD}Usage:${NC}
   nixcage [--flake <ref>] <command> [args...]
 
 ${BOLD}Commands:${NC}
-  enter [-- cmd...]  Enter this project's container (macOS: starts the VM if needed)
+  enter [--substrate nspawn|microvm] [-- cmd...]
+                     Enter this project's cage (macOS: starts the VM if needed).
+                     The substrate is fixed at the cage's first enter; a microVM
+                     needs the host's nixcage.microvm.enable (ADR-019).
   exec [--tty] [--agent] -- <cmd...>
                      Run a command as root where the cages are: here on Linux,
                      inside the VM on macOS. This is how a tool built on
