@@ -28,6 +28,17 @@ let
       throw "nixcage.substrate.default is microvm but nixcage.microvm.enable is false"
     else
       cfg.substrate.default;
+  ## One line per declared cage, its path and its word; a cage declared on
+  ## a substrate this host cannot boot is refused the same way.
+  cageSubstrates = lib.concatStringsSep "\n" (
+    lib.mapAttrsToList (
+      path: cage:
+      if cage.substrate == "microvm" && !cfg.microvm.enable then
+        throw "nixcage.cages.${path}.substrate is microvm but nixcage.microvm.enable is false"
+      else
+        "${path} ${cage.substrate}"
+    ) cfg.cages
+  );
 in
 {
   ## The bridges a cage may be placed on (ADR-018), shared with the VM module.
@@ -109,6 +120,29 @@ in
       };
       default = { };
       description = "The microVM substrate a cage may run on (ADR-019).";
+    };
+
+    cages = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options.substrate = lib.mkOption {
+            type = lib.types.enum [
+              "nspawn"
+              "microvm"
+            ];
+            description = ''
+              What this cage runs on (ADR-019), by the project's absolute
+              path. Outranks the record of the cage's first enter and the
+              flag; a flag against it is refused naming this declaration.
+            '';
+          };
+        }
+      );
+      default = { };
+      example = {
+        "/home/me/Src/untrusted".substrate = "microvm";
+      };
+      description = "Cages the host has something to say about, by project path.";
     };
 
     substrate = lib.mkOption {
@@ -244,6 +278,7 @@ in
         STORAGE_DATASET=${lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset}
         HOST_PLATFORM=linux
         SUBSTRATE_DEFAULT=${substrateDefault}
+        CAGE_SUBSTRATES="${cageSubstrates}"
         ${lib.optionalString cfg.microvm.enable "MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}"}
       '';
     };

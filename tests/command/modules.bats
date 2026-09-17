@@ -163,3 +163,22 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	[[ "$(jq -r '.sshd[1]' <<<"$output")" == "-/nix/store/"*"/bin/sshd -i"* ]]
 	[ "$(jq -r .strategy <<<"$output")" = asDropin ]
 }
+
+@test "a cage declared with a substrate is rendered for the container script, path and word" {
+	# The declaration outranks the record and the flag (ADR-019 decision
+	# 2); it reaches the script as one line per cage in the config it
+	# already reads.
+	run eval_module host '{ nixcage.microvm.enable = true; nixcage.principalUidRange.base = 700000;
+	  nixcage.cages."/srv/trusted".substrate = "nspawn"; nixcage.cages."/srv/untrusted".substrate = "microvm"; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_success
+	[[ "$(jq -r . <<<"$output")" == *'CAGE_SUBSTRATES="/srv/trusted nspawn
+/srv/untrusted microvm"'* ]]
+}
+
+@test "a cage declared microvm on a host that builds no guest is refused at evaluation" {
+	run eval_module host '{ nixcage.principalUidRange.base = 700000; nixcage.cages."/srv/x".substrate = "microvm"; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_failure
+	assert_output --partial "nixcage.cages./srv/x.substrate is microvm but nixcage.microvm.enable is false"
+}

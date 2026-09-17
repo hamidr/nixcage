@@ -392,7 +392,8 @@ let
         ## them for the flag, since the record may make a session microvm
         ## without the flag.
         local substrate
-        substrate="$(nixcage_substrate_resolve "$name" "" \
+        substrate="$(nixcage_substrate_resolve "$name" \
+          "$(nixcage_substrate_declared "$project" "''${CAGE_SUBSTRATES:-}")" \
           "$(nixcage_scope_record_substrate "$name")" \
           "$NIXCAGE_ENTER_SUBSTRATE" "''${SUBSTRATE_DEFAULT:-}")" || exit 1
         if [ "$substrate" = microvm ]; then

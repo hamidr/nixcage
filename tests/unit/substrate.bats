@@ -76,3 +76,19 @@ setup() {
 	! nixcage_substrate_word_ok ""
 	! nixcage_substrate_word_ok Microvm
 }
+
+# nixcage_substrate_declared <project> <declarations>: the word declared for
+# a project path, from the lines the host rendered.
+
+@test "a project's declared substrate is read by its exact path" {
+	local decl=$'/srv/trusted nspawn\n/srv/untrusted microvm'
+	run nixcage_substrate_declared /srv/untrusted "$decl"
+	assert_output microvm
+	run nixcage_substrate_declared /srv/trusted "$decl"
+	assert_output nspawn
+	run nixcage_substrate_declared /srv/untrusted-2 "$decl"
+	assert_success
+	assert_output ""
+	run nixcage_substrate_declared /srv/x ""
+	assert_output ""
+}
