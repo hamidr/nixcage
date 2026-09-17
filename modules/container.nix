@@ -84,6 +84,9 @@ let
       nftables
       ## exec enters a running cage's namespaces and becomes a subject.
       util-linux
+      ## The agent forward into a microVM is a shell around ssh, ended by
+      ## its parent (ADR-019).
+      procps
       ## Resolving a linked worktree's git directories, which the project bind
       ## does not cover.
       git
@@ -300,6 +303,20 @@ let
         done < <(microvm_env_words "$session_home" "$user")
         env_words+=(''${asked_env[@]+"''${asked_env[@]}"})
 
+        ## The agent is forwarded as a socket over vsock ssh once the
+        ## guest's sshd answers (decision 5); the credential tells the
+        ## guest to wait for it, and the session finds it where an nspawn
+        ## session does.
+        local agent=""
+        if [ -n "$auth_sock" ]; then
+          if [ -S "$auth_sock" ]; then
+            agent=1
+            env_words+=(--setenv=SSH_AUTH_SOCK=/run/ssh-agent.sock)
+          else
+            echo "nixcage-container: no agent socket at $auth_sock; commits cannot be signed" >&2
+          fi
+        fi
+
         local tty=""
         if [ -t 0 ] && [ -t 1 ]; then tty=1; fi
 
@@ -315,7 +332,7 @@ let
 
         local cred
         cred="$(nixcage_vmspawn_credential "$session_uid" "$session_gid" "$session_home" /workspace \
-          "$tty" "$network_addr" "''${env_words[@]}" -- "$PROFILE/bin/bash" -c "$shell_cmd" "$@")"
+          "$tty" "$network_addr" "$agent" "''${env_words[@]}" -- "$PROFILE/bin/bash" -c "$shell_cmd" "$@")"
         nixcage_vmspawn_credential_ok "$cred" || exit 1
 
         local -a vmspawn_words=()
@@ -343,10 +360,20 @@ let
         trap "rm -rf '$skeleton' '$credential' '$stopped'" EXIT
 
         nixcage_microvm_watch "$ready" "$name" "$NIXCAGE_MICROVM_BOOT_TIMEOUT" "$stopped" &
-        local watch=$!
+        local watch=$! forward=""
+        if [ -n "$agent" ]; then
+          nixcage_agent_forward "$name" "$auth_sock" "$NIXCAGE_MICROVM_BOOT_TIMEOUT" 2>/dev/null &
+          forward=$!
+        fi
         "''${vmspawn_words[@]}" || true
         kill "$watch" 2>/dev/null || true
         wait "$watch" 2>/dev/null || true
+        if [ -n "$forward" ]; then
+          ## The forward is a shell around ssh: both go.
+          pkill -P "$forward" 2>/dev/null || true
+          kill "$forward" 2>/dev/null || true
+          wait "$forward" 2>/dev/null || true
+        fi
 
         local status
         status="$(nixcage_microvm_outcome "$ready" "$exit_file" "$stopped")"
@@ -403,7 +430,6 @@ let
           [ -z "$network_ns" ] || die "--network ns: is not available on a microvm cage: a VM has no namespace to join"
           [ -z "$network_bridge" ] || die "--network on a microvm cage is not implemented yet"
           [ -z "$NIXCAGE_ENTER_DISK" ] || die "--disk is not implemented yet"
-          [ -z "$auth_sock" ] || echo "nixcage-container: agent forwarding into a microvm cage is not implemented yet; commits cannot be signed" >&2
           no_nix_daemon=1
         elif [ -n "$NIXCAGE_ENTER_DISK" ]; then
           die "--disk needs a microvm cage"
@@ -821,6 +847,8 @@ let
         while IFS= read -r word; do
           env_words+=("$word")
         done < <(microvm_env_words "$session_home" "")
+        ## Where the session's forwarded agent is, when there is one.
+        env_words+=(--setenv=SSH_AUTH_SOCK=/run/ssh-agent.sock)
         while IFS= read -r word; do
           words+=("$word")
         done < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \

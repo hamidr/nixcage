@@ -168,3 +168,19 @@ STUB
 	run nixcage_exec_microvm_words /k vsock/1 1000 100 "" --setenv=MSG='a b' -- sh -c 'echo "x y"'
 	assert_line --index -1 "cd /workspace && exec setpriv --reuid=1000 --regid=100 --clear-groups -- env -i MSG=a\\ b sh -c echo\\ \\\"x\\ y\\\""
 }
+
+# nixcage_agent_forward_words <key> <address> <host socket>: the ssh that
+# carries the host's agent into the guest as a socket, no key with it.
+
+@test "the agent reaches the guest as a remote socket forward over vsock ssh, and nothing else" {
+	run nixcage_agent_forward_words /run/systemd/vmspawn/myproj/ed25519 vsock/1340938338 /run/user/1000/ssh-agent.sock
+	assert_success
+	assert_line --index 0 ssh
+	assert_line "-N"
+	assert_line "-o"
+	assert_line "ExitOnForwardFailure=yes"
+	assert_line "-R"
+	assert_line "/run/ssh-agent.sock:/run/user/1000/ssh-agent.sock"
+	assert_line "root@vsock/1340938338"
+	refute_line "-A"
+}

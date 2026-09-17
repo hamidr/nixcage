@@ -139,3 +139,39 @@ nixcage_exec_microvm_words() {
 	done
 	printf '%s\n' "$remote"
 }
+
+## nixcage_agent_forward_words <key> <address> <host socket>
+## The ssh that carries the host's agent into the guest: a remote unix
+## socket forward, so what appears in the guest is a socket sshd made,
+## and no key material and no login shell go with it. -A would give the
+## agent to root's login only, under a path only root can reach.
+nixcage_agent_forward_words() {
+	local key="$1" address="$2" sock="$3"
+	printf '%s\n' ssh -q -N -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+		-o LogLevel=ERROR -o ExitOnForwardFailure=yes \
+		-R "/run/ssh-agent.sock:$sock" -i "$key" "root@$address"
+}
+
+## nixcage_agent_forward <name> <host socket> <timeout>
+## Forwards the agent for as long as the guest runs, from the moment its
+## sshd answers: tried once a second until it holds or the timeout ends,
+## since the VM registers before it boots. Run in the background beside
+## vmspawn and killed when it returns.
+nixcage_agent_forward() {
+	local name="$1" sock="$2" timeout="$3" waited=0 key address
+	while [ "$waited" -lt "$timeout" ]; do
+		if { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name" 2>/dev/null); then
+			local -a words=()
+			local word
+			while IFS= read -r word; do
+				words+=("$word")
+			done < <(nixcage_agent_forward_words "$key" "$address" "$sock")
+			if "${words[@]}"; then
+				return 0
+			fi
+		fi
+		sleep 1
+		waited=$((waited + 1))
+	done
+	return 1
+}

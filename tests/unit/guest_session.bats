@@ -19,7 +19,7 @@ teardown() {
 }
 
 @test "what the host put in the credential is what the guest reads out" {
-	nixcage_vmspawn_credential 700001 700001 /home/agent /workspace 1 10.77.0.2/24 \
+	nixcage_vmspawn_credential 700001 700001 /home/agent /workspace 1 10.77.0.2/24 1 \
 		--setenv=HOME=/home/agent --setenv=MSG=$'two\nlines' -- bash -c 'echo "a b"' >"$TEST_TEMP_DIR/cred"
 	nixcage_session_read "$TEST_TEMP_DIR/cred"
 	[ "$SESSION_UID" = 700001 ]
@@ -28,6 +28,7 @@ teardown() {
 	[ "$SESSION_CWD" = /workspace ]
 	[ "$SESSION_TTY" = 1 ]
 	[ "$SESSION_ADDRESS" = 10.77.0.2/24 ]
+	[ "$SESSION_AGENT" = 1 ]
 	[ "${#SESSION_ENV[@]}" -eq 2 ]
 	[ "${SESSION_ENV[0]}" = HOME=/home/agent ]
 	[ "${SESSION_ENV[1]}" = $'MSG=two\nlines' ]
@@ -38,10 +39,11 @@ teardown() {
 }
 
 @test "a session without a tty or a placement reads as such" {
-	nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" -- true >"$TEST_TEMP_DIR/cred"
+	nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" "" -- true >"$TEST_TEMP_DIR/cred"
 	nixcage_session_read "$TEST_TEMP_DIR/cred"
 	[ -z "$SESSION_TTY" ]
 	[ -z "$SESSION_ADDRESS" ]
+	[ -z "$SESSION_AGENT" ]
 	[ "${#SESSION_ENV[@]}" -eq 0 ]
 	[ "${SESSION_ARGV[*]}" = true ]
 }
@@ -58,4 +60,54 @@ teardown() {
 	PATH="$TEST_TEMP_DIR/bin:$PATH" nixcage_session_exit 7
 	[ "$(cat "$TEST_TEMP_DIR/home/.nixcage-exit")" = 7 ]
 	[ "$(sort -u "$TEST_TEMP_DIR/setpriv.calls")" = "--reuid=700001 --regid=700001" ]
+}
+
+# nixcage_session_agent_wait <socket> <timeout>: the forwarded agent socket
+# appears when the host's ssh connects, which is after the guest is up.
+
+@test "with an agent forwarded, the session waits for the socket and goes on once it is there" {
+	SESSION_AGENT=1
+	(sleep 1; : >"$TEST_TEMP_DIR/agent.sock") &
+	run nixcage_session_agent_wait "$TEST_TEMP_DIR/agent.sock" 5
+	assert_success
+	wait
+}
+
+@test "a socket that never comes is a session without an agent, said once, not a session that never runs" {
+	SESSION_AGENT=1
+	run nixcage_session_agent_wait "$TEST_TEMP_DIR/agent.sock" 1
+	assert_success
+	assert_output --partial "no agent socket after 1s; commits cannot be signed"
+}
+
+@test "without an agent forwarded, nothing is waited for" {
+	SESSION_AGENT=""
+	run nixcage_session_agent_wait "$TEST_TEMP_DIR/agent.sock" 5
+	assert_success
+	assert_output ""
+}
+
+# nixcage_session_account <passwd> <group>: the session's uid gets a name in
+# the guest, since tools ask getpwuid and git wants a committer to exist.
+
+@test "the session's uid is given the login name it was entered with, in the guest's own files" {
+	SESSION_UID=700001 SESSION_GID=700001 SESSION_HOME=/home/agent
+	SESSION_ENV=(HOME=/home/agent USER=agent)
+	printf 'root:x:0:0::/root:/bin/sh\n' >"$TEST_TEMP_DIR/passwd"
+	printf 'root:x:0:\n' >"$TEST_TEMP_DIR/group"
+	nixcage_session_account "$TEST_TEMP_DIR/passwd" "$TEST_TEMP_DIR/group"
+	[ "$(tail -1 "$TEST_TEMP_DIR/passwd")" = "agent:x:700001:700001::/home/agent:/bin/sh" ]
+	[ "$(tail -1 "$TEST_TEMP_DIR/group")" = "agent:x:700001:" ]
+}
+
+@test "without a login name the session is nixcage, and a uid the guest already names is left alone" {
+	SESSION_UID=0 SESSION_GID=0 SESSION_HOME=/root
+	SESSION_ENV=()
+	printf 'root:x:0:0::/root:/bin/sh\n' >"$TEST_TEMP_DIR/passwd"
+	printf 'root:x:0:\n' >"$TEST_TEMP_DIR/group"
+	nixcage_session_account "$TEST_TEMP_DIR/passwd" "$TEST_TEMP_DIR/group"
+	[ "$(wc -l <"$TEST_TEMP_DIR/passwd")" -eq 1 ]
+	SESSION_UID=1000 SESSION_GID=100 SESSION_HOME=/home/nixcage
+	nixcage_session_account "$TEST_TEMP_DIR/passwd" "$TEST_TEMP_DIR/group"
+	[ "$(tail -1 "$TEST_TEMP_DIR/passwd")" = "nixcage:x:1000:100::/home/nixcage:/bin/sh" ]
 }
