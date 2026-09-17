@@ -291,7 +291,15 @@ in `/workspace` with `HOME=/home/nixcage`, wrote a file the owner owns,
 saw no daemon socket, and its `exit 3` came back; `true` is 7.9 s wall
 against the claim of three, to be trimmed; a second enter with
 `--substrate nspawn` was refused naming the record, and one with no flag
-ran on microvm by it. Open: `--network`, `--disk`, agent forwarding and
-`exec` on a microvm cage are refused as not implemented; the host's
-`nixcage.cages.<path>.substrate` declaration; the `nixcage` CLI does not
-yet pass `--substrate` through; the measurement plan.
+ran on microvm by it. The verbs over the running cage, live on this
+host: `status` reads `machine-mvtest.scope` with qemu as leader once
+`scope.sh` knows vmspawn as a spawner beside nspawn, `list --json` shows
+the substrate with the scope, `netns` answers `none`, `exec` reaches the
+guest over vsock ssh as the session's uid in `/workspace` with the
+session's environment and secrets and returns the command's status, and
+`stop` ends the VM, after which enter reports "session ended without
+status", 255. The `nixcage` CLI hands `--substrate` through. Open:
+`--network`, `--disk` and agent forwarding on a microvm cage are refused
+as not implemented; `exec` does not carry what enter was asked by
+`--setenv`, since the record holds no values; the host's
+`nixcage.cages.<path>.substrate` declaration; the measurement plan.

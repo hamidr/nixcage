@@ -253,6 +253,33 @@ let
       ## there; a watch stops a guest nobody heard from within the boot
       ## timeout, and the outcome is read from those files once vmspawn
       ## returns (microvm-session.sh).
+      ## The environment a microvm session or exec gets: what the nspawn
+      ## line sets by --setenv, with the secrets resolved here because no
+      ## file of a rootfs reaches the guest. One word per line.
+      ## microvm_env_words <session home> <login name or empty>
+      microvm_env_words() {
+        local session_home="$1" user="$2"
+        printf -- '--setenv=%s\n' \
+          HOME="$session_home" \
+          PATH="$PROFILE/bin" \
+          NIXCAGE_NO_NIX_DAEMON=1 \
+          NIX_CONFIG='experimental-features = nix-command flakes' \
+          NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt" \
+          NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc" \
+          TERM="''${TERM:-xterm}"
+        [ -z "$user" ] || printf -- '--setenv=%s\n' USER="$user" LOGNAME="$user"
+        [ -f "$SECRET_ENV" ] || return 0
+        local var secret
+        while IFS='=' read -r var secret; do
+          [ -n "$var" ] || continue
+          if [ -r "/run/secrets/$secret" ]; then
+            printf -- '--setenv=%s=%s\n' "$var" "$(cat "/run/secrets/$secret")"
+          else
+            echo "nixcage-container: secret '$secret' for $var not found; skipping" >&2
+          fi
+        done <"$SECRET_ENV"
+      }
+
       enter_microvm() {
         local skeleton="$cdir/session-$$" credential="$cdir/session-$$.cred"
         mkdir -p "$skeleton"
@@ -266,27 +293,11 @@ let
         local shell_cmd=". ${./dev-shell.sh}; nixcage_enter_shell \"\$@\""
         set -- placeholder "$@"
 
-        local -a env_words=(
-          --setenv=HOME="$session_home"
-          --setenv=PATH="$PROFILE/bin"
-          --setenv=NIXCAGE_NO_NIX_DAEMON=1
-          --setenv=NIX_CONFIG='experimental-features = nix-command flakes'
-          --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt"
-          --setenv=NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc"
-          --setenv=TERM="''${TERM:-xterm}"
-        )
-        [ -n "$user" ] && env_words+=(--setenv=USER="$user" --setenv=LOGNAME="$user")
-        local var secret
-        if [ -f "$SECRET_ENV" ]; then
-          while IFS='=' read -r var secret; do
-            [ -n "$var" ] || continue
-            if [ -r "/run/secrets/$secret" ]; then
-              env_words+=(--setenv="$var=$(cat "/run/secrets/$secret")")
-            else
-              echo "nixcage-container: secret '$secret' for $var not found; skipping" >&2
-            fi
-          done <"$SECRET_ENV"
-        fi
+        local -a env_words=()
+        local word
+        while IFS= read -r word; do
+          env_words+=("$word")
+        done < <(microvm_env_words "$session_home" "$user")
         env_words+=(''${asked_env[@]+"''${asked_env[@]}"})
 
         local tty=""
@@ -308,7 +319,6 @@ let
         nixcage_vmspawn_credential_ok "$cred" || exit 1
 
         local -a vmspawn_words=()
-        local word
         while IFS= read -r word; do
           vmspawn_words+=("$word")
         done < <(nixcage_vmspawn_args "$name" "$skeleton" "$MICROVM_GUEST" "$credential" \
@@ -769,12 +779,51 @@ let
           offset="$(nixcage_principal_subject_offset "$subject" "$(declared_subjects)")" ||
             die "no such subject: $subject"
         fi
+        if [ "$(nixcage_scope_record_substrate "$name")" = microvm ]; then
+          exec_microvm "$name" "$subject" "$offset" "$@"
+        fi
         local -a words=()
         local word
         while IFS= read -r word; do
           words+=("$word")
         done < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \
           nixcage_exec_words "$leader" "$offset" -- "$@")
+        exec "''${words[@]}"
+      }
+
+      ## exec on a microvm cage (ADR-019 decision 6): ssh over vsock to the
+      ## guest's root, becoming the session's uid there. There is no leader
+      ## whose environment could be read, so the command gets what a session
+      ## is given, secrets resolved now; what enter was asked by --setenv is
+      ## not in the record and does not reach it. The uid is the record's
+      ## plus the subject's offset; the gid is the home's, which enter gave
+      ## the last session's, so an exec as another subject than the last
+      ## session's carries that session's group.
+      ## exec_microvm <name> <subject> <offset> [cmd...]
+      exec_microvm() {
+        local name="$1" subject="$2" offset="''${3:-0}"
+        shift 3
+        read_container_config
+        local key address
+        { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name") || exit 1
+        local record uid
+        record="$(<"$STATE_DIR/containers/$name/placement")"
+        [[ "$record" =~ \"uid\":([0-9]+) ]] || die "$name has no uid in its record"
+        uid=$((BASH_REMATCH[1] + offset))
+        local gid
+        gid="$(stat -c %g "$STATE_DIR/homes/$name")" || die "$name has no home"
+        local session_home="/home/''${subject:-nixcage}"
+        local tty=""
+        if [ -t 0 ] && [ -t 1 ]; then tty=1; fi
+        local -a env_words=() words=()
+        local word
+        while IFS= read -r word; do
+          env_words+=("$word")
+        done < <(microvm_env_words "$session_home" "")
+        while IFS= read -r word; do
+          words+=("$word")
+        done < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \
+          nixcage_exec_microvm_words "$key" "$address" "$uid" "$gid" "$tty" "''${env_words[@]}" -- "$@")
         exec "''${words[@]}"
       }
 

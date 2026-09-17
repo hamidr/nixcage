@@ -13,9 +13,12 @@ let
   container = import ./container.nix {
     inherit pkgs;
     extraPackages = cfg.containerPackages;
+    ## qemu and virtiofsd for vmspawn to find, ssh for exec to reach the
+    ## guest with; the host's ssh_config carries systemd-ssh-proxy.
     microvmPackages = lib.optionals cfg.microvm.enable [
       pkgs.qemu_kvm
       pkgs.virtiofsd
+      pkgs.openssh
     ];
   };
   ## Refused at evaluation of anything rendered from it: a default nothing
