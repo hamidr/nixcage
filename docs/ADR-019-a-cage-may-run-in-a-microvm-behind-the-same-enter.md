@@ -136,7 +136,10 @@ below 258 or absent; a conflicting substrate; a missing bridge; a
 credential over the size vmspawn's credential path carries (measured in
 the plan, then a constant here); the second `enter` on a running name.
 After boot: no `READY=1` from the session unit within `--boot-timeout`
-(30 s) is `stop`, exit 124, last console lines on stderr; a missing
+(30 s) is `stop`, exit 124, last console lines on stderr, unless the scope
+is already gone when the timeout fires, in which case the VM finished
+before its readiness was seen and what it left is read like any other
+exit; a missing
 `.nixcage-exit` after poweroff is exit 255, "session ended without status";
 a scope alive 5 s after the status was read is stopped.
 
@@ -175,11 +178,13 @@ superseded, since every nspawn cage still lives by it.
 The session lifecycle (boot, ready, running, exited, status written, powered
 off, stopped by the host, with timeouts and a host that may die) crosses a
 VM boundary with more than three states. The formal modeling gate applies:
-a Quint model of it, with the invariants "the host never reports success
-without a status", "no VM outlives its record unseen by `list`" and "stop
-converges", is written before the guest unit and the host-side protocol are
-coded. Substrate resolution is a pure function of four inputs and gets a
-table, not a model.
+`models/microvm-session.qnt` states it, with the invariants "the host never
+reports success without a status", "no VM outlives its record unseen by
+`list`", "stop converges" and "enter never returns with the VM running",
+written before the guest unit and the host-side protocol are coded. One
+thing in decision 7 comes from writing it: a boot timeout that fires after
+the scope is gone reads the status rather than reporting 124. Substrate
+resolution is a pure function of four inputs and gets a table, not a model.
 
 ## Measurement plan
 
@@ -241,6 +246,13 @@ host's vmspawn dropin used `systemd-tmpfiles --inline`, which a 258 guest
 lacks, so the guest must come from the host's pkgs; and the initrd's
 fstab generator logs a duplicate `/sysroot` entry between NixOS's fstab
 and vmspawn's, harmless, to be quieted when the guest is written.
+
+Model 2026-09-17: `quint run models/microvm-session.qnt --invariants
+successHasStatus scopeHasRecord stopConverges doneMeansGone
+crashBeforeSyncIsNoStatus --max-steps=40 --max-samples=100000` finds no
+violation; each of three mutants (success reported without a status, rm
+of a running cage, a stop that leaves the scope) is found within 5000
+traces. A simulation, not a proof: Apalache is not in the dev shell.
 
 To come: `tests/unit/substrate.bats` (resolution table and refusals), `tests/unit/vmspawn_args.bats` (parse to words, binds equal to
 nspawn's, credential shape and size, `--disk`), `tests/command/modules.bats`
