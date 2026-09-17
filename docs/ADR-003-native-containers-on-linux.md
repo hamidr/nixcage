@@ -63,7 +63,10 @@ transport, not a second implementation.
 - Host-versus-agent isolation on Linux weakens from a VM boundary to a plain
   nspawn boundary (shared kernel, container root is host root behind
   namespaces). This is accepted deliberately and reverses ADR-001's rationale
-  for the Linux case; macOS keeps the VM boundary.
+  for the Linux case; macOS keeps the VM boundary. Amended 2026-09-17: this
+  is true of the nspawn substrate only. A cage may run in a microVM of its
+  own under systemd-vmspawn (ADR-019), chosen per cage, and then the
+  boundary is a kernel again; every nspawn cage still lives by this line.
 - Two lifecycle models exist: on Linux the host module and `nixos-rebuild`
   replace `rebuild`/`down`. Divergence is confined to the transport seam and
   the command surface.

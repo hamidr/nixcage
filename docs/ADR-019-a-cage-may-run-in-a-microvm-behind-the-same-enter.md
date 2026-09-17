@@ -1,7 +1,7 @@
 ---
 id: ADR-019
 title: A cage may run in a microVM under systemd-vmspawn, chosen when the cage is defined, behind the same enter
-status: implementing
+status: implemented
 date: 2026-09-17
 status_date: 2026-09-17
 summary: enter --substrate microvm boots a NixOS guest with vmspawn from the same parse; own kernel, no daemon, same verbs
@@ -31,14 +31,15 @@ running cage read a systemd scope (ADR-012), not nspawn; the record
 `systemd-vmspawn` is nspawn's sibling for virtual machines. Checked in the
 pinned nixpkgs (`d6c71932`, systemd 258.3, `withVmspawn ? true`) and the
 v258 manual, and then against 261, which is the first that boots a kernel
-directly without UEFI firmware (`--firmware=none`; 258 wants an OVMF it
-does not find on NixOS), so 261 is the floor: `--directory` (root over virtiofs), `--linux`/`--initrd`
-(direct kernel boot), `--bind`/`--bind-ro` with nspawn's exact syntax,
-`--private-users=SHIFT[:RANGE]` (virtiofsd uid mapping), `--network-tap`,
-`--cpus`, `--ram`, `--slice`, `--property`, `--register` (machined),
-`--vsock`, `--set-credential`, `--console`, `--machine`. Missing against
-nspawn: no command argv (it boots an init), no `--setenv`, binds are
-directories only. Those three gaps are what this document fills.
+directly without UEFI firmware (`--firmware=none`; 258 wants an OVMF it does
+not find on NixOS), so 261 is the floor: `--directory` (root over virtiofs),
+`--linux`/`--initrd` (direct kernel boot), `--bind`/`--bind-ro` with
+nspawn's exact syntax, `--private-users=SHIFT[:RANGE]` (virtiofsd uid
+mapping), `--network-tap`, `--cpus`, `--ram`, `--slice`, `--property`,
+`--register` (machined), `--vsock`, `--set-credential`, `--console`,
+`--machine`. Missing against nspawn: no command argv (it boots an init), no
+`--setenv`, binds are directories only. Those three gaps are what this
+document fills.
 
 ## Decision
 
@@ -92,32 +93,32 @@ ADR-011 refuses it without the daemon.
 **5. What crosses.** Read-only over virtiofs: `/nix/store` whole, and every
 `--bind-ro`. Read-write over virtiofs, as the host uid: the project at its
 path, the home at `/home/<subject>` (`/home/nixcage` for a session with
-none: a microVM session is never guest root, and the guest owns `/root`
-as root's, re-owning a home bound there), every `--bind`. `--private-users` shifts only the root
-share, and virtiofsd for every other share runs as host root and hands
-uids through unchanged, so the session runs argv as the project owner's
-host uid inside the guest (ADR-004 by identity, not by ADR-010's block),
-and the block is what the skeleton's owner is drawn from. A process that
-becomes root in the guest writes the shares as host root, which ADR-010
-prevents on nspawn; stated here as the substrate's edge, to be closed by
-an idmapped mount of the shares in the guest when its kernel allows it.
-Once, as bytes in guest memory: the credential, with `secretEnv` values
-resolved on the host. As channels: the console, and
-vsock ssh for `exec` and for the agent, which arrives as a remote unix
-socket forward (`ssh -N -R /run/ssh-agent.sock:<host socket>`) held for
-the session's life, so what appears in the guest is a socket sshd made;
-`-A` would give it to root's login only, under a path only root reaches.
-A socket reaches the guest, a key never does (ADR-008). The guest's
-session unit waits up to 15 s for the socket before argv runs, since the
-forward can only hold once the guest's sshd answers, and goes on without
-it aloud. Never: the daemon socket, the host's network namespace,
-`/proc`, `/sys`, devices, other cages. Guest root is read-only; `/etc`,
-`/var`, `/tmp` are tmpfs and die with the session, except that `--disk
-<size>` (new flag) gives the cage a persistent image, handed in with
-`--extra-drive` and mounted at `/var/lib`, for docker's images and anything
-virtiofs is too slow for. The image sits in a directory `storage ensure`
-gave the cage's uid under `/var/lib/nixcage` with `<size>` as its quota
-(ADR-009), so it is owned and bounded like every other thing a cage keeps.
+none: a microVM session is never guest root, and the guest owns `/root` as
+root's, re-owning a home bound there), every `--bind`. `--private-users`
+shifts only the root share, and virtiofsd for every other share runs as host
+root and hands uids through unchanged, so the session runs argv as the
+project owner's host uid inside the guest (ADR-004 by identity, not by
+ADR-010's block), and the block is what the skeleton's owner is drawn from.
+A process that becomes root in the guest writes the shares as host root,
+which ADR-010 prevents on nspawn; stated here as the substrate's edge, to be
+closed by an idmapped mount of the shares in the guest when its kernel
+allows it. Once, as bytes in guest memory: the credential, with `secretEnv`
+values resolved on the host. As channels: the console, and vsock ssh for
+`exec` and for the agent, which arrives as a remote unix socket forward
+(`ssh -N -R /run/ssh-agent.sock:<host socket>`) held for the session's life,
+so what appears in the guest is a socket sshd made; `-A` would give it to
+root's login only, under a path only root reaches. A socket reaches the
+guest, a key never does (ADR-008). The guest's session unit waits up to 15 s
+for the socket before argv runs, since the forward can only hold once the
+guest's sshd answers, and goes on without it aloud. Never: the daemon
+socket, the host's network namespace, `/proc`, `/sys`, devices, other cages.
+Guest root is read-only; `/etc`, `/var`, `/tmp` are tmpfs and die with the
+session, except that `--disk <size>` (new flag) gives the cage a persistent
+image, handed in with `--extra-drive` and mounted at `/var/lib`, for
+docker's images and anything virtiofs is too slow for. The image sits in a
+directory `storage ensure` gave the cage's uid under `/var/lib/nixcage` with
+`<size>` as its quota (ADR-009), so it is owned and bounded like every other
+thing a cage keeps.
 
 **6. Verbs.** `status` and `stop` are unchanged: vmspawn registers a scope
 under `machine.slice` and `modules/scope.sh` reads it. `--memory` becomes
@@ -168,9 +169,14 @@ a scope alive 5 s after the status was read is stopped.
 
 ## Consequences
 
-The kernel boundary is bought per cage at the price of a boot (about one to
-three seconds against nspawn's tenth), memory reserved rather than shared,
-and one virtiofsd per share. A caller pays it only for the cages it names.
+The kernel boundary is bought per cage at the price of a boot (seven
+seconds wall for `true` against nspawn's tenth, measured below: a NixOS
+guest spends a second in the kernel, two in the initrd of which most is
+the virtiofs root coming up, one switching root, and two and a half in
+userspace, and the rest is qemu starting and powering off; the three
+seconds this document first claimed would need an init that is not a
+NixOS boot), memory reserved rather than shared, and one virtiofsd per
+share. A caller pays it only for the cages it names.
 
 The store is shared whole and read-only, wider than ADR-014's closure view.
 ADR-014 narrowed the view because a daemon-less nspawn cage could still read
@@ -236,7 +242,11 @@ the hog is killed and the session returns; a file the guest writes in the
 project is owned by the project owner on the host; the credential line
 either passes or is refused before boot naming the bound; every other line
 behaves as written. Times and outputs are recorded in this
-document's Verification section when run.
+document's Verification section when run. The docker line is not
+runnable as written: the session is the project owner's uid, and dockerd
+wants root or a rootless setup the guest does not carry; it stands for
+a tool that needs a kernel of its own, and the disk it uses is measured
+on its own.
 
 ## Verification
 
@@ -278,59 +288,76 @@ of a running cage, a stop that leaves the scope) is found within 5000
 traces. A simulation, not a proof: Apalache is not in the dev shell.
 
 Implementing 2026-09-17: `modules/substrate.sh` holds the resolution and
-`tests/unit/substrate.bats` its table and refusals; `--substrate` is in
-the parse, held to the two names, and refused beside `--shell`.
+`tests/unit/substrate.bats` its table and refusals; `--substrate` is in the
+parse, held to the two names, and refused beside `--shell`.
 `modules/vmspawn-args.sh` assembles the line and the credential from the
-parse, `tests/unit/vmspawn_args.bats` reads both back word by word;
-`--disk` is in the parse, a size, refused on nspawn. Measured on the way:
-48000 bytes of credential reach the guest beside vmspawn's own, 49000 do
-not, and none of the others do either. `modules/guest.nix` is the guest,
-built by `nixcage.microvm.enable` from the host's pkgs and named in the
-container config with `nixcage.substrate.default`; `modules/guest-session.sh`
-is its unit, and `tests/unit/guest_session.bats` reads the host's
-credential back through it. `tests/command/modules.bats` evaluates the
-guest. Booted by hand with the assembler's line on this host: argv ran
-as the host uid, its file in the home is that uid's, its status 7 came
-back through `.nixcage-exit`, the guest powered off, 7.1 s in all; the
-console carried argv's output and nothing else once the kernel was told
-`loglevel=0` and pinned there by sysctl, systemd told `show_status=0`,
-`log_target=null` (a shutdown logging to kmsg raises the console level
-back to warnings and prints the power-down line) and `TERM=dumb` (its
-init resets the console and marks the boot with OSC sequences
-otherwise). `enter` runs the microvm branch: `modules/microvm-session.sh`
-holds the refusals, the watch and the outcome, `tests/unit/microvm_session.bats`
-drives them on fixtures and a stub `machinectl`; the record carries the
-substrate and answers for it (`scope.bats`). On this host, through
-`nixcage-container enter --substrate microvm`: argv ran as the owner uid
-in `/workspace` with `HOME=/home/nixcage`, wrote a file the owner owns,
-saw no daemon socket, and its `exit 3` came back; `true` is 7.9 s wall
-against the claim of three, to be trimmed; a second enter with
-`--substrate nspawn` was refused naming the record, and one with no flag
-ran on microvm by it. The verbs over the running cage, live on this
-host: `status` reads `machine-mvtest.scope` with qemu as leader once
-`scope.sh` knows vmspawn as a spawner beside nspawn, `list --json` shows
-the substrate with the scope, `netns` answers `none`, `exec` reaches the
-guest over vsock ssh as the session's uid in `/workspace` with the
-session's environment and secrets and returns the command's status, and
-`stop` ends the VM, after which enter reports "session ended without
-status", 255. The `nixcage` CLI hands `--substrate` through. Agent forwarding, live: a throwaway agent's key listed by `ssh-add -l`
-inside the session through `/run/ssh-agent.sock`, and a commit made as
-the session's uid, which the guest names from the login name (`nixcage`
-without one) in its own passwd, since git refuses a committer that does
-not exist. `--disk 1G`, live: the image is made sparse under
-`disks/<name>` by `storage ensure` with the size as quota, the guest
-makes ext4 on it once and mounts it at `/var/lib` for the session's uid,
-a file written there is read by the next session, and the image is
-attached to every later session of the cage whether asked for or not,
-since it is the cage's as the home is; `rm` removes it with the rest.
-`--network nctest0:10.99.0.2/24 --dns 10.99.0.1` on a throwaway bridge,
-live: eth0 carries the address, `resolv.conf` the nameserver, the
-bridge's address answers a ping, 1.1.1.1 does not, a ping sent as
-10.99.0.9 is dropped by the pin, the port is isolated, and the pin and
-the tap are gone after the session. `exec` gives what the last enter was
+parse, `tests/unit/vmspawn_args.bats` reads both back word by word; `--disk`
+is in the parse, a size, refused on nspawn. Measured on the way: 48000 bytes
+of credential reach the guest beside vmspawn's own, 49000 do not, and none
+of the others do either. `modules/guest.nix` is the guest, built by
+`nixcage.microvm.enable` from the host's pkgs and named in the container
+config with `nixcage.substrate.default`; `modules/guest-session.sh` is its
+unit, and `tests/unit/guest_session.bats` reads the host's credential back
+through it. `tests/command/modules.bats` evaluates the guest. Booted by hand
+with the assembler's line on this host: argv ran as the host uid, its file
+in the home is that uid's, its status 7 came back through `.nixcage-exit`,
+the guest powered off, 7.1 s in all; the console carried argv's output and
+nothing else once the kernel was told `loglevel=0` and pinned there by
+sysctl, systemd told `show_status=0`, `log_target=null` (a shutdown logging
+to kmsg raises the console level back to warnings and prints the power-down
+line) and `TERM=dumb` (its init resets the console and marks the boot with
+OSC sequences otherwise). `enter` runs the microvm branch:
+`modules/microvm-session.sh` holds the refusals, the watch and the outcome,
+`tests/unit/microvm_session.bats` drives them on fixtures and a stub
+`machinectl`; the record carries the substrate and answers for it
+(`scope.bats`). On this host, through `nixcage-container enter --substrate
+microvm`: argv ran as the owner uid in `/workspace` with
+`HOME=/home/nixcage`, wrote a file the owner owns, saw no daemon socket, and
+its `exit 3` came back; `true` is 7.9 s wall against the claim of three, to
+be trimmed; a second enter with `--substrate nspawn` was refused naming the
+record, and one with no flag ran on microvm by it. The verbs over the
+running cage, live on this host: `status` reads `machine-mvtest.scope` with
+qemu as leader once `scope.sh` knows vmspawn as a spawner beside nspawn,
+`list --json` shows the substrate with the scope, `netns` answers `none`,
+`exec` reaches the guest over vsock ssh as the session's uid in `/workspace`
+with the session's environment and secrets and returns the command's status,
+and `stop` ends the VM, after which enter reports "session ended without
+status", 255. The `nixcage` CLI hands `--substrate` through. Agent
+forwarding, live: a throwaway agent's key listed by `ssh-add -l` inside the
+session through `/run/ssh-agent.sock`, and a commit made as the session's
+uid, which the guest names from the login name (`nixcage` without one) in
+its own passwd, since git refuses a committer that does not exist. `--disk
+1G`, live: the image is made sparse under `disks/<name>` by `storage ensure`
+with the size as quota, the guest makes ext4 on it once and mounts it at
+`/var/lib` for the session's uid, a file written there is read by the next
+session, and the image is attached to every later session of the cage
+whether asked for or not, since it is the cage's as the home is; `rm`
+removes it with the rest. `--network nctest0:10.99.0.2/24 --dns 10.99.0.1`
+on a throwaway bridge, live: eth0 carries the address, `resolv.conf` the
+nameserver, the bridge's address answers a ping, 1.1.1.1 does not, a ping
+sent as 10.99.0.9 is dropped by the pin, the port is isolated, and the pin
+and the tap are gone after the session. `exec` gives what the last enter was
 asked by `--setenv`, kept in `session-env` beside the record, mode 0600,
-seen live. Open: the measurement plan.
-`nixcage.cages.<path>.substrate` is rendered as one line per cage into
-the container config and read by the project's exact path; live, a
-declaration of nspawn ran the cage on nspawn over a record of microvm,
-and one of microvm refused `--substrate nspawn` naming the declaration.
+seen live. `nixcage.cages.<path>.substrate` is rendered as one line per cage
+into the container config and read by the project's exact path; live, a
+declaration of nspawn ran the cage on nspawn over a record of microvm, and
+one of microvm refused `--substrate nspawn` naming the declaration.
+
+Measured 2026-09-17, on this host through `nixcage-container enter`, the
+guest trimmed of the firewall, time sync, oomd, resolvconf, the console
+font, the journal catalog, a getty and the initrd's default modules:
+`true` 7.0 s wall (from 7.9 untrimmed; `systemd-analyze` in the guest:
+0.7 s kernel, 2.2 s initrd, 2.5 s userspace, with the virtiofs root
+mounted 0.75 s after the initrd's basic target and the switch to the
+real root 1.2 s), so the claim of three seconds is not met and the
+Consequences say what it would take; `false` exits 1; under `--memory
+512M` a shell holding 400 MB is killed by the guest's kernel and the
+session exits 137, once the unit is told `OOMPolicy=continue`, since
+systemd's default stopped a unit the OOM killer touched and the guest
+ended without a status; a file the session touches in `/workspace` is
+uid 1000 on the host, the owner's; `--setenv BIG=<40000 bytes>` is
+refused before boot with "session credential is 40899 bytes; the SMBIOS
+path carries 32768", and 200000 bytes never reach nixcage, since sudo
+refuses an argument that long first; `netns` of a running microvm cage
+is `none`; the placement lines are above. Implemented 2026-09-17.
+
