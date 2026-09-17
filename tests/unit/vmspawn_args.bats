@@ -59,7 +59,7 @@ teardown() {
 		--bind=/srv/myproj:/workspace --bind=/var/lib/nixcage/homes/myproj-1a2b3c4d:/root
 	assert_success
 	assert_line --index 0 "env"
-	assert_line --index 1 "SYSTEMD_VMSPAWN_QEMU_EXTRA=-append 'root=root rootfstype=virtiofs rw init=/nix/store/abc-nixos-system-guest/init console=hvc0'"
+	assert_line --index 1 "SYSTEMD_VMSPAWN_QEMU_EXTRA=-append 'root=root rootfstype=virtiofs rw init=/nix/store/abc-nixos-system-guest/init console=hvc0 loglevel=0 systemd.show_status=0 systemd.log_target=null TERM=dumb'"
 	assert_line --index 2 "systemd-vmspawn"
 	assert_line --index 3 "--quiet"
 	assert_line --index 4 "--register=yes"

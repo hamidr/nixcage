@@ -89,7 +89,9 @@ ADR-011 refuses it without the daemon.
 
 **5. What crosses.** Read-only over virtiofs: `/nix/store` whole, and every
 `--bind-ro`. Read-write over virtiofs, as the host uid: the project at its
-path, the home at `/root`, every `--bind`. `--private-users` shifts only the root
+path, the home at `/home/<subject>` (`/home/nixcage` for a session with
+none: a microVM session is never guest root, and the guest owns `/root`
+as root's, re-owning a home bound there), every `--bind`. `--private-users` shifts only the root
 share, and virtiofsd for every other share runs as host root and hands
 uids through unchanged, so the session runs argv as the project owner's
 host uid inside the guest (ADR-004 by identity, not by ADR-010's block),
@@ -263,7 +265,20 @@ the parse, held to the two names, and refused beside `--shell`.
 parse, `tests/unit/vmspawn_args.bats` reads both back word by word;
 `--disk` is in the parse, a size, refused on nspawn. Measured on the way:
 48000 bytes of credential reach the guest beside vmspawn's own, 49000 do
-not, and none of the others do either. To come: `tests/command/modules.bats` (guest
+not, and none of the others do either. `modules/guest.nix` is the guest,
+built by `nixcage.microvm.enable` from the host's pkgs and named in the
+container config with `nixcage.substrate.default`; `modules/guest-session.sh`
+is its unit, and `tests/unit/guest_session.bats` reads the host's
+credential back through it. `tests/command/modules.bats` evaluates the
+guest. Booted by hand with the assembler's line on this host: argv ran
+as the host uid, its file in the home is that uid's, its status 7 came
+back through `.nixcage-exit`, the guest powered off, 7.1 s in all; the
+console carried argv's output and nothing else once the kernel was told
+`loglevel=0` and pinned there by sysctl, systemd told `show_status=0`,
+`log_target=null` (a shutdown logging to kmsg raises the console level
+back to warnings and prints the power-down line) and `TERM=dumb` (its
+init resets the console and marks the boot with OSC sequences
+otherwise). To come: `tests/command/modules.bats` (guest
 evaluates, session unit present, systemd assertion), `veth.bats` (tap on
 a bridge), `scope.bats` and `exec_cage.bats` (microvm record: `netns`
 none, `exec` words), an exit-status fixture suite, the guest built on a
