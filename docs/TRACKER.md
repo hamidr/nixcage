@@ -4,11 +4,17 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-09-16
+**Generated:** 2026-09-17
 
-**Next PRD number:** 001
+**Next PRD number:** 002
 
 **Next ADR number:** 019
+
+## PRDs
+
+| # | Title | Status | Phases | Depends On | Summary | Flags |
+| --- | --- | --- | --- | --- | --- | --- |
+| [PRD-001](PRD-001-a-cage-per-project.md) | A cage per project, entered with one command, on the machine the developer already has | implemented | 4/4 | -- | any flake directory enters an isolated container in one command, on Linux natively and on macOS in one shared VM |  |
 
 ## ADRs
 
