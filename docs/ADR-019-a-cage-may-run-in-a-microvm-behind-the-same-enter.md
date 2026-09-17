@@ -137,9 +137,16 @@ come from the record, and
 `secretEnv` values are resolved from `/run/secrets` at exec time by the
 same path enter uses, since the record holds names and there is no leader
 on the host whose environment could be read. A
-placement (`--network`) attaches vmspawn's tap to the bridge with ADR-015's
-pin and isolation, in `modules/veth.sh` beside the veth case: a second port
-kind on a bridge, extended, not extracted.
+placement (`--network`) is a tap nixcage makes under its own name
+(ADR-013), on the bridge, pinned and isolated (ADR-015) before the guest
+boots, and handed to qemu by name through the same extra words the
+kernel line goes by; in `modules/veth.sh` beside the veth case, a second
+port kind on a bridge, extended, not extracted. vmspawn's own tap would
+carry its name, shortened by a hash of its own past fifteen characters,
+and on a host running networkd the masquerade systemd ships a network
+file for. `--dns` reaches the guest in the credential and is written as
+the nspawn rootfs gets it (ADR-016). `--network ns:` is refused: a VM
+has no namespace to join.
 
 **7. Refusals before boot.** No `/dev/kvm`; `systemd-vmspawn --version`
 below 261 or absent; a conflicting substrate; a missing bridge; a
@@ -314,7 +321,11 @@ makes ext4 on it once and mounts it at `/var/lib` for the session's uid,
 a file written there is read by the next session, and the image is
 attached to every later session of the cage whether asked for or not,
 since it is the cage's as the home is; `rm` removes it with the rest.
-Open: `--network` on a microvm cage is refused as not implemented; `exec` does not carry what enter was asked by
+`--network nctest0:10.99.0.2/24 --dns 10.99.0.1` on a throwaway bridge,
+live: eth0 carries the address, `resolv.conf` the nameserver, the
+bridge's address answers a ping, 1.1.1.1 does not, a ping sent as
+10.99.0.9 is dropped by the pin, the port is isolated, and the pin and
+the tap are gone after the session. Open: `exec` does not carry what enter was asked by
 `--setenv`, since the record holds no values; the measurement plan.
 `nixcage.cages.<path>.substrate` is rendered as one line per cage into
 the container config and read by the project's exact path; live, a

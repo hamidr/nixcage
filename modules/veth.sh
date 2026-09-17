@@ -108,3 +108,39 @@ nixcage_veth_nspawn_arg() {
 	cage="$(nixcage_veth_cage_name "$1")" || return 1
 	printf -- '--network-interface=%s:host0\n' "$cage"
 }
+
+## A microVM's port (ADR-019): a tap under the same host name, on the
+## bridge, pinned and isolated the same, and up in the same order. vmspawn
+## would name its own tap after the machine and shorten it by a hash of
+## its own, and a host running networkd would give a vt-* tap a masquerade
+## it ships a network file for; a tap nixcage makes has nixcage's name and
+## nixcage's rules before the guest boots, and qemu is handed it by name.
+nixcage_tap_make() {
+	local name="$1" bridge="$2" addr="${3:-}" host
+	[ -n "$addr" ] || return 1
+	addr="${addr%%/*}"
+	host="$(nixcage_veth_host_name "$name")" || return 1
+	nixcage_veth_table_ensure || return 1
+	if ip link show "$host" >/dev/null 2>&1; then
+		ip link del "$host" || return 1
+	fi
+	ip tuntap add dev "$host" mode tap &&
+		ip link set "$host" master "$bridge" &&
+		nixcage_veth_unpin "$host" &&
+		nft add element bridge nixcage placements "{ \"$host\" . $addr }" &&
+		bridge link set dev "$host" isolated on &&
+		ip link set "$host" up
+}
+
+nixcage_tap_delete() {
+	nixcage_veth_delete "$1"
+}
+
+## What qemu is handed through vmspawn's extra words: the tap by name, no
+## script to run on it, one virtio interface the guest sees as eth0.
+nixcage_tap_qemu_words() {
+	local host
+	host="$(nixcage_veth_host_name "$1")" || return 1
+	printf '%s\n' -netdev "tap,id=nixcage0,ifname=$host,script=no,downscript=no" \
+		-device virtio-net-pci,netdev=nixcage0
+}

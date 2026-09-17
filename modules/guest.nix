@@ -49,6 +49,8 @@ in
   networking.useDHCP = false;
   ## The one interface a placed guest has is the tap, named eth0 so the
   ## session unit can give it the address without asking which it is.
+  ## This renders net.ifnames=0 into kernel parameters the direct boot
+  ## never reads; the assembler repeats it on the command line it writes.
   networking.usePredictableInterfaceNames = false;
   system.stateVersion = lib.mkDefault "25.11";
   documentation.enable = false;

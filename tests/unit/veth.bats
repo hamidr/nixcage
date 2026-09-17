@@ -191,3 +191,50 @@ EOF
 	assert_failure
 	[ ! -e "$CALLS" ]
 }
+
+# A microVM's port (ADR-019): a tap nixcage makes under the same host name,
+# on the bridge, pinned and isolated the same, and handed to qemu by name
+# through vmspawn's extra words, so the port exists before the guest boots.
+
+@test "making the tap adds it under the host name, puts it on the bridge, pins, isolates and brings it up" {
+	run nixcage_tap_make builder fabriek-acme 10.77.0.10/24
+	assert_success
+	local host
+	host="$(nixcage_veth_host_name builder)"
+	run ip_calls
+	assert_line --index 0 "ip link show $host"
+	assert_line --index 1 "ip tuntap add dev $host mode tap"
+	assert_line --index 2 "ip link set $host master fabriek-acme"
+	assert_line --index 3 "ip link set $host up"
+	run grep -n "nft add element\|bridge link set\|ip link set $host up" "$CALLS"
+	assert_line --index 0 --partial "nft add element bridge nixcage placements { \"$host\" . 10.77.0.10 }"
+	assert_line --index 1 --partial "bridge link set dev $host isolated on"
+	assert_line --index 2 --partial "ip link set $host up"
+}
+
+@test "a tap make without an address is refused as the pair's is" {
+	run nixcage_tap_make builder fabriek-acme ""
+	assert_failure
+}
+
+@test "deleting the tap releases its pin before the link goes" {
+	local host
+	host="$(nixcage_veth_host_name builder)"
+	stub_nft_listing "$host" 10.77.0.10
+	run nixcage_tap_delete builder
+	assert_success
+	run grep -n "nft delete element\|ip link del" "$CALLS"
+	assert_line --index 0 --partial "nft delete element bridge nixcage placements { \"$host\" . 10.77.0.10 }"
+	assert_line --index 1 --partial "ip link del $host"
+}
+
+@test "qemu is handed the tap by name, with no script to run on it, as one virtio interface" {
+	run nixcage_tap_qemu_words builder
+	assert_success
+	local host
+	host="$(nixcage_veth_host_name builder)"
+	assert_line --index 0 "-netdev"
+	assert_line --index 1 "tap,id=nixcage0,ifname=$host,script=no,downscript=no"
+	assert_line --index 2 "-device"
+	assert_line --index 3 "virtio-net-pci,netdev=nixcage0"
+}

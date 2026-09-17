@@ -352,16 +352,31 @@ let
           fi
         fi
 
+        ## A placement (ADR-013, ADR-015): the port is a tap nixcage makes
+        ## under its own name, on the bridge, pinned and isolated before
+        ## the guest boots, and handed to qemu by name; the guest gives
+        ## eth0 the address from the credential. Deleted with the skeleton,
+        ## whichever way the session ends.
+        local qemu_extra=""
+        if [ -n "$network_bridge" ]; then
+          nixcage_tap_make "$name" "$network_bridge" "$network_addr" ||
+            die "could not make the tap for $name on $network_bridge"
+          # shellcheck disable=SC2064
+          trap "rm -rf '$skeleton' '$credential'; nixcage_tap_delete '$name' 2>/dev/null" EXIT
+          qemu_extra="$(nixcage_tap_qemu_words "$name" | paste -sd' ')"
+        fi
+
         local cred
+        # shellcheck disable=SC2153
         cred="$(nixcage_vmspawn_credential "$session_uid" "$session_gid" "$session_home" /workspace \
-          "$tty" "$network_addr" "$agent" "''${env_words[@]}" -- "$PROFILE/bin/bash" -c "$shell_cmd" "$@")"
+          "$tty" "$network_addr" "$agent" "$NIXCAGE_ENTER_DNS" "''${env_words[@]}" -- "$PROFILE/bin/bash" -c "$shell_cmd" "$@")"
         nixcage_vmspawn_credential_ok "$cred" || exit 1
 
         local -a vmspawn_words=()
         while IFS= read -r word; do
           vmspawn_words+=("$word")
         done < <(nixcage_vmspawn_args "$name" "$skeleton" "$MICROVM_GUEST" "$credential" \
-          "$owner_uid" "$block" "$tty" "$NIXCAGE_ENTER_MEMORY" "$NIXCAGE_ENTER_CPUS" "$disk" \
+          "$owner_uid" "$block" "$tty" "$NIXCAGE_ENTER_MEMORY" "$NIXCAGE_ENTER_CPUS" "$disk" "$qemu_extra" \
           "''${bind_words[@]}")
         if [ -n "$NIXCAGE_ENTER_PRINT_ARGV" ]; then
           printf '%s\n' "''${vmspawn_words[@]}"
@@ -379,7 +394,7 @@ let
         local stopped="$cdir/session-$$.stopped"
         rm -f "$ready" "$exit_file" "$stopped"
         # shellcheck disable=SC2064
-        trap "rm -rf '$skeleton' '$credential' '$stopped'" EXIT
+        trap "rm -rf '$skeleton' '$credential' '$stopped'; [ -z '$network_bridge' ] || nixcage_tap_delete '$name' 2>/dev/null" EXIT
 
         nixcage_microvm_watch "$ready" "$name" "$NIXCAGE_MICROVM_BOOT_TIMEOUT" "$stopped" &
         local watch=$! forward=""
@@ -450,7 +465,6 @@ let
             "$(vmspawn_version)" || exit 1
           [ -z "$shell_name" ] || die "--shell is not available on a microvm cage: it has no nix daemon"
           [ -z "$network_ns" ] || die "--network ns: is not available on a microvm cage: a VM has no namespace to join"
-          [ -z "$network_bridge" ] || die "--network on a microvm cage is not implemented yet"
           no_nix_daemon=1
         elif [ -n "$NIXCAGE_ENTER_DISK" ]; then
           die "--disk needs a microvm cage"

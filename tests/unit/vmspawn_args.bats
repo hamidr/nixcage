@@ -17,27 +17,29 @@ teardown() {
 	teardown_temp_dir
 }
 
-# nixcage_vmspawn_credential <uid> <gid> <home> <cwd> <tty> <address> <agent> [--setenv=K=V...] -- <argv...>
+# nixcage_vmspawn_credential <uid> <gid> <home> <cwd> <tty> <address> <agent> <dns> [--setenv=K=V...] -- <argv...>
 
 @test "the credential carries who runs what where, as one JSON object" {
-	run nixcage_vmspawn_credential 700000 700000 /root /workspace 1 "" "" \
+	run nixcage_vmspawn_credential 700000 700000 /root /workspace 1 "" "" "" \
 		--setenv=HOME=/root --setenv=PATH=/nix/store/x/bin -- bash -c 'echo "hi"'
 	assert_success
 	assert_output '{"uid":700000,"gid":700000,"home":"/root","cwd":"/workspace","tty":true,"agent":false,"env":{"HOME":"/root","PATH":"/nix/store/x/bin"},"argv":["bash","-c","echo \"hi\""]}'
 }
 
 @test "an address is in the credential only when the session was placed" {
-	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 10.0.0.2/24 "" -- true
-	assert_output '{"uid":1000,"gid":100,"home":"/root","cwd":"/workspace","tty":false,"address":"10.0.0.2/24","agent":false,"env":{},"argv":["true"]}'
+	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 10.0.0.2/24 "" none -- true
+	assert_output '{"uid":1000,"gid":100,"home":"/root","cwd":"/workspace","tty":false,"address":"10.0.0.2/24","agent":false,"dns":"none","env":{},"argv":["true"]}'
+	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 10.0.0.2/24 "" 10.0.0.1 -- true
+	assert_output --partial '"dns":"10.0.0.1"'
 }
 
 @test "a session with an agent forwarded says so, and the guest waits for the socket" {
-	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" 1 -- true
+	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" 1 "" -- true
 	assert_output '{"uid":1000,"gid":100,"home":"/root","cwd":"/workspace","tty":false,"agent":true,"env":{},"argv":["true"]}'
 }
 
 @test "a value with a newline or a quote survives the credential" {
-	run nixcage_vmspawn_credential 1 1 /root /w 0 "" "" --setenv=MSG=$'a\nb"c' -- true
+	run nixcage_vmspawn_credential 1 1 /root /w 0 "" "" "" --setenv=MSG=$'a\nb"c' -- true
 	assert_output '{"uid":1,"gid":1,"home":"/root","cwd":"/w","tty":false,"agent":false,"env":{"MSG":"a\nb\"c"},"argv":["true"]}'
 }
 
@@ -55,16 +57,16 @@ teardown() {
 	assert_success
 }
 
-# nixcage_vmspawn_args <name> <skeleton> <toplevel> <credential> <uid> <block> <tty> <memory> <cpus> <disk> [bind words...]
+# nixcage_vmspawn_args <name> <skeleton> <toplevel> <credential> <uid> <block> <tty> <memory> <cpus> <disk> <qemu extra> [bind words...]
 
 @test "the line boots the host's guest over the skeleton with the session credential" {
 	run nixcage_vmspawn_args myproj-1a2b3c4d /var/lib/nixcage/containers/myproj-1a2b3c4d/session-42 \
 		/nix/store/abc-nixos-system-guest /var/lib/nixcage/containers/myproj-1a2b3c4d/session-42.cred \
-		700000 65536 1 "" "" "" \
+		700000 65536 1 "" "" "" "" \
 		--bind=/srv/myproj:/workspace --bind=/var/lib/nixcage/homes/myproj-1a2b3c4d:/root
 	assert_success
 	assert_line --index 0 "env"
-	assert_line --index 1 "SYSTEMD_VMSPAWN_QEMU_EXTRA=-append 'root=root rootfstype=virtiofs rw init=/nix/store/abc-nixos-system-guest/init console=hvc0 loglevel=0 systemd.show_status=0 systemd.log_target=null TERM=dumb'"
+	assert_line --index 1 "SYSTEMD_VMSPAWN_QEMU_EXTRA=-append 'root=root rootfstype=virtiofs rw init=/nix/store/abc-nixos-system-guest/init console=hvc0 net.ifnames=0 loglevel=0 systemd.show_status=0 systemd.log_target=null TERM=dumb'"
 	assert_line --index 2 "systemd-vmspawn"
 	assert_line --index 3 "--quiet"
 	assert_line --index 4 "--register=yes"
@@ -83,13 +85,13 @@ teardown() {
 }
 
 @test "without a tty the console is read-only, so the output is captured and nothing is typed" {
-	run nixcage_vmspawn_args n /s /t /c 1 1 0 "" "" ""
+	run nixcage_vmspawn_args n /s /t /c 1 1 0 "" "" "" ""
 	refute_line "--console=interactive"
 	assert_line "--console=read-only"
 }
 
 @test "bounds are the guest's own, not properties of the scope" {
-	run nixcage_vmspawn_args n /s /t /c 1 1 0 4G 2 ""
+	run nixcage_vmspawn_args n /s /t /c 1 1 0 4G 2 "" ""
 	assert_line "--ram=4G"
 	assert_line "--cpus=2"
 	refute_line --partial "MemoryMax"
@@ -97,14 +99,19 @@ teardown() {
 }
 
 @test "a disk is handed in as an extra drive" {
-	run nixcage_vmspawn_args n /s /t /c 1 1 0 "" "" /var/lib/nixcage/disks/n/disk.img
+	run nixcage_vmspawn_args n /s /t /c 1 1 0 "" "" /var/lib/nixcage/disks/n/disk.img ""
 	assert_line "--extra-drive=/var/lib/nixcage/disks/n/disk.img"
 }
 
 @test "the binds are nspawn's words unchanged" {
 	# bind.sh produces them and the two spawns read the same syntax; a
 	# file cannot cross virtiofs, and that is checked where the file is.
-	run nixcage_vmspawn_args n /s /t /c 1 1 0 "" "" "" --bind-ro=/a:/b --bind=/c
+	run nixcage_vmspawn_args n /s /t /c 1 1 0 "" "" "" "" --bind-ro=/a:/b --bind=/c
 	assert_line "--bind-ro=/a:/b"
 	assert_line "--bind=/c"
+}
+
+@test "a placed session's tap reaches qemu through the same extra words as the kernel line" {
+	run nixcage_vmspawn_args n /s /t /c 1 1 0 "" "" "" "-netdev tap,id=nixcage0,ifname=nc-0123456789ab,script=no,downscript=no -device virtio-net-pci,netdev=nixcage0"
+	assert_line --index 1 "SYSTEMD_VMSPAWN_QEMU_EXTRA=-append 'root=root rootfstype=virtiofs rw init=/t/init console=hvc0 net.ifnames=0 loglevel=0 systemd.show_status=0 systemd.log_target=null TERM=dumb' -netdev tap,id=nixcage0,ifname=nc-0123456789ab,script=no,downscript=no -device virtio-net-pci,netdev=nixcage0"
 }

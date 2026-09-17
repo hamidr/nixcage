@@ -19,7 +19,7 @@ teardown() {
 }
 
 @test "what the host put in the credential is what the guest reads out" {
-	nixcage_vmspawn_credential 700001 700001 /home/agent /workspace 1 10.77.0.2/24 1 \
+	nixcage_vmspawn_credential 700001 700001 /home/agent /workspace 1 10.77.0.2/24 1 10.77.0.1 \
 		--setenv=HOME=/home/agent --setenv=MSG=$'two\nlines' -- bash -c 'echo "a b"' >"$TEST_TEMP_DIR/cred"
 	nixcage_session_read "$TEST_TEMP_DIR/cred"
 	[ "$SESSION_UID" = 700001 ]
@@ -29,6 +29,7 @@ teardown() {
 	[ "$SESSION_TTY" = 1 ]
 	[ "$SESSION_ADDRESS" = 10.77.0.2/24 ]
 	[ "$SESSION_AGENT" = 1 ]
+	[ "$SESSION_DNS" = 10.77.0.1 ]
 	[ "${#SESSION_ENV[@]}" -eq 2 ]
 	[ "${SESSION_ENV[0]}" = HOME=/home/agent ]
 	[ "${SESSION_ENV[1]}" = $'MSG=two\nlines' ]
@@ -39,11 +40,12 @@ teardown() {
 }
 
 @test "a session without a tty or a placement reads as such" {
-	nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" "" -- true >"$TEST_TEMP_DIR/cred"
+	nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" "" "" -- true >"$TEST_TEMP_DIR/cred"
 	nixcage_session_read "$TEST_TEMP_DIR/cred"
 	[ -z "$SESSION_TTY" ]
 	[ -z "$SESSION_ADDRESS" ]
 	[ -z "$SESSION_AGENT" ]
+	[ -z "$SESSION_DNS" ]
 	[ "${#SESSION_ENV[@]}" -eq 0 ]
 	[ "${SESSION_ARGV[*]}" = true ]
 }
@@ -122,4 +124,24 @@ teardown() {
 	assert_success
 	assert_output ""
 	[ ! -d "$TEST_TEMP_DIR/var-lib" ]
+}
+
+# nixcage_session_resolv_conf <file>: what a placed guest resolves with
+# (ADR-016), as the nspawn rootfs gets it: nothing told means the guest's
+# own file stands; none means empty; an address means one nameserver line.
+
+@test "a placed session told none resolves nothing, and one told an address resolves there" {
+	SESSION_DNS=none
+	nixcage_session_resolv_conf "$TEST_TEMP_DIR/resolv.conf"
+	[ -f "$TEST_TEMP_DIR/resolv.conf" ] && [ ! -s "$TEST_TEMP_DIR/resolv.conf" ]
+	SESSION_DNS=10.77.0.1
+	nixcage_session_resolv_conf "$TEST_TEMP_DIR/resolv.conf"
+	[ "$(cat "$TEST_TEMP_DIR/resolv.conf")" = "nameserver 10.77.0.1" ]
+}
+
+@test "a session told nothing about resolving leaves the guest's file as it is" {
+	SESSION_DNS=""
+	echo "nameserver 1.1.1.1" >"$TEST_TEMP_DIR/resolv.conf"
+	nixcage_session_resolv_conf "$TEST_TEMP_DIR/resolv.conf"
+	[ "$(cat "$TEST_TEMP_DIR/resolv.conf")" = "nameserver 1.1.1.1" ]
 }
