@@ -1,3 +1,5 @@
+
+
 # nixcage
 
 Run an AI coding agent on your own machine without handing it your machine.
@@ -123,7 +125,7 @@ nixcage = {
 };
 ```
 
-`nixos-rebuild switch` applies it; the CLI is just `enter`, `rm`, and
+`nixos-rebuild switch` applies it; the CLI is `enter`, `exec`, `rm`, and
 `status` (plus `version`; `rebuild`/`down` are macOS-only -- the host owns the lifecycle).
 Containers use the host store read-only plus the host nix-daemon.
 
