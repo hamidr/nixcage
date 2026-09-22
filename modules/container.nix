@@ -284,11 +284,11 @@ let
       }
 
       enter_microvm() {
-        local skeleton="$cdir/session-$$" credential="$cdir/session-$$.cred"
+        local skeleton="$cdir/session-$$" credential="$cdir/session-$$.cred" stage="$cdir/session-$$.bind"
         mkdir -p "$skeleton"
         chown "$owner_uid:$owner_gid" "$skeleton"
         # shellcheck disable=SC2064
-        trap "rm -rf '$skeleton' '$credential'" EXIT
+        trap "rm -rf '$skeleton' '$credential' '$stage'" EXIT
         trap 'exit 143' TERM HUP INT
 
         ## bash -c consumes its first argument as $0, so a placeholder
@@ -320,13 +320,25 @@ let
         local tty=""
         if [ -t 0 ] && [ -t 1 ]; then tty=1; fi
 
-        ## A socket or a file cannot cross virtiofs; a bind that is not a
-        ## directory is refused here rather than mounted as nothing.
+        ## Only a directory crosses virtiofs. A regular file is staged as a
+        ## copy, owner and mode kept, in a directory of its own beside the
+        ## skeleton (never inside it: the skeleton is the guest's root), that
+        ## directory is shared, and the guest binds the file onto its target
+        ## from the credential (ADR-020). A socket or anything else is
+        ## refused here rather than mounted as nothing.
         local -a bind_words=("--bind=$project:/workspace" "--bind=$home:$session_home")
-        local bind src
-        for bind in ''${git_binds[@]+"''${git_binds[@]}"} ''${asked_binds[@]+"''${asked_binds[@]}"}; do
+        local -a all_binds=(''${git_binds[@]+"''${git_binds[@]}"} ''${asked_binds[@]+"''${asked_binds[@]}"})
+        local bind src n dst mode
+        while IFS=$'\t' read -r n src dst mode; do
+          mkdir -p "$stage/$n"
+          cp -p "$src" "$stage/$n/file" || die "could not stage $src for the microvm"
+          bind_words+=("--bind-ro=$stage/$n:/run/nixcage/bind/$n")
+          env_words+=("--file=$n:$mode:$dst")
+        done < <(nixcage_vmspawn_file_binds ''${all_binds[@]+"''${all_binds[@]}"})
+        for bind in ''${all_binds[@]+"''${all_binds[@]}"}; do
           src="''${bind#--bind=}"; src="''${src#--bind-ro=}"; src="''${src%%:*}"
-          [ -d "$src" ] || die "not a directory, and only a directory crosses into a microvm: $src"
+          [ ! -f "$src" ] || continue
+          [ -d "$src" ] || die "not a directory or a file, and nothing else crosses into a microvm: $src"
           bind_words+=("$bind")
         done
 
@@ -362,7 +374,7 @@ let
           nixcage_tap_make "$name" "$network_bridge" "$network_addr" ||
             die "could not make the tap for $name on $network_bridge"
           # shellcheck disable=SC2064
-          trap "rm -rf '$skeleton' '$credential'; nixcage_tap_delete '$name' 2>/dev/null" EXIT
+          trap "rm -rf '$skeleton' '$credential' '$stage'; nixcage_tap_delete '$name' 2>/dev/null" EXIT
           qemu_extra="$(nixcage_tap_qemu_words "$name" | paste -sd' ')"
         fi
 
@@ -397,7 +409,7 @@ let
         local stopped="$cdir/session-$$.stopped"
         rm -f "$ready" "$exit_file" "$stopped"
         # shellcheck disable=SC2064
-        trap "rm -rf '$skeleton' '$credential' '$stopped'; [ -z '$network_bridge' ] || nixcage_tap_delete '$name' 2>/dev/null" EXIT
+        trap "rm -rf '$skeleton' '$credential' '$stage' '$stopped'; [ -z '$network_bridge' ] || nixcage_tap_delete '$name' 2>/dev/null" EXIT
 
         nixcage_microvm_watch "$ready" "$name" "$NIXCAGE_MICROVM_BOOT_TIMEOUT" "$stopped" &
         local watch=$! forward=""

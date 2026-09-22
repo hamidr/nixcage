@@ -24,6 +24,7 @@ nixcage_session_read() {
 	SESSION_AGENT="$(jq -r 'if .agent then 1 else "" end' "$cred")"
 	SESSION_DNS="$(jq -r '.dns // ""' "$cred")"
 	mapfile -d '' -t SESSION_ENV < <(jq -j '.env | to_entries[] | "\(.key)=\(.value)\u0000"' "$cred")
+	mapfile -d '' -t SESSION_FILES < <(jq -j '(.files // [])[] | "\(.n)\t\(.dst)\t\(if .ro then "ro" else "rw" end)\u0000"' "$cred")
 	mapfile -d '' -t SESSION_ARGV < <(jq -j '.argv[] | . + "\u0000"' "$cred")
 }
 
@@ -82,6 +83,24 @@ nixcage_session_resolv_conf() {
 	none) : >"$file" ;;
 	*) printf 'nameserver %s\n' "$SESSION_DNS" >"$file" ;;
 	esac
+}
+
+## nixcage_session_files <share root> [runner]
+## The files the host staged (ADR-020) arrive one per share under the
+## root, each as "file" in its numbered directory, and each is put onto
+## its target before argv runs: the target's directory made, the target
+## touched so a bind has a mountpoint, the bind, and a read-only remount
+## when the host asked for --bind-ro. A runner word, echo in the suite,
+## goes before each command so what would run is read without a mount.
+nixcage_session_files() {
+	local root="$1" run="${2:-}" entry n dst mode
+	for entry in ${SESSION_FILES[@]+"${SESSION_FILES[@]}"}; do
+		IFS=$'\t' read -r n dst mode <<<"$entry"
+		$run mkdir -p "${dst%/*}"
+		$run touch "$dst"
+		$run mount --bind "$root/$n/file" "$dst"
+		[ "$mode" != ro ] || $run mount -o remount,bind,ro "$dst"
+	done
 }
 
 ## nixcage_session_account <passwd> <group>
@@ -170,6 +189,7 @@ nixcage_session_main() {
 	nixcage_session_resolv_conf /etc/resolv.conf
 	nixcage_session_account /etc/passwd /etc/group
 	nixcage_session_disk /dev/vda /var/lib
+	nixcage_session_files /run/nixcage/bind
 	nixcage_session_ready
 	nixcage_session_agent_wait /run/ssh-agent.sock 15
 	local status=0

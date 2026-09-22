@@ -145,3 +145,32 @@ teardown() {
 	nixcage_session_resolv_conf "$TEST_TEMP_DIR/resolv.conf"
 	[ "$(cat "$TEST_TEMP_DIR/resolv.conf")" = "nameserver 1.1.1.1" ]
 }
+
+# nixcage_session_files <share root> [runner]: the files the host staged (ADR-020)
+# arrive one per share under the root; each is bound onto its target before
+# argv runs, read-only when the host asked for that, so a session finds a
+# file where the same enter on nspawn puts it.
+
+@test "each staged file is bound onto its target in the guest, read-only when asked" {
+	nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" "" "" \
+		--file=0:ro:/run/f/key --file=1:rw:/run/f/token -- true >"$TEST_TEMP_DIR/cred"
+	nixcage_session_read "$TEST_TEMP_DIR/cred"
+	run nixcage_session_files /run/nixcage/bind echo
+	assert_success
+	assert_line --index 0 "mkdir -p /run/f"
+	assert_line --index 1 "touch /run/f/key"
+	assert_line --index 2 "mount --bind /run/nixcage/bind/0/file /run/f/key"
+	assert_line --index 3 "mount -o remount,bind,ro /run/f/key"
+	assert_line --index 4 "mkdir -p /run/f"
+	assert_line --index 5 "touch /run/f/token"
+	assert_line --index 6 "mount --bind /run/nixcage/bind/1/file /run/f/token"
+	[ "${#lines[@]}" -eq 7 ]
+}
+
+@test "a credential with no files binds nothing" {
+	nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" "" "" -- true >"$TEST_TEMP_DIR/cred"
+	nixcage_session_read "$TEST_TEMP_DIR/cred"
+	run nixcage_session_files /run/nixcage/bind echo
+	assert_success
+	assert_output ""
+}

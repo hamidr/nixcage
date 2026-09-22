@@ -115,3 +115,27 @@ teardown() {
 	run nixcage_vmspawn_args n /s /t /c 1 1 0 "" "" "" "-netdev tap,id=nixcage0,ifname=nc-0123456789ab,script=no,downscript=no -device virtio-net-pci,netdev=nixcage0"
 	assert_line --index 1 "SYSTEMD_VMSPAWN_QEMU_EXTRA=-append 'root=root rootfstype=virtiofs rw init=/t/init console=hvc0 net.ifnames=0 loglevel=0 systemd.show_status=0 systemd.log_target=null TERM=dumb' -netdev tap,id=nixcage0,ifname=nc-0123456789ab,script=no,downscript=no -device virtio-net-pci,netdev=nixcage0"
 }
+
+# nixcage_vmspawn_file_binds <bind words...>: a regular file asked as a bind
+# cannot cross virtiofs as itself, only a directory can (ADR-020). Each such
+# bind is named here for the session to stage: its number, its source, its
+# target in the guest and whether it is read-only. A directory passes through
+# untouched, and anything else is refused by the caller as before.
+
+@test "a bind whose source is a regular file is named for staging, and a directory is not" {
+	mkdir -p "$TEST_TEMP_DIR/dir"
+	echo secret >"$TEST_TEMP_DIR/key"
+	echo more >"$TEST_TEMP_DIR/token"
+	run nixcage_vmspawn_file_binds "--bind-ro=$TEST_TEMP_DIR/key:/run/f/key" "--bind=$TEST_TEMP_DIR/dir:/run/f/dir" "--bind=$TEST_TEMP_DIR/token:/run/f/token"
+	assert_success
+	assert_line --index 0 "$(printf '0\t%s/key\t/run/f/key\tro' "$TEST_TEMP_DIR")"
+	assert_line --index 1 "$(printf '1\t%s/token\t/run/f/token\trw' "$TEST_TEMP_DIR")"
+	[ "${#lines[@]}" -eq 2 ]
+}
+
+@test "the credential carries each staged file's number, target and mode for the guest to mount" {
+	run nixcage_vmspawn_credential 1000 100 /root /workspace 0 "" "" "" \
+		--setenv=HOME=/root --file=0:ro:/run/f/key --file=1:rw:/run/f/token -- true
+	assert_success
+	assert_output '{"uid":1000,"gid":100,"home":"/root","cwd":"/workspace","tty":false,"agent":false,"env":{"HOME":"/root"},"files":[{"n":0,"dst":"/run/f/key","ro":true},{"n":1,"dst":"/run/f/token","ro":false}],"argv":["true"]}'
+}

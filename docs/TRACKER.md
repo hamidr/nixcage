@@ -4,11 +4,11 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-09-17
+**Generated:** 2026-09-22
 
 **Next PRD number:** 003
 
-**Next ADR number:** 020
+**Next ADR number:** 021
 
 ## PRDs
 
@@ -40,3 +40,4 @@ document, then regenerate.
 | [ADR-017](ADR-017-nixcage-lists-what-runs-with-what-it-was-given.md) | nixcage lists what runs, with what each cage was given | implemented | -- | ADR-011, ADR-012 | list --json reports each cage's name, uid, subject, placement, scope and leader from state nixcage recorded at enter |  |
 | [ADR-018](ADR-018-the-host-module-owns-a-bridge-a-cage-may-be-placed-on.md) | The host module owns a bridge a cage may be placed on | implementing | -- | ADR-003, ADR-011, ADR-015 | nixcage.bridges.<name> declares a bridge with its address and the two settings an empty bridge needs to be usable |  |
 | [ADR-019](ADR-019-a-cage-may-run-in-a-microvm-behind-the-same-enter.md) | A cage may run in a microVM under systemd-vmspawn, chosen when the cage is defined, behind the same enter | implemented | -- | ADR-003, ADR-009, ADR-010, ADR-011, ADR-012, ADR-014, ADR-017 | enter --substrate microvm boots a NixOS guest with vmspawn from the same parse; own kernel, no daemon, same verbs |  |
+| [ADR-020](ADR-020-a-file-crosses-into-a-microvm-staged-in-a-directory-of-its-own.md) | A file asked as a bind crosses into a microVM staged in a directory of its own, and lands where the same enter on nspawn puts it | implemented | -- | ADR-009, ADR-019 | a file bind works on microvm; the host stages a copy in a shared directory and the guest binds it onto its target |  |

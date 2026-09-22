@@ -19,17 +19,20 @@
 ## vmspawn's own and their growth.
 NIXCAGE_VMSPAWN_CREDENTIAL_MAX=32768
 
-## nixcage_vmspawn_credential <uid> <gid> <home> <cwd> <tty> <address> <agent> <dns> [--setenv=K=V...] -- <argv...>
+## nixcage_vmspawn_credential <uid> <gid> <home> <cwd> <tty> <address> <agent> <dns> [--setenv=K=V...] [--file=N:ro|rw:DST...] -- <argv...>
 ## One JSON object, one line: who argv runs as, where, with what
 ## environment, on a tty or captured, the address to set when the session
-## was placed and what it resolves with there (ADR-016), and whether an
+## was placed and what it resolves with there (ADR-016), whether an
 ## agent socket is on its way, so the guest waits for it before argv
-## runs. The environment words are the parse's own, so a caller hands
-## them over unchanged.
+## runs, and the files the host staged for the guest to bind onto their
+## targets (ADR-020). The environment words are the parse's own, so a
+## caller hands them over unchanged; a file word is what
+## nixcage_vmspawn_file_binds named.
 nixcage_vmspawn_credential() {
 	local uid="$1" gid="$2" home="$3" cwd="$4" tty="$5" address="$6" agent="$7" dns="$8"
 	shift 8
 	local cred sep="" word
+	local -a files=()
 	cred="{\"uid\":$uid,\"gid\":$gid"
 	cred+=",\"home\":$(nixcage_scope_json_string "$home")"
 	cred+=",\"cwd\":$(nixcage_scope_json_string "$cwd")"
@@ -39,13 +42,33 @@ nixcage_vmspawn_credential() {
 	[ -z "$dns" ] || cred+=",\"dns\":$(nixcage_scope_json_string "$dns")"
 	cred+=',"env":{'
 	while [ $# -gt 0 ] && [ "$1" != -- ]; do
-		word="${1#--setenv=}"
-		cred+="$sep$(nixcage_scope_json_string "${word%%=*}"):$(nixcage_scope_json_string "${word#*=}")"
-		sep=","
+		case "$1" in
+		--file=*) files+=("${1#--file=}") ;;
+		*)
+			word="${1#--setenv=}"
+			cred+="$sep$(nixcage_scope_json_string "${word%%=*}"):$(nixcage_scope_json_string "${word#*=}")"
+			sep=","
+			;;
+		esac
 		shift
 	done
 	shift || true
-	cred+='},"argv":['
+	cred+="}"
+	if [ "${#files[@]}" -gt 0 ]; then
+		cred+=',"files":['
+		sep=""
+		local n mode dst
+		for word in "${files[@]}"; do
+			n="${word%%:*}"
+			word="${word#*:}"
+			mode="${word%%:*}"
+			dst="${word#*:}"
+			cred+="$sep{\"n\":$n,\"dst\":$(nixcage_scope_json_string "$dst"),\"ro\":$([ "$mode" = ro ] && echo true || echo false)}"
+			sep=","
+		done
+		cred+="]"
+	fi
+	cred+=',"argv":['
 	sep=""
 	for word in "$@"; do
 		cred+="$sep$(nixcage_scope_json_string "$word")"
@@ -105,4 +128,29 @@ nixcage_vmspawn_args() {
 	printf -- '--load-credential=nixcage.session:%s\n' "$credential"
 	[ -z "$disk" ] || printf -- '--extra-drive=%s\n' "$disk"
 	printf '%s\n' --bind-ro=/nix/store "$@"
+}
+
+## nixcage_vmspawn_file_binds <bind words...>
+## The binds whose source is a regular file, which virtiofs cannot share
+## as itself (ADR-020): one line each, "N<TAB>SRC<TAB>DST<TAB>ro|rw",
+## numbered in the order given. The session stages each in a directory of
+## its own, shares that, and the guest binds the file onto DST. A directory
+## is not named here and passes through as it is; anything else is the
+## caller's refusal.
+nixcage_vmspawn_file_binds() {
+	local word src dst mode n=0
+	for word in "$@"; do
+		case "$word" in
+		--bind-ro=*) mode=ro ;;
+		--bind=*) mode=rw ;;
+		*) continue ;;
+		esac
+		word="${word#--bind-ro=}"
+		word="${word#--bind=}"
+		src="${word%%:*}"
+		dst="${word#*:}"
+		[ -f "$src" ] || continue
+		printf '%s\t%s\t%s\t%s\n' "$n" "$src" "$dst" "$mode"
+		n=$((n + 1))
+	done
 }
