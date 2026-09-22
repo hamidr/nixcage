@@ -82,6 +82,15 @@ home" from `exec`. The record (ADR-017) gains `home` when one was asked,
 `exec` reads it and falls back to the default, and a record from before
 reads as before.
 
+**6. A session without a tty reads a pipe that waits.** ADR-019's
+decision 3 ran such an argv on `/dev/null`, which ends at once. The
+caller of an nspawn session holds its stdin open, and a supervisor's
+argv (pi in rpc mode) reads it for a client and ends on its end, so
+every microVM boot of a supervised role ended within seconds of
+starting. The guest opens a fifo for reading and writing and gives argv
+that as stdin (`nixcage_session_stdin`): a pipe nobody writes and nobody
+closes, as the supervisor's is.
+
 ## Consequences
 
 A dependant's session line is one line for both substrates, files

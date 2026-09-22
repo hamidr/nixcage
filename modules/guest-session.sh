@@ -44,10 +44,24 @@ nixcage_session_network() {
 	ip link set eth0 up
 }
 
+## nixcage_session_stdin <fifo>
+## What a session without a tty reads: the caller of an nspawn session
+## holds a pipe it never writes, and a supervisor's argv reads that pipe
+## for a client and ends on its end (ADR-020 point 6). A fifo opened for
+## reading and writing on fd 3 is a pipe nobody writes and nobody closes,
+## so a read on it waits as it does there, rather than ending at once as
+## /dev/null does.
+nixcage_session_stdin() {
+	local fifo="$1"
+	mkfifo -m 0600 "$fifo"
+	exec 3<>"$fifo"
+}
+
 ## argv as the session's uid, with only the environment it was given, on
 ## the console: vmspawn shows the console to the host, interactively when
-## enter had a tty and read-only when not, so a session without one gets
-## no stdin rather than a console nobody types on.
+## enter had a tty and read-only when not, so a session without one reads
+## a pipe that waits (nixcage_session_stdin) rather than a console nobody
+## types on.
 ## The console is a tty either way; without one asked for, the line
 ## discipline is told not to turn newlines into carriage returns, so what
 ## the host captures is what argv wrote.
@@ -65,8 +79,9 @@ nixcage_session_run() {
 			--clear-groups -- "${SESSION_ARGV[@]}" &
 	else
 		stty -onlcr
+		nixcage_session_stdin /run/nixcage-stdin
 		env -i "${SESSION_ENV[@]}" "$setpriv" --reuid="$SESSION_UID" --regid="$SESSION_GID" \
-			--clear-groups -- "${SESSION_ARGV[@]}" </dev/null &
+			--clear-groups -- "${SESSION_ARGV[@]}" <&3 &
 	fi
 	{ wait $!; } 2>/dev/null
 }

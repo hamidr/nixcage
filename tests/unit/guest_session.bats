@@ -174,3 +174,20 @@ teardown() {
 	assert_success
 	assert_output ""
 }
+
+# nixcage_session_stdin <fifo>: a session without a tty used to run argv on
+# /dev/null, which ends at once; the caller of an nspawn session holds a
+# pipe it never writes, and a supervisor's argv reads that pipe for a client
+# and exits on its end (seen 2026-09-22: pi in rpc mode ending every boot).
+# The guest gives argv a stdin that blocks instead of ending.
+
+@test "a session without a tty reads a stdin that waits rather than one that has ended" {
+	nixcage_session_stdin "$TEST_TEMP_DIR/stdin"
+	[ -p "$TEST_TEMP_DIR/stdin" ]
+	# A read on it times out, which is not EOF: EOF returns 1, a timeout
+	# returns more than 128.
+	local status=0
+	read -r -t 1 _ <&3 || status=$?
+	[ "$status" -gt 128 ]
+	exec 3>&-
+}
