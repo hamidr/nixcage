@@ -1,7 +1,7 @@
 ---
 id: ADR-022
 title: A cage is bounded by what the host declares, and a session may ask for something else
-status: proposed
+status: implemented
 date: 2026-09-22
 status_date: 2026-09-22
 summary: nixcage.bounds and cages.<path>.bounds give memory and cpus to both substrates; the flag still wins
@@ -141,6 +141,16 @@ The declaration is not a security boundary (decision 3), so nothing here makes
 a cage safer; it makes a cage usable. A host that wants a bound a session
 cannot raise has the substrate for that, and would need a ceiling this ADR
 does not add.
+
+`nixcage.cages.<path>.substrate` stops being mandatory. A cage declared only
+for its bounds has nothing to say about where it runs, so the option takes
+null as its default and a null is left out of `CAGE_SUBSTRATES`; a declaration
+that names a substrate behaves exactly as ADR-019 says.
+
+The wiring in `nixcage-container` has no test of its own, as the substrate's
+does not: the script is a Nix string that exists only once built, so what the
+suite drives is `modules/bounds.sh` and what the modules render, and the two
+lines that join them are read by shellcheck when the script is built.
 
 Four surfaces gain a line each: the host module's options, the VM module's,
 the rendered `/etc/nixcage/container`, and the README. The exported interface (ADR-009) is

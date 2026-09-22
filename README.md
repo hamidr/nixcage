@@ -90,7 +90,9 @@ What differs: a kernel boundary toward the host and toward other cages, no
 nix daemon and no builds inside (the session sees the store and cannot add
 to it, so put the toolchain in the devShell or realise it elsewhere), a
 boot of about seven seconds instead of a tenth, and memory reserved rather
-than shared. `--disk 2G` adds a persistent image at `/var/lib` for what
+than shared -- 2 GiB of it, with one vCPU, unless `nixcage.bounds` or
+`--memory`/`--cpus` says otherwise, which is systemd-vmspawn's default and
+not enough to build in. `--disk 2G` adds a persistent image at `/var/lib` for what
 virtiofs is too slow for. This is for a tool you trust less than the rest,
 or one that needs a kernel of its own (eBPF, mount namespaces, modules).
 See `docs/ADR-019-a-cage-may-run-in-a-microvm-behind-the-same-enter.md`.
@@ -121,6 +123,11 @@ nixcage = {
   # cages."/home/me/Src/untrusted".substrate = "microvm";
   ## What a cage runs on when nothing closer decides.
   # substrate.default = "nspawn";
+  ## What a cage may use, and what one cage may use. A session's --memory
+  ## and --cpus outrank both. Unset leaves the substrate's own default:
+  ## unbounded on nspawn, 2 GiB and one vCPU on a microVM.
+  # bounds = { memory = "4G"; cpus = 4; };
+  # cages."/home/me/Src/untrusted".bounds = { memory = "8G"; cpus = 8; };
 };
 ```
 
