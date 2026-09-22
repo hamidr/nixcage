@@ -161,16 +161,26 @@ nixcage_scope_json_string() {
 	printf '"%s"' "$v"
 }
 
-## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [root...]
+## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--home=<path>] [root...]
 ## One object on one line, so list --json can extend it without parsing it.
 ## A field the session was not given is absent rather than empty; the
 ## substrate is absent for nspawn, which every cage ran on before ADR-019,
-## so a record from before reads the same as one written now.
+## so a record from before reads the same as one written now. The home is
+## recorded when a caller named one, since exec on a microvm cage reads
+## the session's group from it and the default is under the state
+## directory only when nobody asked otherwise.
 nixcage_scope_record_write() {
 	local name="$1" uid="$2" subject="$3" bridge="$4" address="$5" netns="$6" substrate="$7"
 	shift 7
 	nixcage_scope_name_ok "$name" || return 1
-	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep
+	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep home=""
+	local -a roots=()
+	for root in "$@"; do
+		case "$root" in
+		--home=*) home="${root#--home=}" ;;
+		*) roots+=("$root") ;;
+		esac
+	done
 	mkdir -p "$dir" || return 1
 	record="{\"name\":$(nixcage_scope_json_string "$name"),\"uid\":$uid"
 	[ -z "$subject" ] || record+=",\"subject\":$(nixcage_scope_json_string "$subject")"
@@ -179,16 +189,30 @@ nixcage_scope_record_write() {
 	[ -z "$netns" ] || record+=",\"netns\":$(nixcage_scope_json_string "$netns")"
 	[ -z "$substrate" ] || [ "$substrate" = nspawn ] ||
 		record+=",\"substrate\":$(nixcage_scope_json_string "$substrate")"
-	if [ $# -gt 0 ]; then
+	[ -z "$home" ] || record+=",\"home\":$(nixcage_scope_json_string "$home")"
+	if [ "${#roots[@]}" -gt 0 ]; then
 		record+=',"roots":['
 		sep=""
-		for root in "$@"; do
+		for root in "${roots[@]}"; do
 			record+="$sep$(nixcage_scope_json_string "$root")"
 			sep=","
 		done
 		record+=']'
 	fi
 	printf '%s}\n' "$record" >"$dir/placement"
+}
+
+## The home a cage's record names, empty when the session took the
+## default or there is no record; read by its own spelling as the
+## substrate is.
+nixcage_scope_record_home() {
+	local record="$NIXCAGE_STATE_DIR/containers/$1/placement"
+	[ -f "$record" ] || return 0
+	local line
+	line="$(<"$record")"
+	if [[ "$line" =~ \"home\":\"([^\"]*)\" ]]; then
+		echo "${BASH_REMATCH[1]}"
+	fi
 }
 
 ## The substrate a cage's record fixed, empty for a cage with none or with

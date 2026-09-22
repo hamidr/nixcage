@@ -74,6 +74,14 @@ in the copy; a dependant that needs them back binds the directory.
 credential only; `exec` keeps the asked environment as before
 (`nixcage_microvm_env_write`) and never sees them.
 
+**5. exec on a microVM cage reads the session's home from the record.**
+ADR-019's decision 6 took the session's group from the home under the
+state directory, which is the home only when nobody asked for another;
+a session entered with `--home` (a dependant's every role) got "has no
+home" from `exec`. The record (ADR-017) gains `home` when one was asked,
+`exec` reads it and falls back to the default, and a record from before
+reads as before.
+
 ## Consequences
 
 A dependant's session line is one line for both substrates, files

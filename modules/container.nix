@@ -565,14 +565,14 @@ let
         [ -n "$subject" ] && session_user=("--user=$subject")
 
 
-        local cdir="$STATE_DIR/containers/$name"
+        local cdir="$STATE_DIR/containers/$name" asked_home="$home"
         [ -n "$home" ] || home="$STATE_DIR/homes/$name"
         mkdir -p "$cdir" "$home"
         ## What this session was given, for list --json to show while it
         ## runs and after (ADR-017). Written before anything else of the
         ## session exists, so a session that dies on the way still left it.
         nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns" "$substrate" \
-          ''${store_roots[@]+"''${store_roots[@]}"} ||
+          ''${asked_home:+"--home=$asked_home"} ''${store_roots[@]+"''${store_roots[@]}"} ||
           die "could not record the placement of $name"
         ## The home holds whatever the session writes there, so it is private
         ## to the subject running. If its contents belong to someone else the
@@ -887,8 +887,12 @@ let
         record="$(<"$STATE_DIR/containers/$name/placement")"
         [[ "$record" =~ \"uid\":([0-9]+) ]] || die "$name has no uid in its record"
         uid=$((BASH_REMATCH[1] + offset))
-        local gid
-        gid="$(stat -c %g "$STATE_DIR/homes/$name")" || die "$name has no home"
+        ## The home is the record's when the session named one (ADR-017),
+        ## else the default under the state directory.
+        local gid home
+        home="$(nixcage_scope_record_home "$name")"
+        [ -n "$home" ] || home="$STATE_DIR/homes/$name"
+        gid="$(stat -c %g "$home")" || die "$name has no home at $home"
         local session_home="/home/''${subject:-nixcage}"
         local tty=""
         if [ -t 0 ] && [ -t 1 ]; then tty=1; fi

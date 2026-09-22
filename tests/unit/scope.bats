@@ -290,3 +290,24 @@ STUB
 	assert_success
 	assert_output ""
 }
+
+# A session entered with --home has its home where the caller said, not
+# under the state directory, and exec on a microvm cage reads the session's
+# group from it (ADR-019 decision 6); found 2026-09-22 on a cage whose home
+# was a dependant's: "has no home". The record carries the home when one
+# was asked, and a record without one reads as the default.
+
+@test "the record carries the home a session was given, among what else it was given" {
+	nixcage_scope_record_write builder 700000 agent fabriek0 10.77.0.10/24 "" microvm --home=/srv/homes/builder /nix/store/aaaa-profile
+	run cat "$NIXCAGE_STATE_DIR/containers/builder/placement"
+	assert_output '{"name":"builder","uid":700000,"subject":"agent","bridge":"fabriek0","address":"10.77.0.10/24","substrate":"microvm","home":"/srv/homes/builder","roots":["/nix/store/aaaa-profile"]}'
+	run nixcage_scope_record_home builder
+	assert_output "/srv/homes/builder"
+}
+
+@test "a record without a home says nothing, so the caller falls back to the default" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" ""
+	run nixcage_scope_record_home builder
+	assert_success
+	assert_output ""
+}
