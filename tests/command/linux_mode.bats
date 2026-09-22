@@ -97,6 +97,38 @@ write_host_config() {
 	[[ "$output" == *"--disk needs a size"* ]]
 }
 
+# Written as --flag=value by two people in one issue before anyone noticed:
+# the word-only match let the whole flag fall through to the command, so the
+# session ran it inside a cage on the substrate it was trying to change.
+@test "enter --substrate=word is the same flag, not a command to run" {
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter --substrate=microvm -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/sudo-calls"
+	[[ "$output" == nixcage-container\ enter\ --substrate\ microvm\ proj-*\ "$TEST_TEMP_DIR/src/proj"\ true ]]
+}
+
+@test "enter --disk=size is the same flag, not a command to run" {
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter --disk=2G --substrate=microvm -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/sudo-calls"
+	[[ "$output" == nixcage-container\ enter\ --disk\ 2G\ --substrate\ microvm\ proj-*\ "$TEST_TEMP_DIR/src/proj"\ true ]]
+}
+
+@test "enter --substrate=nonsense is refused, as the spaced form is" {
+	write_host_config
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter --substrate=qemu
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"--substrate needs nspawn or microvm"* ]]
+}
+
 @test "enter --substrate without a word is refused" {
 	write_host_config
 	mkdir -p "$TEST_TEMP_DIR/src/proj"

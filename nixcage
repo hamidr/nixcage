@@ -418,15 +418,25 @@ cmd_enter() {
   # The substrate the cage runs on and the disk a microVM keeps (ADR-019),
   # handed through as words in either order: whether they are allowed, and
   # whether the cage already has a substrate, is nixcage-container's to say.
+  # Both spellings of a flag: --substrate microvm and --substrate=microvm.
+  # Matching the word alone let the joined form fall through to the command,
+  # so a session ran "--substrate=microvm" inside a cage on the substrate it
+  # was asking to change, and said nothing.
   local -a substrate=()
-  while [[ "${1:-}" == --substrate || "${1:-}" == --disk ]]; do
-    case "$1 ${2:-}" in
-      "--substrate nspawn"|"--substrate microvm") substrate+=(--substrate "$2") ;;
+  local flag word joined
+  while :; do
+    case "${1:-}" in
+      --substrate=*|--disk=*) joined=1 flag="${1%%=*}" word="${1#*=}" ;;
+      --substrate|--disk) joined="" flag="$1" word="${2:-}" ;;
+      *) break ;;
+    esac
+    case "$flag $word" in
+      "--substrate nspawn"|"--substrate microvm") substrate+=(--substrate "$word") ;;
       "--substrate "*) log_err "--substrate needs nspawn or microvm"; exit 1 ;;
-      "--disk "[0-9]*) substrate+=(--disk "$2") ;;
+      "--disk "[0-9]*) substrate+=(--disk "$word") ;;
       "--disk "*) log_err "--disk needs a size such as 2G"; exit 1 ;;
     esac
-    shift 2
+    if [[ -n "$joined" ]]; then shift; else shift 2; fi
   done
 
   # Accept both 'enter -- cmd...' and 'enter cmd...'.
