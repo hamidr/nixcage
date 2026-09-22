@@ -165,6 +165,19 @@ nixcage_enter_direnv() {
 	exec direnv exec "$project" bash
 }
 
+## Enter the container's own userland, with the reason the project's own
+## environment was not used. Announced rather than silent: a session that
+## looks like a devShell but is not would hide the difference until a tool is
+## missing, far from the cause.
+nixcage_enter_base_shell() {
+	echo "nixcage: $1; entering the base container shell" >&2
+	shift
+	if [ "$#" -gt 0 ]; then
+		exec "$@"
+	fi
+	exec bash
+}
+
 nixcage_enter_shell() {
 	local project="${NIXCAGE_PROJECT:-/workspace}"
 
@@ -209,11 +222,7 @@ nixcage_enter_shell() {
 		exec nix develop
 		;;
 	1)
-		echo "nixcage: no devShell in this project; entering the base container shell" >&2
-		if [ "$#" -gt 0 ]; then
-			exec "$@"
-		fi
-		exec bash
+		nixcage_enter_base_shell "no devShell in this project" "$@"
 		;;
 	*)
 		echo "nixcage: the project flake failed to evaluate; see the error above" >&2
