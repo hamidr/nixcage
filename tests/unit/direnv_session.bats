@@ -9,6 +9,9 @@ setup() {
 	STUB_DIR="$TEST_TEMP_DIR/bin"
 	PROJECT="$TEST_TEMP_DIR/project"
 	mkdir -p "$STUB_DIR" "$PROJECT"
+	# These are the flake-directory cases; the directory without one is
+	# flakeless_project.bats (ADR-021).
+	touch "$PROJECT/flake.nix"
 	PATH="$STUB_DIR:$PATH"
 	export PATH NIXCAGE_PROJECT="$PROJECT"
 	export HOME="$TEST_TEMP_DIR/home"

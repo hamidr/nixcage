@@ -8,7 +8,7 @@ document, then regenerate.
 
 **Next PRD number:** 003
 
-**Next ADR number:** 021
+**Next ADR number:** 022
 
 ## PRDs
 
@@ -41,3 +41,4 @@ document, then regenerate.
 | [ADR-018](ADR-018-the-host-module-owns-a-bridge-a-cage-may-be-placed-on.md) | The host module owns a bridge a cage may be placed on | implementing | -- | ADR-003, ADR-011, ADR-015 | nixcage.bridges.<name> declares a bridge with its address and the two settings an empty bridge needs to be usable |  |
 | [ADR-019](ADR-019-a-cage-may-run-in-a-microvm-behind-the-same-enter.md) | A cage may run in a microVM under systemd-vmspawn, chosen when the cage is defined, behind the same enter | implemented | -- | ADR-003, ADR-009, ADR-010, ADR-011, ADR-012, ADR-014, ADR-017 | enter --substrate microvm boots a NixOS guest with vmspawn from the same parse; own kernel, no daemon, same verbs |  |
 | [ADR-020](ADR-020-a-file-crosses-into-a-microvm-staged-in-a-directory-of-its-own.md) | A file asked as a bind crosses into a microVM staged in a directory of its own, and lands where the same enter on nspawn puts it | implemented | -- | ADR-009, ADR-019 | a file bind works on microvm; the host stages a copy in a shared directory and the guest binds it onto its target |  |
+| [ADR-021](ADR-021-a-project-is-any-directory-under-a-workspace-root.md) | A project is any directory under a workspace root, not only a flake directory | implemented | -- | ADR-002, ADR-005 | enter validates the workspace root alone; a directory with no flake.nix opens the base container shell |  |

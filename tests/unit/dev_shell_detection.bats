@@ -7,9 +7,13 @@ load ../test_helper/common
 setup() {
 	setup_temp_dir
 	STUB_DIR="$TEST_TEMP_DIR/bin"
-	mkdir -p "$STUB_DIR"
+	PROJECT="$TEST_TEMP_DIR/project"
+	mkdir -p "$STUB_DIR" "$PROJECT"
+	# These are the flake-directory cases; the directory without one is
+	# flakeless_project.bats (ADR-021).
+	touch "$PROJECT/flake.nix"
 	PATH="$STUB_DIR:$PATH"
-	export PATH
+	export PATH NIXCAGE_PROJECT="$PROJECT"
 	source "$NIXCAGE_ROOT/modules/dev-shell.sh"
 }
 

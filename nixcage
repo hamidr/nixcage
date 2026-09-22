@@ -407,11 +407,9 @@ check_workspace_root() {
 cmd_enter() {
   local project_dir="$PWD"
 
-  if [[ ! -f "$project_dir/flake.nix" ]]; then
-    log_err "No flake.nix in $project_dir -- a nixcage project is any flake directory."
-    exit 1
-  fi
-
+  # A project is any directory under a workspace root (ADR-021). The flake is
+  # an environment the session offers to use, not the ticket that admits it,
+  # so the root is the only thing validated here.
   check_workspace_root "$project_dir"
 
   local name

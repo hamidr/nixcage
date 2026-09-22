@@ -21,6 +21,9 @@ exit 1
 STUB
 	chmod +x "$STUB_DIR/nix"
 	mkdir -p "$TEST_TEMP_DIR/project"
+	# A project that declares a flake, so the last test here is about the
+	# daemon rather than about the flake's absence (ADR-021).
+	touch "$TEST_TEMP_DIR/project/flake.nix"
 	export NIXCAGE_PROJECT="$TEST_TEMP_DIR/project"
 	unset NIXCAGE_SHELL NIXCAGE_NO_NIX_DAEMON NIXCAGE_PATH_PREFIX
 }

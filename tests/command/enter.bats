@@ -11,12 +11,23 @@ teardown() {
 	teardown_temp_dir
 }
 
-@test "enter outside a flake directory fails" {
-	mkdir -p "$TEST_TEMP_DIR/noflake"
-	cd "$TEST_TEMP_DIR/noflake"
+# A directory under a workspace root is a project whether or not it declares
+# a flake (ADR-021), so enter validates the root and nothing about the flake.
+@test "enter in a directory with no flake.nix gets past validation" {
+	write_cache 22022 "$TEST_TEMP_DIR/src"
+	mkdir -p "$TEST_TEMP_DIR/src/noflake"
+	cd "$TEST_TEMP_DIR/src/noflake"
+	run_nixcage enter
+	[[ "$output" != *flake.nix* ]]
+}
+
+@test "enter outside every workspace root fails without a flake too" {
+	write_cache 22022 "$TEST_TEMP_DIR/src"
+	mkdir -p "$TEST_TEMP_DIR/elsewhere/noflake"
+	cd "$TEST_TEMP_DIR/elsewhere/noflake"
 	run_nixcage enter
 	[ "$status" -ne 0 ]
-	[[ "$output" == *flake.nix* ]]
+	[[ "$output" == *workspaceRoots* ]]
 }
 
 @test "enter outside every workspace root fails before starting the VM" {

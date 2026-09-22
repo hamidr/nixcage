@@ -196,6 +196,15 @@ nixcage_enter_shell() {
 		exec bash
 	fi
 
+	## A named devShell is a flake attribute, so a project with no flake
+	## cannot have one. Refused here rather than at the probe, which would
+	## report the missing flake as one that failed to evaluate and send the
+	## caller looking for an error that was never printed.
+	if [ -n "${NIXCAGE_SHELL:-}" ] && [ ! -f "$project/flake.nix" ]; then
+		echo "nixcage: this session was asked for devShells.$NIXCAGE_SHELL, but $project has no flake.nix" >&2
+		return 1
+	fi
+
 	## A session that named its own devShell has said what its environment is
 	## more specifically than the project can, so it wins over both the .envrc
 	## and the default-shell probe. Several sessions work one repository, and
@@ -211,6 +220,15 @@ nixcage_enter_shell() {
 	if [ -f "$project/.envrc" ]; then
 		nixcage_enter_direnv "$project" "$@"
 		return
+	fi
+
+	## A project without a flake.nix is still a project (ADR-021): what the
+	## caller came for is the cage, and a directory under a workspace root is
+	## one whether or not it declares a flake. The probe cannot say so --
+	## builtins.getFlake fails on such a directory exactly as it fails on a
+	## flake that does not evaluate -- so the absence is answered ahead of it.
+	if [ ! -f "$project/flake.nix" ]; then
+		nixcage_enter_base_shell "no flake.nix in this project" "$@"
 	fi
 
 	nixcage_has_dev_shell "$project"
