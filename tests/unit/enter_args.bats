@@ -318,6 +318,22 @@ teardown() {
 
 # The composed nspawn line as a contract a dependant can test against
 # (ADR-012 consequence): asked for, the session is printed and not run.
+# The exported interface takes a flag and its value as two words (ADR-009).
+# A joined spelling would otherwise land in the name position and be reported
+# as an invalid container name, which sends the caller looking at the name.
+@test "a flag written with an equals sign is refused, naming the spelling that works" {
+	run nixcage_enter_parse --memory=4G myproj /srv/myproj
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"--memory=4G"* ]]
+	[[ "$output" == *"--memory 4G"* ]]
+}
+
+@test "a positional that merely contains an equals sign is not a flag" {
+	nixcage_enter_parse myproj /srv/myproj env A=B
+	[ "${NIXCAGE_ENTER_ARGV[0]}" = myproj ]
+	[ "${NIXCAGE_ENTER_ARGV[3]}" = A=B ]
+}
+
 @test "given --print-argv, a session records that it is to be printed, not run" {
 	nixcage_enter_parse --print-argv myproj /srv/myproj
 	[ "$NIXCAGE_ENTER_PRINT_ARGV" = 1 ]

@@ -145,6 +145,14 @@ nixcage_enter_parse() {
 			NIXCAGE_ENTER_STORE_ROOTS+=("$2")
 			shift 2 || return 1
 			;;
+		## A flag and its value are two words here (ADR-009). A joined
+		## spelling would otherwise break out of the parse and land in the
+		## name position, and the caller would be told its name is invalid
+		## rather than that its flag was never read.
+		--*=*)
+			echo "nixcage: $1 is not a flag; a flag takes its value as the next word: ${1%%=*} ${1#*=}" >&2
+			return 1
+			;;
 		*) break ;;
 		esac
 	done
