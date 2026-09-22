@@ -37,12 +37,15 @@ let
         throw "nixcage.cages.${path}.substrate is microvm but nixcage.microvm.enable is false"
       else
         "${path} ${cage.substrate}"
-    ) cfg.cages
+    ) (lib.filterAttrs (_: cage: cage.substrate != null) cfg.cages)
   );
 in
 {
   ## The bridges a cage may be placed on (ADR-018), shared with the VM module.
-  imports = [ ./bridges.nix ];
+  imports = [
+    ./bridges.nix
+    ./bounds.nix
+  ];
 
   options.nixcage = {
     workspaceRoots = lib.mkOption {
@@ -126,15 +129,27 @@ in
       type = lib.types.attrsOf (
         lib.types.submodule {
           options.substrate = lib.mkOption {
-            type = lib.types.enum [
-              "nspawn"
-              "microvm"
-            ];
+            type = lib.types.nullOr (
+              lib.types.enum [
+                "nspawn"
+                "microvm"
+              ]
+            );
+            default = null;
             description = ''
               What this cage runs on (ADR-019), by the project's absolute
               path. Outranks the record of the cage's first enter and the
               flag; a flag against it is refused naming this declaration.
+              Null leaves the choice to the record, the flag and the host's
+              default, which is what a cage declared only for its bounds
+              wants.
             '';
+          };
+
+          options.bounds = lib.mkOption {
+            type = lib.types.submodule { options = config.nixcage.boundsOptions; };
+            default = { };
+            description = "What this cage may use (ADR-022), outranked by a session's own flags.";
           };
         }
       );
@@ -279,7 +294,7 @@ in
         HOST_PLATFORM=linux
         SUBSTRATE_DEFAULT=${substrateDefault}
         CAGE_SUBSTRATES="${cageSubstrates}"
-        ${lib.optionalString cfg.microvm.enable "MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}"}
+        ${cfg.boundsConfigText}        ${lib.optionalString cfg.microvm.enable "MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}"}
       '';
     };
 

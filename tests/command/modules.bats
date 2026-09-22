@@ -184,3 +184,51 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	assert_failure
 	assert_output --partial "nixcage.cages./srv/x.substrate is microvm but nixcage.microvm.enable is false"
 }
+
+# What a cage may use (ADR-022). Both platform modules render the default,
+# because both run the same container layer; only the host module has cages
+# to declare bounds for one at a time.
+
+@test "the host's default bounds are rendered for the container script" {
+	run eval_module host '{ nixcage.principalUidRange.base = 700000;
+	  nixcage.bounds = { memory = "4G"; cpus = 4; }; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_success
+	[[ "$(jq -r . <<<"$output")" == *'BOUNDS_DEFAULT="4G 4"'* ]]
+}
+
+@test "a quantity the host left unset is rendered as nothing said" {
+	run eval_module host '{ nixcage.principalUidRange.base = 700000;
+	  nixcage.bounds.memory = "4G"; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_success
+	[[ "$(jq -r . <<<"$output")" == *'BOUNDS_DEFAULT="4G -"'* ]]
+}
+
+@test "a cage's own bounds are rendered, path and both quantities" {
+	run eval_module host '{ nixcage.principalUidRange.base = 700000;
+	  nixcage.cages."/srv/big".bounds = { memory = "8G"; cpus = 8; };
+	  nixcage.cages."/srv/small".bounds.memory = "1G"; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_success
+	[[ "$(jq -r . <<<"$output")" == *'CAGE_BOUNDS="/srv/big 8G 8
+/srv/small 1G -"'* ]]
+}
+
+@test "a size nixcage cannot hand to systemd is refused at evaluation" {
+	run eval_module host '{ nixcage.principalUidRange.base = 700000;
+	  nixcage.bounds.memory = "4GiB"; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_failure
+}
+
+@test "the VM module renders the default too, for the cages inside it" {
+	# authorizedKeys has no default and environment.etc is one merged option,
+	# so the VM's sshd definition is forced along with the file under test.
+	run eval_module vm '{ nixcage.principalUidRange.base = 700000;
+	  nixcage.authorizedKeys = [ "ssh-ed25519 AAAA test" ];
+	  nixcage.bounds = { memory = "2G"; cpus = 2; }; }' \
+		'sys.config.environment.etc."nixcage/container".text'
+	assert_success
+	[[ "$(jq -r . <<<"$output")" == *'BOUNDS_DEFAULT="2G 2"'* ]]
+}

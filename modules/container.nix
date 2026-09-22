@@ -106,6 +106,7 @@ let
       . ${./bind.sh}
       . ${./store-closure.sh}
       . ${./substrate.sh}
+      . ${./bounds.sh}
       . ${./enter-args.sh}
       . ${./dev-shell.sh}
       . ${./scope.sh}
@@ -484,6 +485,22 @@ let
         elif [ -n "$NIXCAGE_ENTER_DISK" ]; then
           die "--disk needs a microvm cage"
         fi
+
+        ## What the cage may use (ADR-022): the flag, then what the host
+        ## declared for this cage, then the host's default. Empty stays
+        ## empty, which is each substrate's own default and not nixcage's
+        ## to choose. Resolved once for both substrates, and rendered by
+        ## each of them alone: the scope's properties are the nspawn path's
+        ## and the vmspawn line is the microVM's, because a MemoryMax= on a
+        ## microVM's scope bounds qemu and kills the guest (ADR-019).
+        local cage_bounds
+        cage_bounds="$(nixcage_bounds_declared "$project" "''${CAGE_BOUNDS:-}")"
+        NIXCAGE_ENTER_MEMORY="$(nixcage_bounds_resolve "$NIXCAGE_ENTER_MEMORY" \
+          "$(nixcage_bounds_field 1 "$cage_bounds")" \
+          "$(nixcage_bounds_field 1 "''${BOUNDS_DEFAULT:-}")")"
+        NIXCAGE_ENTER_CPUS="$(nixcage_bounds_resolve "$NIXCAGE_ENTER_CPUS" \
+          "$(nixcage_bounds_field 2 "$cage_bounds")" \
+          "$(nixcage_bounds_field 2 "''${BOUNDS_DEFAULT:-}")")"
 
         ## The name is checked here as well as where it is declared, because
         ## this is the last point before it becomes part of a flake reference

@@ -26,7 +26,10 @@ in
 {
   ## The bridges a cage may be placed on (ADR-018), rendered into the
   ## guest, shared with the host module.
-  imports = [ ./bridges.nix ];
+  imports = [
+    ./bridges.nix
+    ./bounds.nix
+  ];
 
   options.nixcage = {
     workspaceRoots = lib.mkOption {
@@ -313,7 +316,7 @@ in
         PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
         STORAGE_DATASET=${stateDataset}
         HOST_PLATFORM=macos
-      '';
+        ${cfg.boundsConfigText}      '';
     };
 
     environment.etc."nixcage/profile".source = container.profile;
