@@ -64,6 +64,13 @@ A caller standing in the directory is the same consent ADR-021 already accepts
 for a directory that declares no flake, and inventing a root would put a
 declaration in the tool's mouth.
 
+What it does refuse is the directory nobody means: `/`, the invoking user's
+home itself, `/nix` and `/nix/store`, and any directory that user does not
+own. A declared root caught a mistyped `cd` and this recovers most of that
+without declaring anything, since the session's uid is `stat` on the project
+anyway (ADR-004) and a directory the caller does not own was never going to
+be their cage.
+
 **3. The skip is the roots gate's, not `enter`'s.** `check_workspace_root` is
 where the declaration is read, so it is where its absence is answered, and
 every caller of it inherits the rule: today `enter` and `rm` without a name
@@ -75,7 +82,10 @@ made it in.
 is the same cage after the module is imported: one home, one record, one name.
 Adoption keeps the work rather than abandoning it, which is the point of
 trying the tool at all. The cost is that two nixcages of different versions may
-write one set of records, and it is accepted.
+write one set of records, and it is accepted -- but not silently: a record says
+which nixcage wrote it and whether that session was declared, so `list --json`
+can show it and a format that diverges later is a message rather than a
+puzzle.
 
 **5. `read_container_config` stops refusing, and the verbs that need a
 declaration refuse instead.** Absent, the session runs with no declared
@@ -138,6 +148,24 @@ real failure mode here that the declared path meets at `nixos-rebuild` time,
 with an administrator watching; undeclared it would land in the middle of an
 `enter`, so it falls back rather than refuses.
 
+**10. Undeclared, a bound is read from the machine rather than left to
+vmspawn.** ADR-022 declined to choose a number because a module does not know
+the machine it will be applied to. Undeclared, nixcage is standing on the
+machine: it reads the cores and the memory the host has and gives a session a
+share of them -- half of each -- announcing what it chose. The principle
+survives, because nixcage still never guesses on a host's behalf in a module,
+and a flag or a declaration still outranks this. Without it the first microVM
+anybody tries has systemd-vmspawn's 2 GiB and one vCPU, which is the cage
+ADR-022 exists to stop handing out.
+
+**11. Undeclared, a session's git identity is read, never bound.** The module
+renders `/etc/nixcage/gitconfig` from `nixcage.git.*`; undeclared, nixcage
+asks the host's own git for `user.name` and `user.email` and renders the same
+minimal file. The invoking user's `~/.gitconfig` is never bound in: it carries
+`credential.helper` and signing configuration, which is what ADR-008 keeps out
+of a cage. Signing still goes through the forwarded agent, as it does on a
+declared host.
+
 ## Assumptions
 
 Written down because an undeclared host has told nixcage nothing, so every one
@@ -166,12 +194,22 @@ of these is something the tool is taking on faith rather than reading:
 ## Consequences
 
 Two supported ways to run nixcage, so every option added from here has to
-answer what it means undeclared. Today that list is `secretEnv`, `git.*`,
-`principalSubjects`, `bridges`, `cages.*` and `bounds`: none has an undeclared
-equivalent, so an undeclared session has no secrets, no git identity, no
-declared subjects, no bridge to be placed on, and whatever default each
-substrate has. `status` says so, rather than leaving the difference to be
-inferred.
+answer what it means undeclared. Two of today's options are not gaps at all:
+`cages.<path>` addresses one cage among many and undeclared there is exactly
+one, the current directory; and a bridge is a network a host built (ADR-018),
+which an undeclared host has not. `git.*` and `bounds` are answered by
+decisions 10 and 11. What is left with no undeclared equivalent is `secretEnv`
+and `principalSubjects`: an undeclared session has no secrets, because the
+host environment is never read, and no declared subjects. `status` says so,
+rather than leaving the difference to be inferred.
+
+To keep that question cheap to answer as options are added, the declaration is
+one thing the code asks rather than a spelling scattered through it: a single
+reader with two implementations, the rendered file and the undeclared
+defaults. A new option then has one place to state its undeclared value, and
+the suite can enumerate them. Retrofitting this after `[ -f
+/etc/nixcage/... ]` has spread through the script costs far more than writing
+it this way now.
 
 Secrets need nothing new: `write_secret_env` already returns early when
 `/etc/nixcage/secret-env` is absent, so an undeclared session simply has none.
@@ -189,7 +227,11 @@ needs. It is treated here as a fixed number, and it may not be one; trimming
 it is worth a measurement before the mode is called cheap.
 
 The guest is built rather than downloaded on a machine with only
-cache.nixos.org, because 204 of its derivations are nixcage's own. Publishing
+cache.nixos.org, because 204 of its derivations are nixcage's own. How long
+that takes has not been measured, and the count is misleading on its own:
+those derivations are unit files, `/etc` sets and a toplevel, not compilers,
+so the wait may be a minute rather than an hour. Measure it before quoting
+either. Publishing
 them to a binary cache on release turns the first microVM session from a
 compile into a fetch; until that exists, decision 6's "realised on demand"
 means "compiled on demand" for the first caller.
@@ -237,6 +279,7 @@ The mode itself is checked by what a session is given rather than by what it
 prints, with no host config in place:
 
 ```
+time nix build <the guest toplevel>             # open: what 204 own derivations cost
 nixos-version --json                            # the revision decision 9 builds against
 nixcage enter --print-argv                      # the nspawn line, no /etc/nixcage
 nixcage enter --substrate microvm --print-argv  # the vmspawn line, guest path from the cache
