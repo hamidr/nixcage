@@ -587,10 +587,10 @@ cmd_rm() {
       exit 1
     fi
   else
-    if [[ ! -f "$PWD/flake.nix" ]]; then
-      log_err "Usage: nixcage rm [name]  (run without a name from inside a project)"
-      exit 1
-    fi
+    # Without a name this is the cage of the directory it was run from, and a
+    # project is any directory under a workspace root (ADR-021). The root is
+    # what says whether this is one, so it is what is asked.
+    check_workspace_root "$PWD"
     name="$(container_name_for "$PWD")"
   fi
 
