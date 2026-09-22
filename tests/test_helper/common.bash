@@ -20,7 +20,10 @@ fi
 # to macos so the suite behaves identically on Linux CI/dev machines;
 # linux_mode.bats overrides it.
 setup_temp_dir() {
-	TEST_TEMP_DIR="$(mktemp -d)"
+	# Resolved, because macOS puts /tmp behind a symlink to /private/tmp and
+	# nixcage resolves a path before handing it to vmspawn. An unresolved
+	# root would make a test compare the two spellings of one directory.
+	TEST_TEMP_DIR="$(cd "$(mktemp -d)" && pwd -P)"
 	export TEST_TEMP_DIR
 	export NIXCAGE_OS=macos
 	export XDG_STATE_HOME="$TEST_TEMP_DIR/state"
