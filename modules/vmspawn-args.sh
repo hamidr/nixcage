@@ -154,3 +154,16 @@ nixcage_vmspawn_file_binds() {
 		n=$((n + 1))
 	done
 }
+
+## nixcage_vmspawn_bind_resolved <bind word>
+## The bind word with its source resolved: nspawn follows a symlink given
+## as a source, virtiofsd refuses to share one (EINVAL entering its
+## sandbox, seen 2026-09-22 on a directory that was a symlink into the
+## store), so the guest is handed the directory itself.
+nixcage_vmspawn_bind_resolved() {
+	local word="$1" flag src rest
+	flag="${word%%=*}"
+	rest="${word#*=}"
+	src="${rest%%:*}"
+	printf '%s=%s:%s\n' "$flag" "$(readlink -f "$src")" "${rest#*:}"
+}

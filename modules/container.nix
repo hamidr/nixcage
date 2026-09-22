@@ -339,7 +339,7 @@ let
           src="''${bind#--bind=}"; src="''${src#--bind-ro=}"; src="''${src%%:*}"
           [ ! -f "$src" ] || continue
           [ -d "$src" ] || die "not a directory or a file, and nothing else crosses into a microvm: $src"
-          bind_words+=("$bind")
+          bind_words+=("$(nixcage_vmspawn_bind_resolved "$bind")")
         done
 
         ## The image --disk asks for (decision 5): in a directory storage

@@ -44,9 +44,11 @@ into `<state>/<cage>/session-<pid>.bind/<n>/file`, and shares that
 directory read-only at `/run/nixcage/bind/<n>` in the guest. The staging
 directory is a sibling of the session's skeleton and never inside it,
 since the skeleton is the guest's root share; it is removed with the
-skeleton at exit. A directory passes through as before. A socket, a
-device or anything else is still refused before boot, with the refusal
-now saying what does cross.
+skeleton at exit. A directory passes through with its source resolved, since nspawn
+follows a symlink given as a source and virtiofsd refuses to share one
+(`EINVAL` entering its sandbox, on a directory that was a symlink into
+the store). A socket, a device or anything else is still refused before
+boot, with the refusal now saying what does cross.
 
 **2. The guest puts each file where it was asked for.** The credential
 gains a `files` array (`n`, `dst`, `ro`), written from `--file=N:ro|rw:DST`

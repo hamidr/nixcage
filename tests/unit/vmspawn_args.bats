@@ -139,3 +139,18 @@ teardown() {
 	assert_success
 	assert_output '{"uid":1000,"gid":100,"home":"/root","cwd":"/workspace","tty":false,"agent":false,"env":{"HOME":"/root"},"files":[{"n":0,"dst":"/run/f/key","ro":true},{"n":1,"dst":"/run/f/token","ro":false}],"argv":["true"]}'
 }
+
+# nixcage_vmspawn_bind_resolved <bind word>: nspawn follows a symlink given
+# as a bind's source; virtiofsd does not, and refuses the share with EINVAL
+# (seen 2026-09-22: a directory that was a symlink into the store). The
+# source is resolved here so the guest gets the directory itself.
+
+@test "a bind whose source is a symlink is handed to vmspawn with the source resolved" {
+	mkdir -p "$TEST_TEMP_DIR/real"
+	ln -s "$TEST_TEMP_DIR/real" "$TEST_TEMP_DIR/link"
+	run nixcage_vmspawn_bind_resolved "--bind-ro=$TEST_TEMP_DIR/link:/run/x/skills"
+	assert_success
+	assert_output "--bind-ro=$TEST_TEMP_DIR/real:/run/x/skills"
+	run nixcage_vmspawn_bind_resolved "--bind=$TEST_TEMP_DIR/real:/run/x/w"
+	assert_output "--bind=$TEST_TEMP_DIR/real:/run/x/w"
+}
