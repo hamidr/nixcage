@@ -14,7 +14,7 @@ document, then regenerate.
 
 | # | Title | Status | Phases | Depends On | Summary | Flags |
 | --- | --- | --- | --- | --- | --- | --- |
-| [PRD-001](PRD-001-a-cage-per-project.md) | A cage per project, entered with one command, on the machine the developer already has | implementing | 4/5 | -- | any flake directory enters an isolated container in one command, on Linux natively and on macOS in one shared VM |  |
+| [PRD-001](PRD-001-a-cage-per-project.md) | A cage per project, entered with one command, on the machine the developer already has | implementing | 4/5 | -- | any directory under a workspace root enters an isolated container in one command, natively on Linux and in a VM on macOS |  |
 | [PRD-002](PRD-002-a-flake-closure-as-a-kubernetes-volume.md) | A flake's closure reaches a Kubernetes pod as a volume, not as an image | proposed | 0/3 | PRD-001, ADR-009, ADR-011, ADR-014 | one flake root runs in a cage locally and, via nixkube, in a pod; nixcage pushes it and emits the fragment |  |
 
 ## ADRs

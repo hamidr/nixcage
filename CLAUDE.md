@@ -10,8 +10,10 @@ systemd-vmspawn with a kernel of its own (ADR-019). On Linux the cages run
 natively on the host (config via `nixosModules.host` in the host's NixOS
 configuration). On macOS they run in
 one shared NixOS microVM (microvm.nix + qemu) that exists to provide a Linux
-kernel. A project is any flake directory under a
-configured workspace root (`devShells.default` is optional; see ADR-005) -- there are no nixcage-specific files in projects.
+kernel. A project is any directory under a
+configured workspace root (`flake.nix` and `devShells.default` are both
+optional; see ADR-021 and ADR-005) -- there are no nixcage-specific files in
+projects.
 The primary use case is running AI coding agents in isolation.
 
 nixcage runs cages; it has no opinion about what is built on them. What a

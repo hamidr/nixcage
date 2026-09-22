@@ -19,10 +19,11 @@ existing sops-nix setup, never from your shell.
 
 ## What you get
 
-- **Nothing to add to a project.** A project is any flake directory under a
+- **Nothing to add to a project.** A project is any directory under a
   workspace root you name. The project's own `devShells.default` is the
-  environment inside the cage, so what the agent gets is what the project
-  already says it needs. No Dockerfile, no image, no nixcage file in the
+  environment inside the cage when it declares one, so what the agent gets is
+  what the project already says it needs; a directory that declares none gets
+  the base container shell. No Dockerfile, no image, no nixcage file in the
   repo.
 - **One command.** `cd` into a project and `nixcage enter`; you are in the
   cage, in the devShell, in the project. `nixcage enter -- claude` runs the
@@ -168,10 +169,12 @@ flake can serve a macOS laptop and a NixOS desktop from one repo.
 
 ## Projects
 
-A project is any flake directory under a workspace root. There is no
+A project is any directory under a workspace root. There is no
 `nixcage init` and no nixcage file in the repo -- `devShells.default` is the
-entire interface. Want claude-code in a project? Put it in that project's
-devShell (see `examples/project/`). nixcage installs nothing into containers.
+entire interface, and it is optional: a directory with an `.envrc` is entered
+through direnv, one with neither gets the base container shell. Want
+claude-code in a project? Put it in that project's devShell (see
+`examples/project/`). nixcage installs nothing into containers.
 
 ## Commands
 

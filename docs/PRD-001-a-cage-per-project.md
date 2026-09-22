@@ -4,7 +4,7 @@ title: A cage per project, entered with one command, on the machine the develope
 status: implementing
 date: 2026-09-17
 status_date: 2026-09-17
-summary: any flake directory enters an isolated container in one command, on Linux natively and on macOS in one shared VM
+summary: any directory under a workspace root enters an isolated container in one command, natively on Linux and in a VM on macOS
 depends_on: []
 supersedes: []
 superseded_by: []
