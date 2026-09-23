@@ -543,10 +543,10 @@ microvm_realise() {
   # does that costs more than the session it was asked for.
   log_warn "This host declared nothing, so a microVM session is built here first."
   log_warn "  the guest:  204 derivations, 302.2 MiB of downloads"
-  log_warn "  virtiofsd:  49 MiB"
-  log_warn "  openssh:    what exec and the agent forward reach the guest with"
+  log_warn "  virtiofsd:  44 MiB"
+  log_warn "  openssh:    74 MiB, what exec and the agent forward use"
   [[ -n "$want_qemu" ]] &&
-    log_warn "  qemu:       1562 MiB (this machine has no qemu-system-$(uname -m) of its own)"
+    log_warn "  qemu:       1450 MiB (this machine has no qemu-system-$(uname -m) of its own)"
   read -rp "Realise them now? [y/N] " answer
   if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
     log_err "Nothing realised. A microVM session needs them; an nspawn session does not."

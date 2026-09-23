@@ -111,8 +111,9 @@ are realised together on the first `enter --substrate microvm` and their store
 paths cached in the state directory, the way `rebuild` caches the runner on
 macOS and the way 1.2.0 cached its own build under `.nixcage-vm/`. The numbers
 say why: the guest is 204 derivations and 302.2 MiB of downloads (949.9 MiB
-unpacked) on the flake's pinned nixpkgs, and qemu's closure is 1562 MiB
-against cache.nixos.org, virtiofsd's 49 MiB. In the closure, all of it would
+unpacked) on the flake's pinned nixpkgs, and against cache.nixos.org qemu's
+closure is 1450 MiB, openssh's 74 MiB and virtiofsd's 44 MiB
+(`docs/MEASUREMENTS.md`). In the closure, all of it would
 be paid by `nix run github:hamidr/nixcage --help`, and paid by every nspawn
 session, which never runs qemu. vmspawn is part of systemd and is already on
 the host a cage runs on.
@@ -122,7 +123,7 @@ another is announced before it is spent.** `systemd-vmspawn` finds its
 hypervisor itself -- `find_qemu_binary()` searches `PATH` for
 `qemu-system-<arch>`, and it supports no other backend -- so a host that
 already runs virtual machines needs nothing from nixcage. Only a host without
-one has qemu realised for it, and undeclared that is 1562 MiB against
+one has qemu realised for it, and undeclared that is 1450 MiB against
 cache.nixos.org on top of the guest's 302.2 MiB and 204 builds, so the session
 says what it is about to fetch and build and asks before doing it. A declared
 host is unaffected: `nixcage.microvm.enable` already puts qemu and virtiofsd
@@ -278,16 +279,10 @@ what is added is the case where the file is not there.
 
 The costs decision 6 turns on are read rather than assumed:
 
-```
-nix build --dry-run --impure --expr '<the guest toplevel for x86_64-linux>'
-# these 204 derivations will be built:
-# these 301 paths will be fetched (302.2 MiB download, 949.9 MiB unpacked)
-
-nix path-info --store https://cache.nixos.org -S nixpkgs#legacyPackages.x86_64-linux.qemu_kvm
-# 1562 MiB
-nix path-info --store https://cache.nixos.org -S nixpkgs#legacyPackages.x86_64-linux.virtiofsd
-# 49 MiB
-```
+`scripts/measure` runs them and writes `docs/MEASUREMENTS.md`, which carries
+each number beside the command, the date and the host that produced it. The
+numbers quoted above came from it; a number quoted anywhere without that
+behind it is one nobody has checked.
 
 A slimmer qemu is not a saving unless nixcage caches it: an override of
 `qemu_kvm` is absent from cache.nixos.org, so asking for one makes the caller

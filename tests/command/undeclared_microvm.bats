@@ -102,7 +102,7 @@ enter_microvm() {
 @test "a machine without a qemu is told what realising one costs, and asked" {
 	run bash -c "echo n | bash '$NIXCAGE_BIN' enter --substrate microvm"
 	[ "$status" -ne 0 ]
-	[[ "$output" == *1562* ]]
+	[[ "$output" == *1450* ]]
 	[[ "$output" == *qemu* ]]
 	[ ! -f "$TEST_TEMP_DIR/sudo-calls" ]
 }

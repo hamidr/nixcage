@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Every number the ADRs assert, measured rather than remembered, into
+# docs/MEASUREMENTS.md.
+#
+# A claim in an ADR is worth what its measurement is worth, and prose cannot
+# say when it was last true. This writes each command beside its result and
+# the date and host it ran on, and says plainly which measurements this host
+# could not make: a closure size is a query against a binary cache and works
+# anywhere, while a build time and a boot are Linux, and a macOS host has
+# neither to offer.
+#
+# Usage: scripts/measure [system]   (default x86_64-linux)
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+SYSTEM="${1:-x86_64-linux}"
+OUT=docs/MEASUREMENTS.md
+HOST_SYSTEM="$(nix eval --impure --raw --expr 'builtins.currentSystem')"
+
+# A closure's size against the binary cache, in MiB, for a flake attribute.
+# The store is remote, so this answers on any host for any system: it is what
+# a caller would download, not what this machine holds.
+closure_mib() {
+  local attr="$1" path bytes
+  path="$(nix eval --raw ".#packages.$SYSTEM.$attr" 2>/dev/null)" || {
+    echo "unavailable"
+    return 0
+  }
+  bytes="$(nix path-info -S --store https://cache.nixos.org "$path" 2>/dev/null |
+    awk '{print $2}')" || bytes=""
+  if [[ -z "$bytes" ]]; then
+    echo "not in the cache"
+    return 0
+  fi
+  echo "$((bytes / 1024 / 1024)) MiB"
+}
+
+# What a first build of an attribute would fetch and build, from the two
+# summary lines nix prints before it would start.
+dry_run_lines() {
+  local attr="$1"
+  nix build --dry-run ".#packages.$SYSTEM.$attr" 2>&1 |
+    grep -E "will be built|will be fetched" || echo "(nothing to do: already realised)"
+}
+
+echo "measuring for $SYSTEM on $HOST_SYSTEM ..." >&2
+
+guest_dry="$(dry_run_lines guest)"
+cli_dry="$(dry_run_lines default)"
+qemu_closure="$(closure_mib qemu)"
+virtiofsd_closure="$(closure_mib virtiofsd)"
+openssh_closure="$(closure_mib openssh)"
+
+{
+  cat <<EOF
+# Measurements
+
+Written by \`scripts/measure\`, which is the only thing that should write it.
+Every number an ADR asserts belongs here with the command that produced it,
+the date it ran, and the host it ran on. A number quoted anywhere else without
+one of these behind it is a number nobody has checked.
+
+- Measured for: \`$SYSTEM\`
+- Measured on: \`$HOST_SYSTEM\`
+- Date: $(date -u +%Y-%m-%d)
+- Revision: \`$(git rev-parse --short HEAD)\`
+
+## What a microVM session realises the first time it is asked for
+
+ADR-023 decision 6 turns on these: they are what an nspawn session would pay
+for and never use, which is why they are flake outputs rather than part of
+what the CLI carries.
+
+\`\`\`
+nix build --dry-run .#packages.$SYSTEM.guest
+$guest_dry
+\`\`\`
+
+| Output | Closure against cache.nixos.org |
+| --- | --- |
+| \`qemu\` | $qemu_closure |
+| \`virtiofsd\` | $virtiofsd_closure |
+| \`openssh\` | $openssh_closure |
+
+Each is \`nix path-info -S --store https://cache.nixos.org\` over the path
+\`nix eval --raw .#packages.$SYSTEM.<output>\` answers with. A slimmer qemu is
+not a saving unless nixcage caches it: an override of \`qemu_kvm\` is absent
+from cache.nixos.org, so asking for one makes the caller compile qemu rather
+than fetch it.
+
+## What \`nix run github:hamidr/nixcage\` fetches
+
+ADR-023 decision 6 says the layer travels with the CLI and the microVM's
+parts do not. This is that claim as a number.
+
+\`\`\`
+nix build --dry-run .#packages.$SYSTEM.default
+$cli_dry
+\`\`\`
+
+Read as a closure size this would answer "not in the cache": nixcage
+publishes no binary cache of its own, so its four derivations -- the CLI, the
+guest script, the container profile and the wrapper -- are built by whoever
+runs it, and only their dependencies are fetched. That is also why the guest
+above says 204 derivations rather than a download: they are unit files, /etc
+sets and a toplevel, not compilers, but they are still work the first caller
+does.
+
+## Not measured here
+
+A macOS host can query a binary cache for any system, which is why the
+closures above are real. It cannot build a Linux derivation or boot a Linux
+kernel, so these remain open, with the command each one wants:
+
+| Claim | Where it is asserted | Command |
+| --- | --- | --- |
+| What the guest's own 204 derivations cost in time | ADR-023 Consequences | \`time nix build .#packages.$SYSTEM.guest\` |
+| That building the guest against the host's revision leaves only nixcage's own derivations | ADR-023 decision 9 | \`nix build --dry-run .#packages.$SYSTEM.guest --override-input nixpkgs github:NixOS/nixpkgs/\$(nixos-version --json \| jq -r .nixpkgsRevision)\` |
+| A microVM cage boots in about seven seconds | ADR-019, README | \`time nixcage enter --substrate microvm -- true\` |
+| An nspawn cage enters in about a tenth of a second | README | \`time nixcage enter -- true\` |
+| What the guest's 302.2 MiB is made of, and whether it can be trimmed | ADR-023 Consequences | \`nix path-info -Sh --store https://cache.nixos.org --closure-size\` over the guest, sorted |
+
+Run \`scripts/measure\` on a Linux host and this section shrinks.
+EOF
+} >"$OUT"
+
+echo "wrote $OUT" >&2
