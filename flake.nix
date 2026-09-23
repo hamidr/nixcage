@@ -21,7 +21,12 @@
       ];
 
       perSystem =
-        { pkgs, lib, ... }:
+        {
+          self',
+          pkgs,
+          lib,
+          ...
+        }:
         let
           runtimeDeps = with pkgs; [
             jq
@@ -98,6 +103,89 @@
                 };
               };
             };
+
+          ## The one test that boots what every other test only describes: a
+          ## NixOS machine running the host module, a second running nothing
+          ## but the CLI, and a cage entered on each for real. Linux only,
+          ## because a NixOS test is a Linux virtual machine.
+          checks = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            cage = pkgs.testers.runNixOSTest {
+              name = "nixcage-enters-a-cage";
+
+              nodes.declared = {
+                imports = [ inputs.self.nixosModules.host ];
+                nixcage.workspaceRoots = [ "/srv" ];
+                ## Declared here because the uid verb refuses without it, and
+                ## that refusal is what the bare node is for.
+                nixcage.principalUidRange = {
+                  base = 700000;
+                  size = 64;
+                };
+                environment.systemPackages = [ self'.packages.default ];
+                virtualisation.memorySize = 2048;
+              };
+
+              ## No module, nothing under /etc/nixcage: the cage is the
+              ## directory the caller stands in, and what a session is built
+              ## from is what the CLI carries (ADR-023).
+              nodes.bare = {
+                environment.systemPackages = [ self'.packages.default ];
+                virtualisation.memorySize = 2048;
+              };
+
+              testScript = ''
+                start_all()
+                declared.wait_for_unit("multi-user.target")
+                bare.wait_for_unit("multi-user.target")
+
+                with subtest("a declared host enters the cage of a project"):
+                    declared.succeed("mkdir -p /srv/proj")
+                    declared.succeed("cd /srv/proj && nixcage enter -- true")
+                    record = declared.succeed(
+                        "cat /var/lib/nixcage/containers/*/placement"
+                    )
+                    assert '"declared":true' in record, record
+
+                with subtest("a project outside every root is refused"):
+                    declared.succeed("mkdir -p /elsewhere/proj")
+                    declared.fail("cd /elsewhere/proj && nixcage enter -- true")
+
+                with subtest("what the session was given reaches it"):
+                    out = declared.succeed(
+                        "cd /srv/proj && nixcage enter --setenv K=V -- sh -c 'echo $K'"
+                    )
+                    assert "V" in out, out
+
+                with subtest("the project is the session's workspace"):
+                    declared.succeed("touch /srv/proj/marker")
+                    declared.succeed(
+                        "cd /srv/proj && nixcage enter -- test -e /workspace/marker"
+                    )
+
+                with subtest("a host that declared nothing enters the directory it is in"):
+                    bare.succeed("mkdir -p /root/work")
+                    bare.succeed("cd /root/work && nixcage enter -- true")
+                    record = bare.succeed("cat /var/lib/nixcage/containers/*/placement")
+                    assert '"declared":false' in record, record
+                    assert '"writer":"/nix/store/' in record, record
+
+                with subtest("the directories nobody means are refused"):
+                    bare.fail("cd / && nixcage enter -- true")
+                    bare.fail("cd /root && nixcage enter -- true")
+                    bare.fail("cd /nix/store && nixcage enter -- true")
+
+                with subtest("a verb only a declaration can answer refuses, naming it"):
+                    out = bare.fail(
+                        "nixcage exec -- nixcage-container uid worker 2>&1"
+                    )
+                    assert "nixcage.principalUidRange" in out, out
+                    uid = declared.succeed(
+                        "nixcage exec -- nixcage-container uid worker"
+                    ).strip()
+                    assert uid.isdigit(), uid
+              '';
+            };
+          };
 
           devShells.default = pkgs.mkShell {
             buildInputs = with pkgs; [
