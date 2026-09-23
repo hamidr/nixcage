@@ -447,3 +447,37 @@ teardown() {
 	run cat "$TEST_TEMP_DIR/resolv.conf"
 	assert_output "nameserver 10.77.0.1"
 }
+
+# The layer and the guest a session is built from, where nothing rendered
+# /etc/nixcage (ADR-023). sudo clears the environment, so they arrive named
+# rather than inherited, and they are store paths for the same reason a store
+# root is: a path outside the store is not one a session could have been built
+# from.
+
+@test "given --profile, a session is built from the layer it names" {
+	nixcage_enter_parse --profile /nix/store/abc-nixcage-container-profile n /srv/w
+	[ "$NIXCAGE_ENTER_PROFILE" = /nix/store/abc-nixcage-container-profile ]
+}
+
+@test "given --guest, a microvm session boots the toplevel it names" {
+	nixcage_enter_parse --guest /nix/store/def-nixos-system n /srv/w
+	[ "$NIXCAGE_ENTER_GUEST" = /nix/store/def-nixos-system ]
+}
+
+@test "given neither, a session has the host's own" {
+	nixcage_enter_parse n /srv/w
+	[ -z "$NIXCAGE_ENTER_PROFILE" ]
+	[ -z "$NIXCAGE_ENTER_GUEST" ]
+}
+
+@test "a profile outside the store stops the parse" {
+	run nixcage_enter_parse --profile /etc/nixcage/profile n /srv/w
+	assert_failure
+	assert_output --partial "not a store path: /etc/nixcage/profile"
+}
+
+@test "a guest outside the store stops the parse" {
+	run nixcage_enter_parse --guest /var/lib/guest n /srv/w
+	assert_failure
+	assert_output --partial "not a store path: /var/lib/guest"
+}

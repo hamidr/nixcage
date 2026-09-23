@@ -34,6 +34,8 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_MEMORY=""
 	NIXCAGE_ENTER_CPUS=""
 	NIXCAGE_ENTER_PRINT_ARGV=""
+	NIXCAGE_ENTER_PROFILE=""
+	NIXCAGE_ENTER_GUEST=""
 	NIXCAGE_ENTER_SUBSTRATE=""
 	NIXCAGE_ENTER_DISK=""
 	NIXCAGE_ENTER_BINDS=()
@@ -131,6 +133,27 @@ nixcage_enter_parse() {
 		--setenv)
 			arg="$(nixcage_setenv_arg "${2:-}")" || return 1
 			NIXCAGE_ENTER_ENV+=("$arg")
+			shift 2 || return 1
+			;;
+		## The userland layer a session is given, and the toplevel a microVM
+		## boots. A host that rendered /etc/nixcage named both there and
+		## passes neither; a caller that realised its own says so here,
+		## because sudo clears the environment and an inherited path would
+		## make the coupling invisible to the interface that documents it.
+		--profile)
+			if ! nixcage_store_root_ok "${2:-}"; then
+				echo "nixcage: not a store path: ${2:-}" >&2
+				return 1
+			fi
+			NIXCAGE_ENTER_PROFILE="$2"
+			shift 2 || return 1
+			;;
+		--guest)
+			if ! nixcage_store_root_ok "${2:-}"; then
+				echo "nixcage: not a store path: ${2:-}" >&2
+				return 1
+			fi
+			NIXCAGE_ENTER_GUEST="$2"
 			shift 2 || return 1
 			;;
 		--store-root)

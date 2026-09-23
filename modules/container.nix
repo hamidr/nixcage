@@ -124,8 +124,10 @@ let
       ## one. Absent on a host that declares neither.
       CONTAINER_CONFIG=/etc/nixcage/container
       ## Resolve the /etc symlink to its store path: the container has its
-      ## own /etc, but the store bind makes store paths valid inside.
-      PROFILE="$(readlink -f /etc/nixcage/profile)"
+      ## own /etc, but the store bind makes store paths valid inside. Absent
+      ## where nothing rendered /etc/nixcage (ADR-023), and then the session
+      ## names the layer it was built from with --profile.
+      PROFILE_LINK=/etc/nixcage/profile
       SECRET_ENV=/etc/nixcage/secret-env
 
       die() { echo "nixcage-container: $*" >&2; exit 1; }
@@ -133,7 +135,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--memory <size>] [--cpus <n>] [--substrate nspawn|microvm] [--disk <size>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--memory <size>] [--cpus <n>] [--substrate nspawn|microvm] [--disk <size>] [--profile <path>] [--guest <path>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -463,6 +465,19 @@ let
         local network_addr="$NIXCAGE_ENTER_NETWORK_ADDR"
         local network_ns="$NIXCAGE_ENTER_NETWORK_NS"
         local no_nix_daemon="$NIXCAGE_ENTER_NO_NIX_DAEMON"
+        ## The layer this session is built from: the one the host rendered,
+        ## else the one the caller named. Resolved once here, because every
+        ## path below spells it and a session with neither has nothing to run.
+        PROFILE="$(readlink -f "$PROFILE_LINK" 2>/dev/null || true)"
+        if [ -n "$NIXCAGE_ENTER_PROFILE" ]; then
+          PROFILE="$NIXCAGE_ENTER_PROFILE"
+        fi
+        [ -n "$PROFILE" ] ||
+          die "no container profile: pass --profile <path>, or import nixcage nixosModules.host"
+        if [ -n "$NIXCAGE_ENTER_GUEST" ]; then
+          MICROVM_GUEST="$NIXCAGE_ENTER_GUEST"
+        fi
+
         local -a store_roots=(''${NIXCAGE_ENTER_STORE_ROOTS[@]+"''${NIXCAGE_ENTER_STORE_ROOTS[@]}"})
         local -a asked_binds=(''${NIXCAGE_ENTER_BINDS[@]+"''${NIXCAGE_ENTER_BINDS[@]}"})
         local -a asked_env=(''${NIXCAGE_ENTER_ENV[@]+"''${NIXCAGE_ENTER_ENV[@]}"})
