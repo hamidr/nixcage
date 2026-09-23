@@ -212,3 +212,12 @@ write_host_config() {
 	[ "$status" -eq 0 ]
 	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" != *--git-name* ]]
 }
+
+
+@test "status on a declared host reads its config and says nothing about undeclared mode" {
+	write_host_config "$TEST_TEMP_DIR/src"
+	run_nixcage status
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"$TEST_TEMP_DIR/src"* ]]
+	[[ "$output" != *"nothing declared"* ]]
+}

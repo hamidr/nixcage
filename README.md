@@ -103,6 +103,36 @@ See `docs/ADR-019-a-cage-may-run-in-a-microvm-behind-the-same-enter.md`.
 nix profile install github:hamidr/nixcage
 ```
 
+## Trying it on Linux without configuring anything
+
+```bash
+cd ~/Src/myproject
+nix run github:hamidr/nixcage -- enter
+```
+
+On a Linux host that has declared nothing, the cage is the directory you are
+standing in. There is no workspace root to satisfy, because there is no host
+configuration to declare one; what is refused instead is the directory nobody
+means: `/`, `/nix`, `/nix/store`, your home directory itself, and anything you
+do not own. The session's bounds are half of this machine's memory and cores,
+announced when the session starts, and its git identity is read from your own
+`git config` (your `~/.gitconfig` is never bound in -- it carries
+`credential.helper` and signing configuration).
+
+Cages entered this way live at `/var/lib/nixcage`, exactly where they live
+after you import the module, so nothing is thrown away when you keep nixcage.
+`nixcage status` says what an undeclared host does not have: no `secretEnv`,
+since the host environment is never read, and no declared subjects, so
+`nixcage-container uid` and `storage ensure` refuse and name the option that
+would answer them.
+
+`--substrate microvm` works here too, and the first session that asks for one
+builds the guest and, where this machine has no `qemu-system-<arch>` of its
+own, fetches qemu. What that costs is printed and confirmed before it is
+spent, and the result is cached, so only the first microVM session pays.
+`nix run` re-evaluates the flake every time; `nix profile install` is the
+honest next step once you keep it.
+
 ## Configuration on Linux
 
 Containers run on the host; there is no VM. Import the host module in your
@@ -125,7 +155,8 @@ nixcage = {
   # substrate.default = "nspawn";
   ## What a cage may use, and what one cage may use. A session's --memory
   ## and --cpus outrank both. Unset leaves the substrate's own default:
-  ## unbounded on nspawn, 2 GiB and one vCPU on a microVM.
+  ## unbounded on nspawn, 2 GiB and one vCPU on a microVM. A host that
+  ## declared nothing at all gets half this machine instead.
   # bounds = { memory = "4G"; cpus = 4; };
   # cages."/home/me/Src/untrusted".bounds = { memory = "8G"; cpus = 8; };
 };

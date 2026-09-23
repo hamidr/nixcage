@@ -147,3 +147,17 @@ GIT
 	[ "$status" -eq 0 ]
 	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" != *--git-name* ]]
 }
+
+
+# What a session does not get where nothing was declared, said rather than
+# left to be inferred (ADR-023).
+@test "status with no host config says what nothing declared means" {
+	mkdir -p "$TEST_TEMP_DIR/proj"
+	cd "$TEST_TEMP_DIR/proj"
+	run_nixcage status
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"nothing declared"* ]]
+	[[ "$output" == *"$PWD"* ]]
+	[[ "$output" == *secretEnv* ]]
+	[[ "$output" == *principalSubjects* ]]
+}

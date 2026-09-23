@@ -841,8 +841,18 @@ cmd_status() {
 
   if [[ "$OS" == "linux" ]]; then
     host_read_config
-    echo "  Host config:  $HOST_CONFIG"
-    echo "  Roots:        $VM_WORKSPACE_ROOTS"
+    if host_declared; then
+      echo "  Host config:  $HOST_CONFIG"
+      echo "  Roots:        $VM_WORKSPACE_ROOTS"
+    else
+      # Two options have no undeclared equivalent, and a caller who is not
+      # told reads their absence as a bug rather than as this mode (ADR-023).
+      echo "  Host config:  nothing declared at $HOST_CONFIG"
+      echo "  Cage:         $PWD, the directory you are standing in"
+      echo "  Without one:  no secretEnv, since the host environment is never"
+      echo "                read, and no principalSubjects, since a subject is"
+      echo "                something a host declares"
+    fi
     echo "  Containers:"
     sudo nixcage-container list 2>/dev/null | sed 's/^/    /' || true
     return

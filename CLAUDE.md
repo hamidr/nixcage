@@ -212,6 +212,19 @@ VM data volume at first boot; `nixcage.secretEnv` maps env vars to secret
 names, injected per session by the guest script from `/run/secrets`. The
 host environment is never read.
 
+**A host that declared nothing** (ADR-023) -- with no `/etc/nixcage/config`,
+`host_declared` answers false and every reader gives the undeclared answer
+instead of refusing: `check_workspace_root` takes `$PWD` (refusing `/`,
+`/nix`, `/nix/store`, `$HOME` itself and anything the caller does not own),
+`read_container_config` yields no subjects and no dataset, and the `uid` and
+`storage ensure` verbs refuse naming the option that carries what they need.
+What a session is built from travels as flags over sudo, because sudo clears
+the environment: `--profile`, and for a microVM `--guest` and
+`--microvm-path`, plus `--git-name`/`--git-email` for the identity the module
+would have rendered. Bounds come from the machine, half of each. The layer is
+in what `nix run` fetches; the guest, qemu and virtiofsd are flake outputs
+realised on the first microVM session and cached in `$STATE/microvm`.
+
 ### Platform branching
 
 `detect_os()` (overridable with `NIXCAGE_OS` for tests) selects the
