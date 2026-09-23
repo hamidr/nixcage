@@ -109,6 +109,95 @@
           ## but the CLI, and a cage entered on each for real. Linux only,
           ## because a NixOS test is a Linux virtual machine.
           checks = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            ## The sequence a dependant performs, against a real machine: a
+            ## uid for a principal, storage given to that uid, a session that
+            ## runs as it, and a way back to the host. The parts have tests of
+            ## their own; what is asserted here is the seam between them and
+            ## the promises that only real state can show (ADR-009).
+            primitives = pkgs.testers.runNixOSTest {
+              name = "nixcage-exports-four-primitives";
+
+              nodes.host = {
+                imports = [ inputs.self.nixosModules.host ];
+                nixcage.workspaceRoots = [ "/srv" ];
+                nixcage.principalUidRange = {
+                  base = 700000;
+                  size = 64;
+                };
+                nixcage.principalSubjects = [ "agent" ];
+                environment.systemPackages = [ self'.packages.default ];
+                virtualisation.memorySize = 2048;
+              };
+
+              testScript = ''
+                start_all()
+                host.wait_for_unit("multi-user.target")
+
+                def container(*words):
+                    return host.succeed(
+                        "nixcage exec -- nixcage-container " + " ".join(words)
+                    ).strip()
+
+                with subtest("one name always answers with one number"):
+                    first = container("uid", "worker")
+                    again = container("uid", "worker")
+                    assert first == again, (first, again)
+                    assert int(first) >= 700000, first
+
+                with subtest("a second principal is a block of its own"):
+                    other = container("uid", "builder")
+                    assert other != first, (other, first)
+                    assert abs(int(other) - int(first)) >= 2, (other, first)
+
+                with subtest("a subject of a principal is that principal's own number"):
+                    subject = container("uid", "worker", "agent")
+                    assert int(subject) == int(first) + 1, (subject, first)
+
+                with subtest("allocation only ever moves forward"):
+                    # Not the whole promise: that a number is never reissued
+                    # cannot be shown without losing a principal and asking
+                    # again. What is shown here is the property the promise
+                    # rests on, that a new name never lands under an old one.
+                    third = container("uid", "later")
+                    assert int(third) > max(int(first), int(other)), third
+
+                with subtest("a path given to a uid belongs to it"):
+                    path = container(
+                        "storage", "ensure", "/var/lib/nixcage/work/worker", first
+                    )
+                    assert path == "/var/lib/nixcage/work/worker", path
+                    owner = host.succeed("stat -c %u " + path).strip()
+                    assert owner == first, (owner, first)
+
+                with subtest("a path outside what nixcage owns is refused"):
+                    host.fail(
+                        "nixcage exec -- nixcage-container storage ensure "
+                        "/etc/nixcage-elsewhere " + first
+                    )
+
+                with subtest("a session runs as the uid it was given"):
+                    host.succeed("mkdir -p /srv/proj")
+                    out = host.succeed(
+                        "nixcage exec -- nixcage-container enter --uid " + first
+                        + " --setenv K=V --bind-ro /srv:/srv-ro"
+                        + " cage /srv/proj sh -c 'id -u; echo $K; test -e /srv-ro/proj'"
+                    )
+                    assert first in out, (first, out)
+                    assert "V" in out, out
+
+                with subtest("what the session was given is in its record"):
+                    record = host.succeed(
+                        "cat /var/lib/nixcage/containers/cage/placement"
+                    )
+                    assert '"uid":' + first in record, record
+
+                with subtest("exec reaches the machine the cages are on"):
+                    assert "cage" in host.succeed(
+                        "nixcage exec -- nixcage-container list"
+                    )
+              '';
+            };
+
             cage = pkgs.testers.runNixOSTest {
               name = "nixcage-enters-a-cage";
 

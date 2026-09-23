@@ -279,7 +279,9 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 # The one check that boots a cage rather than describing one (task of this
 # round). It cannot run on a macOS host, so what is asserted here is that it
 # still evaluates: a test nobody can build is a test nobody runs.
-@test "the flake carries a check that enters a real cage" {
-	run nix eval --raw "$NIXCAGE_ROOT#checks.x86_64-linux.cage.drvPath"
-	assert_success
+@test "the flake carries the checks that boot a machine" {
+	for check in cage primitives; do
+		run nix eval --raw "$NIXCAGE_ROOT#checks.x86_64-linux.$check.drvPath"
+		assert_success
+	done
 }

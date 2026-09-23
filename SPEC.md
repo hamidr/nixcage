@@ -279,8 +279,10 @@ cover dispatch and pre-VM validation with `sudo`, `nix`, `git` and
 
 What the bats suite does not do is boot a cage: every privileged path is
 asserted against the words it would run, never against a running one. That is
-what `checks.<linux>.cage` is for: a NixOS test with two machines, one running
-the host module and one running nothing but the CLI, entering real cages on
-each and reading the records they leave. It is a Linux virtual machine, so it
+what the NixOS checks are for: `checks.<linux>.cage` runs two machines, one
+with the host module and one with nothing but the CLI, entering real cages on
+each and reading the records they leave, and `checks.<linux>.primitives` runs
+the sequence a dependant performs -- a uid for a principal, storage given to
+that uid, a session that runs as it, and `exec` back to the host. It is a Linux virtual machine, so it
 runs where a Linux builder is (`nix build .#checks.x86_64-linux.cage`) and not
 on a macOS host with none.
