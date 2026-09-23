@@ -644,8 +644,10 @@ let
         ## runs and after (ADR-017). Written before anything else of the
         ## session exists, so a session that dies on the way still left it.
         ## Which nixcage wrote this, and whether it had a declaration to read
-        ## (ADR-023 decision 4). $0 is this script's own store path, which is
-        ## the precise answer to the first.
+        ## (ADR-023 decision 4). $0 is how this script was reached: its store
+        ## path when a session ran it from the store, and the path a module
+        ## installed it at otherwise, which is the difference the field is
+        ## recorded for.
         nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns" "$substrate" \
           "--writer=$0" "--declared=''${NIXCAGE_DECLARED:-}" \
           ''${asked_home:+"--home=$asked_home"} ''${store_roots[@]+"''${store_roots[@]}"} ||

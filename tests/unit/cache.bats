@@ -31,3 +31,23 @@ teardown() {
 	[ "$status" -ne 0 ]
 	[[ "$output" == *rebuild* ]]
 }
+
+
+# A store path name may hold an =, and a reader that splits on every one of
+# them keeps only what precedes the second.
+
+@test "a store path with an equals sign in its name survives the cache" {
+	mkdir -p "$TEST_TEMP_DIR/store/g-nixos=system"
+	MICROVM_CACHE="$XDG_STATE_HOME/nixcage/microvm"
+	echo "GUEST=$TEST_TEMP_DIR/store/g-nixos=system" >"$MICROVM_CACHE"
+	run microvm_cached_args
+	assert_success
+	assert_line "$TEST_TEMP_DIR/store/g-nixos=system"
+}
+
+@test "a workspace root with an equals sign in its path survives the host config" {
+	HOST_CONFIG="$TEST_TEMP_DIR/host-config"
+	echo "WORKSPACE_ROOTS=/srv/a=b:/srv/c" >"$HOST_CONFIG"
+	host_read_config
+	[ "$VM_WORKSPACE_ROOTS" = "/srv/a=b:/srv/c" ]
+}

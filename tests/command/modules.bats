@@ -264,3 +264,13 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 		assert_success
 	done
 }
+
+
+# An undeclared session's git identity is read from the invoking user's own
+# git (ADR-023 decision 11), so the CLI has to have one to ask.
+@test "the CLI carries the git it reads an identity with" {
+	run nix eval --json "$NIXCAGE_ROOT#packages.x86_64-linux.default.drvPath"
+	assert_success
+	run bash -c "sed -n '/runtimeDeps = with pkgs/,/];/p' '$NIXCAGE_ROOT/flake.nix' | grep -qx '            git'"
+	assert_success
+}

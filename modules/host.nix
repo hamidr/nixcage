@@ -207,7 +207,7 @@ in
       '';
     };
 
-        containerPackages = lib.mkOption {
+    containerPackages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
       example = lib.literalExpression "[ pkgs.ripgrep ]";

@@ -701,7 +701,7 @@ cmd_enter() {
     local -a profile=()
     local word
     while IFS= read -r word; do
-      [[ -n "$word" ]] && profile+=("$word")
+      if [[ -n "$word" ]]; then profile+=("$word"); fi
     done < <(container_profile_args)
     # A microVM on a host that declared nothing has no guest to boot and no
     # hypervisor where vmspawn looks, so this session is where they are
@@ -709,14 +709,14 @@ cmd_enter() {
     # before, since its record makes it a microVM session without the flag.
     local -a identity=()
     while IFS= read -r word; do
-      [[ -n "$word" ]] && identity+=("$word")
+      if [[ -n "$word" ]]; then identity+=("$word"); fi
     done < <(git_identity_args)
     local -a microvm=()
     if ! host_declared &&
        { [[ " ${session[*]-} " == *" microvm "* ]] || [[ -s "$MICROVM_CACHE" ]]; }; then
       microvm_realise
       while IFS= read -r word; do
-        [[ -n "$word" ]] && microvm+=("$word")
+        if [[ -n "$word" ]]; then microvm+=("$word"); fi
       done < <(microvm_cached_args)
     fi
     [[ $# -eq 0 ]] && log_info "Entering container $name..."

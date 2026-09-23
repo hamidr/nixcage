@@ -29,6 +29,9 @@
             gnused
             bash
             openssh
+            ## Where nothing was declared, a session's identity is whatever
+            ## this user's own git answers with, so the CLI has to have one.
+            git
           ];
           ## The container layer this nixcage carries. A host that imported
           ## nixosModules.host installs its own and the CLI uses that; where
