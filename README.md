@@ -90,9 +90,9 @@ What differs: a kernel boundary toward the host and toward other cages, no
 nix daemon and no builds inside (the session sees the store and cannot add
 to it, so put the toolchain in the devShell or realise it elsewhere), a
 boot of about seven seconds instead of a tenth, and memory reserved rather
-than shared -- 2 GiB of it, with one vCPU, unless `nixcage.bounds` or
-`--memory`/`--cpus` says otherwise, which is systemd-vmspawn's default and
-not enough to build in. `--disk 2G` adds a persistent image at `/var/lib` for what
+than shared: what `nixcage.bounds` or `--memory`/`--cpus` says, else half this
+machine where nothing was declared, else systemd-vmspawn's own 2 GiB and one
+vCPU, which is not enough to build in. `--disk 2G` adds a persistent image at `/var/lib` for what
 virtiofs is too slow for. This is for a tool you trust less than the rest,
 or one that needs a kernel of its own (eBPF, mount namespaces, modules).
 See `docs/ADR-019-a-cage-may-run-in-a-microvm-behind-the-same-enter.md`.
@@ -235,6 +235,10 @@ exported primitives, which are the whole interface (ADR-009):
 
 | Primitive | What it gives |
 |---|---|
+A `--bind` source is resolved where the cage runs: on Linux that is this host,
+so any path works; on macOS it is the VM, which sees only your workspace
+roots, so a source outside them is not there to bind.
+
 | `nixcage-container enter [--uid n] [--user name] [--subject name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] [--network BRIDGE:ADDR/PREFIX\|ns:PATH] [--dns none\|ADDR] [--no-nix-daemon] [--memory SIZE] [--cpus N] [--substrate nspawn\|microvm] [--disk SIZE] [--print-argv] <name> <project> [cmd]` | A session built out of what you asked for, bounded on its scope when asked; with `--print-argv`, the nspawn or vmspawn line it would run, one word per line, and no session. On a microVM cage (ADR-019) `--memory` and `--cpus` are the guest's own, `--shell` and `ns:` are refused, and `--network` places a tap nixcage makes |
 | `nixcage-container uid <principal> [<subject>]` | A durable uid for a name, never reissued |
 | `nixcage-container storage ensure <path> <uid> [quota]` | That path owned by that uid, bounded where it can be |

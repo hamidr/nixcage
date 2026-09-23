@@ -1,14 +1,16 @@
 # nixcage Specification
 
-Version: 2.0.0
+Version: 5.0.0
 
 ## 1. Purpose
 
 nixcage runs one cage per project: a systemd-nspawn container, or on Linux,
 chosen per cage, a microVM under systemd-vmspawn with a kernel of its own
-(ADR-019). A project is any flake directory with a `devShells.default`
-located under a configured workspace root; `nixcage enter` runs that
-devShell inside the project's cage.
+(ADR-019). A project is any directory under a configured workspace root, and
+on a host that declared none, the directory the caller is standing in
+(ADR-023). `flake.nix` and `devShells.default` are both optional (ADR-021,
+ADR-005): `nixcage enter` runs the project's devShell where it declares one,
+direnv where it has an `.envrc`, and the base container shell otherwise.
 
 On Linux the containers run natively on the host (container boundary between
 projects and toward the host). On macOS, which has no containers, they run in
@@ -24,12 +26,17 @@ The primary use case is running AI coding agents in isolation. See
 
 | Dependency        | Required on | Purpose                          |
 | ----------------- | ----------- | -------------------------------- |
-| Nix (with flakes) | All         | Build the VM image               |
-| ssh, ssh-keygen   | All         | VM control plane                 |
-| KVM               | Linux       | qemu acceleration                |
+| Nix (with flakes) | All         | Realise the layer, the guest and the VM image |
+| systemd           | Linux       | nspawn, the cage's scope, and vmspawn for a microVM (261 or newer) |
+| sudo              | Linux       | Every session is privileged where the cages are |
+| ssh, ssh-keygen   | macOS       | VM control plane                 |
+| KVM               | Linux       | qemu acceleration, and a microVM cage at all |
 | Hypervisor.framework | macOS    | qemu acceleration                |
 | Linux builder     | macOS       | Build aarch64-linux derivations  |
 | bash, coreutils, grep, sed, awk, jq | All | Script runtime   |
+
+NixOS is not required on Linux: a host that has declared nothing runs a cage
+from what the CLI carries (section 3.0.1).
 
 The tool itself is a single Bash script. The flake provides a `devShell` with
 `bash`, `jq`, `shellcheck`, `bats`, and `openssh` for development.
@@ -55,12 +62,33 @@ and renders `/etc/nixcage/config` (`WORKSPACE_ROOTS=a:b`) for the CLI
 the host's own pkgs, and renders its path with `HOST_PLATFORM`,
 `SUBSTRATE_DEFAULT` and `CAGE_SUBSTRATES` into `/etc/nixcage/container`;
 the substrate options are `nixcage.substrate.default` (`nspawn`) and
-`nixcage.cages.<path>.substrate`, and they are the host module's alone. Containers bind
+`nixcage.cages.<path>.substrate`, and they are the host module's alone. It
+renders the bounds a cage may use (`BOUNDS_DEFAULT`, `CAGE_BOUNDS`) the same
+way (ADR-022), and `/etc/nixcage/gitconfig` from `nixcage.git.*`. Containers bind
 the host store read-only and build through the host nix-daemon; `secretEnv`
 resolves against the host's own sops-nix `/run/secrets`. The CLI commands on
 Linux are `enter`, `rm`, and `status`, executing `sudo nixcage-container`
 locally; `rebuild` and `down` fail pointing at `nixos-rebuild`. `NIXCAGE_OS`
 overrides OS detection for tests only.
+
+### 3.0.1 Linux: a host that declared nothing
+
+With no `/etc/nixcage/config`, every reader gives the undeclared answer rather
+than refusing (ADR-023). The cage is `$PWD`; `/`, `/nix`, `/nix/store`, the
+invoking user's home itself and any directory that user does not own are
+refused, since there is no declared root to catch a mistyped `cd`. The session
+is built from what this nixcage carries, named across sudo because sudo clears
+the environment: `--profile`, and for a microVM `--guest` and
+`--microvm-path`, plus `--git-name`/`--git-email` for the identity the module
+would have rendered, read from the invoking user's own `git config`. A
+declared host passes none of them and refuses them. Bounds are half the
+machine's memory and cores, announced. The guest, qemu where the machine has
+no `qemu-system-<arch>` of its own, virtiofsd and openssh are realised on the
+first microVM session, cached in `$STATE/microvm`, with the cost printed and
+confirmed first. `nixcage-container uid` and `storage ensure` refuse, naming
+`nixcage.principalUidRange` and `nixcage.storage.dataset`: a uid that is never
+reissued and a dataset the pool is mounted at are promises only a host can
+make. There are no secrets, no declared subjects and no bridges.
 
 Sections 3.1-3.3 below apply to macOS.
 
@@ -93,6 +121,14 @@ machines (the nixos-rebuild hostname convention). A starter is scaffolded with
 | `nixcage.microvm.guestModules` | list of modules | `[]` | Host module only: NixOS modules added to the guest |
 | `nixcage.substrate.default` | `nspawn` or `microvm` | `nspawn` | Host module only: what a cage runs on when neither declaration, record nor flag says |
 | `nixcage.cages.<path>.substrate` | `nspawn` or `microvm` | -- | Host module only: fixes a cage's substrate by project path, over its record and the flag |
+| `nixcage.bounds` | `{ memory; cpus; }` | `null` | What a cage may use: `MemoryMax=`/`CPUQuota=` on nspawn, the guest's own RAM and vCPUs on a microVM (ADR-022) |
+| `nixcage.cages.<path>.bounds` | `{ memory; cpus; }` | `null` | The same for one cage, over the default and under the session's `--memory`/`--cpus` |
+| `nixcage.git.userName`, `.userEmail`, `.signing.enable` | str, str, bool | `""`, `""`, `true` | The identity a session commits as, rendered to `/etc/nixcage/gitconfig`; signing goes through the forwarded agent (ADR-008) |
+| `nixcage.principalUidRange` | `{ base; size; }` | `{ 700000; 64; }` | The block `nixcage-container uid` allocates from, monotonically, never reissuing (ADR-004, ADR-010) |
+| `nixcage.principalSubjects` | list of str | `[ ]` | The subjects every cage has besides its root (ADR-010) |
+| `nixcage.containerPackages` | list of package | `[ ]` | What every session's userland carries on top of the minimal one; `enter` takes binds and environment, never packages |
+| `nixcage.storage.dataset` | null or str | `null` | Host module only: the pool `storage ensure` makes datasets in; without one it makes directories (ADR-017) |
+| `nixcage.microvm.guest` | read-only | -- | Host module only: the guest as evaluated, built from the host's own pkgs |
 
 Everything must be evaluable at build time; the CLI holds no configuration of
 its own. Values the CLI needs at runtime (`sshPort`, `workspaceRoots`) are
@@ -108,6 +144,8 @@ id_ed25519{,.pub}   SSH keypair, generated on first start; public key must be
 known_hosts         cleared on each VM start, filled by accept-new
 result              symlink to the built microvm runner
 cache               SSH_PORT=..., WORKSPACE_ROOTS=a:b (written by rebuild)
+microvm             GUEST=..., PATH=... -- what an undeclared host realised
+                    for a microVM session, reused until the store loses it
 vm.pid, vm.log      hypervisor process
 virtiofsd.pid/.log  virtiofs daemons (Linux)
 ```
@@ -120,16 +158,20 @@ nixcage [--flake <ref>] <command> [args...]
 
 | Command            | Description                                                        |
 | ------------------ | ------------------------------------------------------------------ |
-| `enter [--substrate nspawn\|microvm] [--disk <size>] [-- cmd...]`| Enter this project's cage; auto-builds and auto-starts the VM on macOS. With a command: non-interactive `nix develop --command`. The two flags are handed to `nixcage-container` as they are; `--substrate` needs `nspawn` or `microvm`, `--disk` a size such as `2G`. |
+| `enter [--memory <size>] [--cpus <n>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--shell <name>] [--no-agent] [--print-argv] [--substrate nspawn\|microvm] [--disk <size>] [-- cmd...]`| Enter this project's cage; auto-builds and auto-starts the VM on macOS. With a command: non-interactive `nix develop --command`. The flags are handed to `nixcage-container` as they are, in either spelling (`--substrate microvm` or `--substrate=microvm`); `--substrate` needs `nspawn` or `microvm` and `--disk` a size such as `2G`, both checked here because the alternative is booting a VM before refusing. The options that parameterise a session on behalf of a dependant (`--uid`, `--user`, `--subject`, `--home`, `--network`, `--dns`, `--store-root`, `--no-nix-daemon`) are refused by name and reached with `exec`, and a flag nixcage does not have is refused rather than run as the session's command. |
+| `exec [--tty] [--agent] -- <cmd...>`| Run argv as root where the cages are: on this machine on Linux, inside the VM over its SSH on macOS. How a dependant reaches `nixcage-container` without knowing this machine's SSH key, port or state layout (ADR-009). |
 | `down`             | Stop the VM.                                                       |
 | `rebuild`          | `nix build` the runner from the config flake, refresh the cache, restart the VM if running (interrupts all sessions). |
 | `rm [name]`        | Delete a container and its persistent home; confirms first. Without a name, resolves the current project. |
 | `status`           | Config flake, built/running/SSH state, container list, age public key. |
 | `version`, `help`  | Metadata.                                                          |
 
-`enter` validation order: `flake.nix` present, path under a workspace root
-(from the cache; errors point at `rebuild` when absent), then VM liveness.
-Both `enter cmd...` and `enter -- cmd...` are accepted.
+`enter` validation order: the path is under a workspace root (from
+`/etc/nixcage/config` on Linux, the cache on macOS, where errors point at
+`rebuild` when it is absent), or, where nothing was declared, is a directory
+the caller may cage (section 3.0.1); then VM liveness. A project needs no
+`flake.nix` to be entered (ADR-021). Both `enter cmd...` and
+`enter -- cmd...` are accepted.
 
 ## 5. VM architecture
 
@@ -149,8 +191,15 @@ Both `enter cmd...` and `enter -- cmd...` are accepted.
 
 ## 6. Containers
 
-`nixcage-container` is a Nix-built script inside the VM (part of the nixcage
-module); the host CLI only ever calls it over SSH.
+`nixcage-container` is a Nix-built script owning every nspawn and vmspawn
+mechanic, shared unchanged by the host module and the VM module. On Linux the
+CLI runs it locally through sudo -- the one a module installed, or the one the
+CLI itself carries where nothing was declared; on macOS it only ever calls it
+over SSH inside the VM.
+
+A `--bind` source is resolved where the cage runs. On Linux that is the host,
+so any host path works. On macOS it is the VM, which is shared only the
+workspace roots, so a source outside them is not there to bind.
 
 - `enter <name> <project> [cmd...]`: creates `/var/lib/nixcage/homes/<name>`
   and a throwaway per-session rootfs skeleton (nspawn locks its directory
@@ -221,8 +270,13 @@ sessions only through `nixcage.secretEnv`. Interactive credentials (e.g.
 
 ## 8. Testing
 
-`shellcheck nixcage` and `bats --recursive tests/` must pass. Unit tests cover
-the pure helpers (name derivation, cache parsing, root validation); command
-tests cover dispatch and pre-VM validation, mocked at the SSH boundary. The
-guest script is validated by `writeShellApplication`'s built-in shellcheck at
-VM build time.
+`shellcheck nixcage modules/*.sh` and `bats --recursive tests/` must pass.
+Unit tests cover the shell modules directly (name derivation, cache parsing,
+root validation, binds, bounds, scopes, vmspawn arguments); command tests
+cover dispatch and pre-VM validation with `sudo`, `nix`, `git` and
+`nixos-version` stubbed on `PATH`. The guest script is validated by
+`writeShellApplication`'s built-in shellcheck when it is built.
+
+What the suite does not do is boot a cage: every privileged path is asserted
+against the words it would run, never against a running one. A test that
+enters a real cage needs a Linux machine and does not exist yet.

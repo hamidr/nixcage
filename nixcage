@@ -982,17 +982,23 @@ ${BOLD}Commands:${NC}
   help               Show this help
 
 ${BOLD}Configuration:${NC}
-  Linux: containers run on this host. Import nixcage's nixosModules.host in
-  your NixOS configuration and set nixcage.workspaceRoots; apply with
-  nixos-rebuild.
+  Linux: containers run on this host. With nothing declared, the cage is the
+  directory you are standing in and the session is built from what this
+  nixcage carries; bounds are half this machine. For workspace roots,
+  secrets, declared subjects, storage and bridges, import nixcage's
+  nixosModules.host in your NixOS configuration and set
+  nixcage.workspaceRoots; apply with nixos-rebuild.
 
   macOS: containers run in a shared VM configured by a flake you own
   (default: ~/.config/nixcage, override with --flake or NIXCAGE_FLAKE):
 
     nix flake new -t github:hamidr/nixcage ~/.config/nixcage
 
-  A project is any flake directory under one of your nixcage.workspaceRoots.
-  No nixcage files exist in projects.
+  A project is any directory under one of your nixcage.workspaceRoots, and
+  where nothing is declared, the directory you are in. Its flake.nix and
+  devShells.default are both optional: a project with an .envrc is entered
+  through direnv, one with neither gets the base container shell. No nixcage
+  files exist in projects.
 HELP
 }
 
