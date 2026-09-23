@@ -121,3 +121,51 @@ nixcage_setenv_arg() {
 	fi
 	printf -- '--setenv=%s\n' "$spec"
 }
+
+## nixcage_bind_declared <project> <table>
+## The binds a host declared for one cage, as the arguments a session's own
+## binds become, or nothing. The table is what the module rendered, one
+## "<path> <spec>" per line, and the path is matched whole: a declaration for
+## a directory says nothing about the directories under it, which are other
+## cages.
+##
+## A spec is what a caller would have written after --bind, with ":ro" where
+## it would have written --bind-ro instead. Every one of them goes through the
+## same checks an asked-for bind does, so a host cannot declare what a caller
+## could not ask for.
+nixcage_bind_declared() {
+	local project="$1" table="$2" path spec flag arg
+	while read -r path spec; do
+		[ "$path" = "$project" ] || continue
+		flag=--bind
+		case "$spec" in
+		*:ro)
+			flag=--bind-ro
+			spec="${spec%:ro}"
+			;;
+		esac
+		arg="$(nixcage_bind_arg "$flag" "$spec")" || return 1
+		printf '%s\n' "$arg"
+	done <<<"$table"
+}
+
+## nixcage_bind_clash <arg...>
+## The destination two binds disagree about, or nothing. A declared bind and
+## an asked one that name the same place are two statements about what the
+## session is, and picking one would give a caller a session that is not what
+## it asked for without saying so.
+nixcage_bind_clash() {
+	local arg dst seen=""
+	for arg in "$@"; do
+		dst="${arg#*=}"
+		dst="${dst#*:}"
+		case "$seen" in
+		*" $dst "*)
+			echo "nixcage: two binds name $dst; a cage's declaration and this session disagree" >&2
+			return 1
+			;;
+		esac
+		seen="$seen $dst "
+	done
+	return 0
+}

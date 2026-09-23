@@ -128,3 +128,61 @@ teardown() {
 	run nixcage_setenv_arg "1PATH=/x"
 	assert_failure
 }
+
+
+# What a host declared for one cage (ADR-025). The table is the one the
+# module renders, "<path> <spec>" per line, and a spec is what a session
+# would have asked for with a flag, plus ":ro" where the flag would have been
+# --bind-ro.
+
+@test "a cage the host said nothing about has no declared bind" {
+	run nixcage_bind_declared /Src/other "/Src/untrusted /data:/data"
+	assert_success
+	assert_output ""
+}
+
+@test "a cage the host declared answers with its binds, in order" {
+	run nixcage_bind_declared /Src/untrusted "/Src/untrusted /data:/data
+/Src/untrusted /etc/hosts:/etc/hosts:ro
+/Src/other /elsewhere:/elsewhere"
+	assert_line --index 0 "--bind=/data:/data"
+	assert_line --index 1 "--bind-ro=/etc/hosts:/etc/hosts"
+	[ "${#lines[@]}" -eq 2 ]
+}
+
+# The path is matched whole, as a substrate and a bound are: a declaration
+# for a directory says nothing about the directories under it, which are
+# other cages.
+@test "a declaration for a directory says nothing about one under it" {
+	run nixcage_bind_declared /Src/untrusted/sub "/Src/untrusted /data:/data"
+	assert_output ""
+}
+
+@test "a declared bind is held to what any bind is held to" {
+	run nixcage_bind_declared /Src/w "/Src/w /data:/nix/store"
+	assert_failure
+	assert_output --partial "nothing may be mounted at /nix/store"
+}
+
+@test "a declared bind spelt wrongly is refused naming the cage" {
+	run nixcage_bind_declared /Src/w "/Src/w nonsense"
+	assert_failure
+}
+
+# Two statements about one destination disagree about what the session is,
+# and neither is nixcage's to discard (ADR-025 decision 3).
+@test "a declared bind and an asked bind on one destination is refused" {
+	run nixcage_bind_clash "--bind=/data:/work" "--bind-ro=/other:/work"
+	assert_failure
+	assert_output --partial /work
+}
+
+@test "binds on different destinations are not a clash" {
+	run nixcage_bind_clash "--bind=/data:/work" "--bind-ro=/other:/ref"
+	assert_success
+}
+
+@test "no binds at all is not a clash" {
+	run nixcage_bind_clash
+	assert_success
+}

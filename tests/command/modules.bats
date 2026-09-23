@@ -285,3 +285,36 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 		assert_success
 	done
 }
+
+
+# The binds a host declared for one cage (ADR-025), rendered as the table the
+# session reads, and refused at evaluation where a typo belongs.
+
+@test "a cage's declared binds are rendered, path and spec per line" {
+	run eval_module host \
+		'{ nixcage.cages."/srv/untrusted".binds = [ "/srv/models:/models:ro" "/data:/data" ]; }' \
+		'sys.config.environment.etc."nixcage/declaration".text'
+	assert_success
+	assert_output --partial '/srv/untrusted /srv/models:/models:ro'
+	assert_output --partial '/srv/untrusted /data:/data'
+}
+
+@test "a host that declared no bind renders an empty table" {
+	run eval_module host '{ }' 'sys.config.environment.etc."nixcage/declaration".text'
+	assert_success
+	# The eval is --json, so the rendered quotes arrive escaped.
+	assert_output --partial 'CAGE_BINDS=\"\"'
+}
+
+@test "a bind that is not written SRC:DST is refused at evaluation" {
+	run eval_module host '{ nixcage.cages."/srv/w".binds = [ "nonsense" ]; }' \
+		'sys.config.environment.etc."nixcage/declaration".text'
+	assert_failure
+}
+
+@test "a bind spelt with a .. segment is refused at evaluation" {
+	run eval_module host '{ nixcage.cages."/srv/w".binds = [ "/srv/../etc:/etc" ]; }' \
+		'sys.config.environment.etc."nixcage/declaration".text'
+	assert_failure
+	assert_output --partial '..'
+}

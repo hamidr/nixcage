@@ -339,3 +339,22 @@ STUB
 	run jq -c 'keys' "$NIXCAGE_STATE_DIR/containers/builder/placement"
 	assert_output '["name","uid"]'
 }
+
+
+# A session may carry mounts its caller never named (ADR-025), so the record
+# says which: what the host declared for this cage is distinguishable there
+# from what the session asked for.
+
+@test "a record names the binds the host declared for the cage" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" "" \
+		"--declared-bind=--bind-ro=/srv/models:/models" \
+		"--declared-bind=--bind=/data:/data"
+	local record="$NIXCAGE_STATE_DIR/containers/builder/placement"
+	[ "$(jq -c .declaredBinds "$record")" = '["--bind-ro=/srv/models:/models","--bind=/data:/data"]' ]
+}
+
+@test "a cage nothing was declared for keeps the record it always had" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" ""
+	run jq -c 'keys' "$NIXCAGE_STATE_DIR/containers/builder/placement"
+	assert_output '["name","uid"]'
+}

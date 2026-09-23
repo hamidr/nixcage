@@ -161,7 +161,7 @@ nixcage_scope_json_string() {
 	printf '"%s"' "$v"
 }
 
-## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--home=<path>] [--writer=<path>] [--declared=<1|>] [root...]
+## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--home=<path>] [--writer=<path>] [--declared=<1|>] [--declared-bind=<arg>...] [root...]
 ## One object on one line, so list --json can extend it without parsing it.
 ## A field the session was not given is absent rather than empty; the
 ## substrate is absent for nspawn, which every cage ran on before ADR-019,
@@ -181,12 +181,13 @@ nixcage_scope_record_write() {
 	nixcage_scope_name_ok "$name" || return 1
 	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep home=""
 	local writer="" declared="" marked=""
-	local -a roots=()
+	local -a roots=() declared_binds=()
 	for root in "$@"; do
 		case "$root" in
 		--home=*) home="${root#--home=}" ;;
 		--writer=*) writer="${root#--writer=}" ;;
 		--declared=*) declared="${root#--declared=}" marked=1 ;;
+		--declared-bind=*) declared_binds+=("${root#--declared-bind=}") ;;
 		*) roots+=("$root") ;;
 		esac
 	done
@@ -206,6 +207,18 @@ nixcage_scope_record_write() {
 		else
 			record+=',"declared":false'
 		fi
+	fi
+	## What the host declared for this cage, which its caller did not ask
+	## for: recorded apart from the roots so the two are distinguishable by
+	## whoever reads the record rather than only by whoever wrote it.
+	if [ "${#declared_binds[@]}" -gt 0 ]; then
+		record+=',"declaredBinds":['
+		sep=""
+		for root in "${declared_binds[@]}"; do
+			record+="$sep$(nixcage_scope_json_string "$root")"
+			sep=","
+		done
+		record+=']'
 	fi
 	if [ "${#roots[@]}" -gt 0 ]; then
 		record+=',"roots":['

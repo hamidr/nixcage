@@ -1,7 +1,7 @@
 ---
 id: ADR-025
 title: A host declares the binds a cage always has, and a session still asks for its own
-status: proposed
+status: implemented
 date: 2026-09-23
 status_date: 2026-09-23
 summary: nixcage.cages.<path>.binds renders a table the session adds to what it was asked for, with a clash refused

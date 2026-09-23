@@ -204,6 +204,9 @@
               nodes.declared = {
                 imports = [ inputs.self.nixosModules.host ];
                 nixcage.workspaceRoots = [ "/srv" ];
+                ## What this host says every session of that cage has,
+                ## whatever its caller asked for.
+                nixcage.cages."/srv/proj".binds = [ "/srv/shared:/shared:ro" ];
                 ## Declared here because the uid verb refuses without it, and
                 ## that refusal is what the bare node is for.
                 nixcage.principalUidRange = {
@@ -234,6 +237,24 @@
                         "cat /var/lib/nixcage/containers/*/placement"
                     )
                     assert '"declared":true' in record, record
+
+                with subtest("a cage carries the binds its host declared"):
+                    declared.succeed("mkdir -p /srv/shared && touch /srv/shared/marker")
+                    declared.succeed(
+                        "cd /srv/proj && nixcage enter -- test -e /shared/marker"
+                    )
+                    declared.fail(
+                        "cd /srv/proj && nixcage enter -- touch /shared/written"
+                    )
+                    record = declared.succeed(
+                        "cat /var/lib/nixcage/containers/*/placement"
+                    )
+                    assert "declaredBinds" in record, record
+
+                with subtest("a session asking for the same destination is refused"):
+                    declared.fail(
+                        "cd /srv/proj && nixcage enter --bind /tmp:/shared -- true"
+                    )
 
                 with subtest("a project outside every root is refused"):
                     declared.succeed("mkdir -p /elsewhere/proj")

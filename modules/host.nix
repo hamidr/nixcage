@@ -28,6 +28,25 @@ let
       throw "nixcage.substrate.default is microvm but nixcage.microvm.enable is false"
     else
       cfg.substrate.default;
+  ## One line per declared bind, its cage's path and the spec a session turns
+  ## into an argument. A path with a .. segment would resolve somewhere the
+  ## session's own check reads as allowed, so it is refused here as a
+  ## spelling, where an administrator is watching.
+  cageBinds = lib.concatStringsSep "\n" (
+    lib.flatten (
+      lib.mapAttrsToList (
+        path: cage:
+        map (
+          bind:
+          if lib.hasInfix "/../" bind || lib.hasSuffix "/.." bind then
+            throw "nixcage.cages.${path}.binds has a .. segment: ${bind}"
+          else
+            "${path} ${bind}"
+        ) cage.binds
+      ) cfg.cages
+    )
+  );
+
   ## One line per declared cage, its path and its word; a cage declared on
   ## a substrate this host cannot boot is refused the same way.
   cageSubstrates = lib.concatStringsSep "\n" (
@@ -150,6 +169,27 @@ in
             type = lib.types.submodule { options = config.nixcage.boundsOptions; };
             default = { };
             description = "What this cage may use (ADR-022), outranked by a session's own flags.";
+          };
+
+          options.binds = lib.mkOption {
+            ## Shape only. What a destination may be is the session's answer,
+            ## where one list of refusals already lives; a second copy here
+            ## would be two lists to keep in step.
+            type = lib.types.listOf (
+              lib.types.strMatching "/[^:]*:/[^:]*(:ro)?"
+            );
+            default = [ ];
+            example = [ "/srv/models:/models:ro" ];
+            description = ''
+              Paths this cage always has, written SRC:DST, or SRC:DST:ro for
+              one the session may not write. Added to whatever the session
+              asks for with its own --bind; two binds naming one destination
+              are refused at the session, naming both.
+
+              This is the host adding to a session its caller did not ask
+              for, which is the host's standing on its own machine. A caller
+              that wants a path for one session asks for it with a flag.
+            '';
           };
         }
       );
@@ -286,6 +326,7 @@ in
       WORKSPACE_ROOTS=${lib.concatStringsSep ":" cfg.workspaceRoots}
       SUBSTRATE_DEFAULT=${substrateDefault}
       CAGE_SUBSTRATES="${cageSubstrates}"
+      CAGE_BINDS="${cageBinds}"
       ${cfg.boundsConfigText}${lib.optionalString cfg.microvm.enable ''
         MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}
       ''}${lib.optionalString (cfg.principalUidRange != null) ''

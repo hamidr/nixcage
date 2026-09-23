@@ -151,6 +151,8 @@ nixcage = {
   # principalUidRange = { base = 700000; size = 64; };
   ## Fix a cage's substrate from here, over its record and the flag.
   # cages."/home/me/Src/untrusted".substrate = "microvm";
+  ## Paths a cage always has, beside whatever a session asks for with --bind.
+  # cages."/home/me/Src/untrusted".binds = [ "/srv/models:/models:ro" ];
   ## What a cage runs on when nothing closer decides.
   # substrate.default = "nspawn";
   ## What a cage may use, and what one cage may use. A session's --memory

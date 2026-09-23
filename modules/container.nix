@@ -535,7 +535,26 @@ let
         export PATH
 
         local -a store_roots=(''${NIXCAGE_ENTER_STORE_ROOTS[@]+"''${NIXCAGE_ENTER_STORE_ROOTS[@]}"})
-        local -a asked_binds=(''${NIXCAGE_ENTER_BINDS[@]+"''${NIXCAGE_ENTER_BINDS[@]}"})
+        ## What this host declared for this cage, ahead of what the session
+        ## asked for: both are binds, and neither replaces the other. Two of
+        ## them naming one destination is a refusal, because a session that
+        ## quietly mounted something other than what it asked for would be
+        ## the worse answer.
+        ## Read before the loop rather than in a process substitution: a
+        ## refusal inside one ends that subshell and leaves the loop happy.
+        local declared_text declared_bind
+        declared_text="$(nixcage_bind_declared "$project" "''${CAGE_BINDS:-}")" ||
+          die "this host's declaration for $project names a bind nothing may be given"
+        local -a declared_binds=()
+        while IFS= read -r declared_bind; do
+          [ -n "$declared_bind" ] || continue
+          declared_binds+=("$declared_bind")
+        done <<<"$declared_text"
+        local -a asked_binds=(
+          ''${declared_binds[@]+"''${declared_binds[@]}"}
+          ''${NIXCAGE_ENTER_BINDS[@]+"''${NIXCAGE_ENTER_BINDS[@]}"}
+        )
+        nixcage_bind_clash ''${asked_binds[@]+"''${asked_binds[@]}"} || exit 1
         local -a asked_env=(''${NIXCAGE_ENTER_ENV[@]+"''${NIXCAGE_ENTER_ENV[@]}"})
 
         ## What the cage runs on (ADR-019), fixed by the host's declaration
@@ -680,6 +699,7 @@ let
         ## recorded for.
         nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns" "$substrate" \
           "--writer=$0" "--declared=''${NIXCAGE_DECLARED:-}" \
+          ''${declared_binds[@]+"''${declared_binds[@]/#/--declared-bind=}"} \
           ''${asked_home:+"--home=$asked_home"} ''${store_roots[@]+"''${store_roots[@]}"} ||
           die "could not record the placement of $name"
         ## The home holds whatever the session writes there, so it is private

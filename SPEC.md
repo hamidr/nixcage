@@ -128,6 +128,7 @@ machines (the nixos-rebuild hostname convention). A starter is scaffolded with
 | `nixcage.microvm.guestModules` | list of modules | `[]` | Host module only: NixOS modules added to the guest |
 | `nixcage.substrate.default` | `nspawn` or `microvm` | `nspawn` | Host module only: what a cage runs on when neither declaration, record nor flag says |
 | `nixcage.cages.<path>.substrate` | `nspawn` or `microvm` | -- | Host module only: fixes a cage's substrate by project path, over its record and the flag |
+| `nixcage.cages.<path>.binds` | list of str | `[ ]` | Host module only: paths this cage always has, `SRC:DST` or `SRC:DST:ro`, added to whatever the session asks for; two binds on one destination are refused (ADR-025) |
 | `nixcage.bounds` | `{ memory; cpus; }` | `null` | What a cage may use: `MemoryMax=`/`CPUQuota=` on nspawn, the guest's own RAM and vCPUs on a microVM (ADR-022) |
 | `nixcage.cages.<path>.bounds` | `{ memory; cpus; }` | `null` | The same for one cage, over the default and under the session's `--memory`/`--cpus` |
 | `nixcage.git.userName`, `.userEmail`, `.signing.enable` | str, str, bool | `""`, `""`, `true` | The identity a session commits as, rendered to `/etc/nixcage/gitconfig`; signing goes through the forwarded agent (ADR-008) |
@@ -205,6 +206,12 @@ mechanic, shared unchanged by the host module and the VM module. On Linux the
 CLI runs it locally through sudo -- the one a module installed, or the one the
 CLI itself carries where nothing was declared; on macOS it only ever calls it
 over SSH inside the VM.
+
+A cage may also have binds its caller did not ask for, where the host
+declared `nixcage.cages.<path>.binds` (ADR-025). They come first on the line,
+go through the same checks, and appear in the cage's record as
+`declaredBinds`, so what a session carries is distinguishable from what it
+asked for.
 
 A `--bind` source is resolved where the cage runs. On Linux that is the host,
 so any host path works. On macOS it is the VM, which is shared only the
