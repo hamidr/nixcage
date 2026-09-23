@@ -87,14 +87,19 @@ cfg_read() {
   fi
 }
 
-# Read the config rendered by nixosModules.host on a Linux host.
+# Whether this machine has been told anything about nixcage. The one place
+# the question is asked, so that an option added later has one place to say
+# what it means where nothing was declared.
+host_declared() {
+  [[ -f "$HOST_CONFIG" ]]
+}
+
+# Read the config rendered by nixosModules.host on a Linux host. A host that
+# declared nothing is not an error: it gets the undeclared answer to every
+# setting the file would carry, which for the roots is no roots at all.
 host_read_config() {
-  if [[ ! -f "$HOST_CONFIG" ]]; then
-    log_err "No host config at $HOST_CONFIG."
-    log_err "Import nixcage's nixosModules.host in your NixOS configuration and rebuild."
-    exit 1
-  fi
   VM_WORKSPACE_ROOTS=""
+  host_declared || return 0
   local key val
   while IFS='=' read -r key val || [[ -n "$key" ]]; do
     case "$key" in
@@ -388,9 +393,40 @@ container_name_for() {
 # Verify the path sits under a configured workspace root; on macOS the
 # roots are mounted at identical paths inside the VM, so the same path is
 # valid on both sides. On Linux the containers run on the host directly.
+## What a directory has to be to be a cage where no root was declared: the
+## caller standing in it is the consent, so the check is only for the
+## directories that answer is never meant for. The ownership test is the one
+## the session already depends on, since a cage runs as the owner of its
+## project.
+check_undeclared_project() {
+  local project_dir="$1"
+  case "$project_dir" in
+  / | /nix | /nix/store)
+    log_err "$project_dir is not a project."
+    log_err "With no host config the cage is the directory you are standing in."
+    exit 1
+    ;;
+  esac
+  if [[ -n "${HOME:-}" && "$project_dir" == "$HOME" ]]; then
+    log_err "$project_dir is your home directory, not a project."
+    exit 1
+  fi
+  if [[ ! -O "$project_dir" ]]; then
+    log_err "$project_dir is not owned by you; a cage runs as the owner of its project."
+    exit 1
+  fi
+}
+
 check_workspace_root() {
   local project_dir="$1"
   cfg_read
+  # A host that declared no roots has not declared a boundary either, so the
+  # directory the caller is in is the cage. Answered here rather than in
+  # enter, so that a cage made from a directory is removable from it.
+  if [[ "$OS" == "linux" ]] && ! host_declared; then
+    check_undeclared_project "$project_dir"
+    return 0
+  fi
   local root
   IFS=':' read -ra _roots <<<"$VM_WORKSPACE_ROOTS"
   for root in "${_roots[@]}"; do

@@ -40,15 +40,6 @@ write_host_config() {
 	[[ "$output" == *nixos-rebuild* ]]
 }
 
-@test "enter without the host config fails pointing at nixosModules.host" {
-	mkdir -p "$TEST_TEMP_DIR/src/proj"
-	touch "$TEST_TEMP_DIR/src/proj/flake.nix"
-	cd "$TEST_TEMP_DIR/src/proj"
-	run_nixcage enter
-	[ "$status" -ne 0 ]
-	[[ "$output" == *nixosModules.host* ]]
-}
-
 @test "enter outside every workspace root fails using host config roots" {
 	write_host_config "$TEST_TEMP_DIR/src"
 	mkdir -p "$TEST_TEMP_DIR/elsewhere/proj"
