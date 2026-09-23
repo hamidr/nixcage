@@ -8,7 +8,7 @@ document, then regenerate.
 
 **Next PRD number:** 003
 
-**Next ADR number:** 025
+**Next ADR number:** 026
 
 ## PRDs
 
@@ -45,3 +45,4 @@ document, then regenerate.
 | [ADR-022](ADR-022-a-cage-is-bounded-by-what-the-host-declares.md) | A cage is bounded by what the host declares, and a session may ask for something else | implemented | -- | ADR-003, ADR-009, ADR-012, ADR-017, ADR-019 | nixcage.bounds and cages.<path>.bounds give memory and cpus to both substrates; the flag still wins |  |
 | [ADR-023](ADR-023-nixcage-runs-a-cage-on-a-host-that-declared-nothing.md) | nixcage runs a cage on a host that declared nothing, with the guest built when a session first asks for one | implemented | -- | ADR-003, ADR-009, ADR-019, ADR-021, ADR-022 | with no /etc/nixcage/config a session cages the current directory; uid and storage refuse, the guest builds on demand |  |
 | [ADR-024](ADR-024-one-declaration-and-one-reader-that-answers-from-it.md) | A host renders one declaration, and one reader answers from it, undeclared included | implemented | -- | ADR-003, ADR-009, ADR-017, ADR-022, ADR-023 | one versioned file replaces the four under /etc/nixcage, read by one function with two implementations |  |
+| [ADR-025](ADR-025-a-bind-is-asked-for-per-session-and-never-declared.md) | A bind is asked for per session, and nothing declares one on a caller's behalf | accepted | -- | ADR-002, ADR-009, ADR-020, ADR-024 | no per-cage bind option and no caller-owned registry; the flag is the interface and repetition is the caller's to solve |  |
