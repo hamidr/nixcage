@@ -620,27 +620,66 @@ cmd_enter() {
   local name
   name="$(container_name_for "$project_dir")"
 
-  # The substrate the cage runs on and the disk a microVM keeps (ADR-019),
-  # handed through as words in either order: whether they are allowed, and
-  # whether the cage already has a substrate, is nixcage-container's to say.
-  # Both spellings of a flag: --substrate microvm and --substrate=microvm.
-  # Matching the word alone let the joined form fall through to the command,
-  # so a session ran "--substrate=microvm" inside a cage on the substrate it
-  # was asking to change, and said nothing.
-  local -a substrate=()
+  # The options a session takes. The CLI is a person's tool and
+  # nixcage-container is a program's (ADR-009): what a person parameterises a
+  # session with is handed through, and what a dependant parameterises one
+  # with is refused by name, pointing at exec, rather than falling through to
+  # become the command the session runs. Whether a value is usable is
+  # nixcage-container's to say; what is checked here is only what would
+  # otherwise boot a VM before being refused.
+  #
+  # Both spellings: --substrate microvm and --substrate=microvm. Matching the
+  # word alone let the joined form fall through to the command, so a session
+  # ran "--substrate=microvm" inside a cage on the substrate it was asking to
+  # change, and said nothing.
+  local -a session=()
   local flag word joined
   while :; do
     case "${1:-}" in
-      --substrate=*|--disk=*) joined=1 flag="${1%%=*}" word="${1#*=}" ;;
-      --substrate|--disk) joined="" flag="$1" word="${2:-}" ;;
+      --) break ;;
+      --*=*) joined=1 flag="${1%%=*}" word="${1#*=}" ;;
+      --*)   joined="" flag="$1" word="${2:-}" ;;
       *) break ;;
     esac
+
+    case "$flag" in
+      --no-agent|--print-argv)
+        session+=("$flag")
+        # A flag that takes no value consumes only itself, whatever followed.
+        shift
+        continue
+        ;;
+      --substrate|--disk|--memory|--cpus|--bind|--bind-ro|--setenv|--shell) ;;
+      --uid|--user|--subject|--home|--network|--dns|--no-nix-daemon|--store-root|\
+      --profile|--guest|--microvm-path|--git-name|--git-email)
+        log_err "$flag parameterises a session on behalf of a dependant, not from here."
+        log_err "Reach it with: nixcage exec -- nixcage-container enter $flag ... $name $project_dir"
+        exit 1
+        ;;
+      *)
+        log_err "Unknown flag: $flag"
+        log_err "Run 'nixcage help' for what enter takes."
+        exit 1
+        ;;
+    esac
+
+    # What a value has to be to be worth booting a VM for. A flag given no
+    # value at all reads as one given an empty one, so these two answer for
+    # the missing word with the words they take rather than with a generic
+    # complaint about arity.
     case "$flag $word" in
-      "--substrate nspawn"|"--substrate microvm") substrate+=(--substrate "$word") ;;
+      "--substrate nspawn"|"--substrate microvm") ;;
       "--substrate "*) log_err "--substrate needs nspawn or microvm"; exit 1 ;;
-      "--disk "[0-9]*) substrate+=(--disk "$word") ;;
+      "--disk "[0-9]*) ;;
       "--disk "*) log_err "--disk needs a size such as 2G"; exit 1 ;;
     esac
+
+    if [[ -z "$joined" && $# -lt 2 ]]; then
+      log_err "$flag needs a value as the next word."
+      exit 1
+    fi
+    session+=("$flag" "$word")
+
     if [[ -n "$joined" ]]; then shift; else shift 2; fi
   done
 
@@ -674,14 +713,14 @@ cmd_enter() {
     done < <(git_identity_args)
     local -a microvm=()
     if ! host_declared &&
-       { [[ " ${substrate[*]-} " == *" microvm "* ]] || [[ -s "$MICROVM_CACHE" ]]; }; then
+       { [[ " ${session[*]-} " == *" microvm "* ]] || [[ -s "$MICROVM_CACHE" ]]; }; then
       microvm_realise
       while IFS= read -r word; do
         [[ -n "$word" ]] && microvm+=("$word")
       done < <(microvm_cached_args)
     fi
     [[ $# -eq 0 ]] && log_info "Entering container $name..."
-    sudo "$container" enter "${substrate[@]}" "${profile[@]}" "${microvm[@]}" \
+    sudo "$container" enter "${session[@]}" "${profile[@]}" "${microvm[@]}" \
       "${identity[@]}" "${agent_fwd[@]}" "$name" "$project_dir" "$@"
     return
   fi
@@ -690,7 +729,7 @@ cmd_enter() {
 
   # Everything in the remote command is re-split by the remote shell, so
   # every word gets %q, not just the trailing command arguments.
-  local remote=(sudo nixcage-container enter "${substrate[@]}")
+  local remote=(sudo nixcage-container enter "${session[@]}")
   # The forwarded socket lives in the VM and is named by the remote shell,
   # so the expansion is deliberately left for it to perform.
   local -a ssh_fwd=()
@@ -919,11 +958,18 @@ ${BOLD}Usage:${NC}
   nixcage [--flake <ref>] <command> [args...]
 
 ${BOLD}Commands:${NC}
-  enter [--substrate nspawn|microvm] [--disk <size>] [-- cmd...]
+  enter [--memory <size>] [--cpus <n>] [--bind SRC:DST] [--bind-ro SRC:DST]
+        [--setenv K=V] [--shell <name>] [--no-agent] [--print-argv]
+        [--substrate nspawn|microvm] [--disk <size>] [-- cmd...]
                      Enter this project's cage (macOS: starts the VM if needed).
                      The substrate is fixed at the cage's first enter; a microVM
                      needs the host's nixcage.microvm.enable, and --disk gives
-                     it a persistent image at /var/lib (ADR-019).
+                     it a persistent image at /var/lib (ADR-019). --memory and
+                     --cpus outrank what the host declared for this cage.
+                     The options that parameterise a session on behalf of a
+                     dependant (--uid, --user, --subject, --home, --network,
+                     --dns, --store-root, --no-nix-daemon) are reached with
+                     nixcage exec -- nixcage-container enter ...
   exec [--tty] [--agent] -- <cmd...>
                      Run a command as root where the cages are: here on Linux,
                      inside the VM on macOS. This is how a tool built on
