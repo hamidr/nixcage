@@ -784,6 +784,17 @@ cmd_exec() {
   local -a sudo_opts=()
   [[ -n "$agent" ]] && sudo_opts=(--preserve-env=SSH_AUTH_SOCK)
 
+  # The one word this transport reads rather than carries. A host that
+  # declared nothing has no nixcage-container on any path, only the layer this
+  # nixcage carries, and a dependant that had to know which kind of host it
+  # stands on would be knowing exactly what exec exists to hide. Every other
+  # word, and a path that already names a container, is handed over as it is.
+  if [[ "$1" == "nixcage-container" ]] && ! host_declared && [[ "$OS" == "linux" ]]; then
+    local container
+    container="$(container_words)" || exit 1
+    set -- "$container" "${@:2}"
+  fi
+
   if [[ "$OS" == "linux" ]]; then
     sudo "${sudo_opts[@]}" "$@"
     return

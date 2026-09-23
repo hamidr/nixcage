@@ -180,3 +180,27 @@ GIT
 	[ "$status" -eq 0 ]
 	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "$NIXCAGE_CONTAINER list"* ]]
 }
+
+
+# A dependant reaches nixcage-container through exec (ADR-009), and where
+# nothing was declared there is no such name on any path: the layer is the one
+# this nixcage carries. Resolved here so one line works on either kind of
+# host, and so the refusals an undeclared host owes a caller are reachable
+# rather than lost behind "command not found".
+@test "exec resolves the container the CLI carries where nothing was declared" {
+	run_nixcage exec -- nixcage-container uid worker
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "$NIXCAGE_CONTAINER uid worker" ]]
+}
+
+@test "exec leaves every other command exactly as it was given" {
+	run_nixcage exec -- /bin/echo nixcage-container
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "/bin/echo nixcage-container" ]]
+}
+
+@test "exec of a path to a container is not resolved again" {
+	run_nixcage exec -- /nix/store/other-container/bin/nixcage-container list
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "/nix/store/other-container/bin/nixcage-container list" ]]
+}

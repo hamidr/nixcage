@@ -97,6 +97,13 @@ reissued, and a number invented here would be handed out against the very state
 directory decision 4 shares. A dependant built on the four primitives therefore
 still wants the module, and that is said rather than discovered.
 
+For it to be said, the refusal has to be reachable: undeclared there is no
+`nixcage-container` on any path, so `exec` resolves that one word to the
+layer this nixcage carries and hands every other word over as it is. A
+dependant then writes one line for either kind of host, which is what `exec`
+exists for (ADR-009), instead of learning which kind it stands on in order to
+be told it needs the other.
+
 **6. What every session needs travels with the CLI; what only a microVM needs
 is realised when one is asked for.** The closure of what `nix run` fetches is
 `nixcage-container` and the container profile. The guest, qemu, virtiofsd and openssh

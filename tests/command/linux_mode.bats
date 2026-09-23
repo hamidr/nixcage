@@ -221,3 +221,14 @@ write_host_config() {
 	[[ "$output" == *"$TEST_TEMP_DIR/src"* ]]
 	[[ "$output" != *"nothing declared"* ]]
 }
+
+
+# A declared host has nixcage-container on its path, installed by the module,
+# and exec hands over what it was given (ADR-009).
+@test "exec on a declared host passes the name through untouched" {
+	write_host_config "$TEST_TEMP_DIR/src"
+	export NIXCAGE_CONTAINER=/nix/store/aaa-nixcage-container/bin/nixcage-container
+	run_nixcage exec -- nixcage-container list
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "nixcage-container list" ]]
+}
