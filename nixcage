@@ -784,6 +784,80 @@ cmd_enter() {
   fi
 }
 
+## What cages this machine has, with what each was given (ADR-017). The
+## record has held this since the cage was entered and only the container
+## script could show it; this is the verb a person uses.
+##
+## --json hands the records over untouched, one object per line, because a
+## caller that wants fields wants them as nixcage wrote them, not as a column
+## this reformatted.
+cmd_list() {
+  local json=""
+  case "${1:-}" in
+  --json) json=1 ;;
+  "") ;;
+  *)
+    log_err "usage: nixcage list [--json]"
+    exit 1
+    ;;
+  esac
+
+  local records
+  records="$(container_records)"
+
+  if [[ -n "$json" ]]; then
+    [[ -z "$records" ]] || printf '%s\n' "$records"
+    return
+  fi
+
+  if [[ -z "$records" ]]; then
+    log_info "No cages on this machine yet."
+    return
+  fi
+
+  # A cage with no substrate in its record is an nspawn cage: absent is what
+  # every record held before a cage could be anything else.
+  local -a rows=("NAME SUBSTRATE STATE UID")
+  local row
+  while IFS= read -r row; do
+    [[ -n "$row" ]] && rows+=("$row")
+  done < <(jq -r '[.name, (.substrate // "nspawn"),
+                   (if .leader then "running" else "stopped" end),
+                   (.uid // "-")] | @tsv' <<<"$records" | tr '\t' ' ')
+
+  # Padded here rather than by column(1), which is util-linux on one platform
+  # and BSD on the other and is in this flake's dependencies on neither.
+  local -a width=(0 0 0 0)
+  local -a cell
+  local i
+  for row in "${rows[@]}"; do
+    read -r -a cell <<<"$row"
+    for i in 0 1 2 3; do
+      [[ "${#cell[i]}" -gt "${width[i]}" ]] && width[i]="${#cell[i]}"
+    done
+  done
+  for row in "${rows[@]}"; do
+    read -r -a cell <<<"$row"
+    printf '%-*s  %-*s  %-*s  %s\n' \
+      "${width[0]}" "${cell[0]}" \
+      "${width[1]}" "${cell[1]}" \
+      "${width[2]}" "${cell[2]}" \
+      "${cell[3]}"
+  done
+}
+
+## The records as the container script prints them, wherever the cages are.
+container_records() {
+  if [[ "$OS" == "linux" ]]; then
+    local container
+    container="$(container_words)" || exit 1
+    sudo "$container" list --json
+    return
+  fi
+  ensure_vm
+  vm_ssh -- sudo nixcage-container list --json
+}
+
 ## Run a command as root wherever this machine's cages are: here on Linux,
 ## and inside the shared VM on macOS. Exported because everything nixcage
 ## builds a session for lives on that side of the transport, and a dependant
@@ -1017,6 +1091,7 @@ ${BOLD}Commands:${NC}
                      Run a command as root where the cages are: here on Linux,
                      inside the VM on macOS. This is how a tool built on
                      nixcage reaches nixcage-container.
+  list [--json]      What cages this machine has, with what each was given
   rm [name]          Delete a project container and its persistent home
   status             Show container state (macOS: VM state and age public key)
   down               macOS only: stop the VM
@@ -1062,6 +1137,7 @@ main() {
   exec)    cmd_exec "$@" ;;
   down)    cmd_down "$@" ;;
   rebuild) cmd_rebuild "$@" ;;
+  list)    cmd_list "$@" ;;
   rm)      cmd_rm "$@" ;;
   status)  cmd_status "$@" ;;
   version | --version | -v) echo "nixcage $NIXCAGE_VERSION" ;;

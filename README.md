@@ -220,8 +220,9 @@ claude-code in a project? Put it in that project's devShell (see
 
 | Command | Description |
 |---|---|
-| `nixcage enter [--substrate nspawn\|microvm] [--disk SIZE] [-- cmd]` | Enter this project's cage (on macOS, auto-starts the VM); with a command, run it non-interactively. The substrate is fixed at the first enter; `--disk` gives a microVM a persistent image at `/var/lib` |
+| `nixcage enter [--memory SIZE] [--cpus N] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--shell NAME] [--no-agent] [--print-argv] [--substrate nspawn\|microvm] [--disk SIZE] [-- cmd]` | Enter this project's cage (on macOS, auto-starts the VM); with a command, run it non-interactively. The substrate is fixed at the first enter; `--disk` gives a microVM a persistent image at `/var/lib`. The options that parameterise a session for a dependant are reached with `exec` |
 | `nixcage exec [--tty] [--agent] -- cmd` | Run a command as root where the cages are: on this host on Linux, inside the VM on macOS |
+| `nixcage list [--json]` | What cages this machine has: name, substrate, whether it runs, the uid it is mapped onto. `--json` gives each cage's record as nixcage wrote it |
 | `nixcage rm [name]` | Delete a project's container and persistent home |
 | `nixcage status` | Configuration in use, containers, and on macOS the VM state and age public key |
 | `nixcage down` | Stop the VM (macOS only) |

@@ -172,6 +172,7 @@ nixcage [--flake <ref>] <command> [args...]
 | `exec [--tty] [--agent] -- <cmd...>`| Run argv as root where the cages are: on this machine on Linux, inside the VM over its SSH on macOS. How a dependant reaches `nixcage-container` without knowing this machine's SSH key, port or state layout (ADR-009). Argv is handed over as it is, with one exception: a first word of exactly `nixcage-container` on a Linux host that declared nothing becomes the layer the CLI carries, since there is no such name on any path there. |
 | `down`             | Stop the VM.                                                       |
 | `rebuild`          | `nix build` the runner from the config flake, refresh the cache, restart the VM if running (interrupts all sessions). |
+| `list [--json]`    | What cages this machine has, with what each was given (ADR-017): name, substrate, whether it runs, and the uid it is mapped onto. `--json` hands the records over untouched, one object per line, including `declaredBinds` and whether the session that wrote each was declared. |
 | `rm [name]`        | Delete a container and its persistent home; confirms first. Without a name, resolves the current project. |
 | `status`           | Config flake, built/running/SSH state, container list, age public key. |
 | `version`, `help`  | Metadata.                                                          |
