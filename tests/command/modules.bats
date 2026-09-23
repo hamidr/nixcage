@@ -358,3 +358,26 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_failure
 }
+
+
+# The other direction of a partial upgrade: a machine rebuilds with this
+# module while the CLI the user installed separately is older than it. That
+# CLI reads one key from one file, so the file stays for one release rather
+# than telling someone who just rebuilt to import the module they imported.
+@test "the host module still renders the roots where an older CLI looks" {
+	run eval_module host '{ nixcage.workspaceRoots = [ "/srv" "/opt/w" ]; }' \
+		'sys.config.environment.etc."nixcage/config".text'
+	assert_success
+	assert_output --partial 'WORKSPACE_ROOTS=/srv:/opt/w'
+}
+
+@test "the roots an older CLI reads are the roots this one reads" {
+	run eval_module host '{ nixcage.workspaceRoots = [ "/srv" ]; }' \
+		'{ old = sys.config.environment.etc."nixcage/config".text;
+		   new = sys.config.environment.etc."nixcage/declaration".text; }'
+	assert_success
+	local old new
+	old="$(jq -r .old <<<"$output" | sed -n 's/^WORKSPACE_ROOTS=//p')"
+	new="$(jq -r .new <<<"$output" | sed -n 's/^WORKSPACE_ROOTS=//p')"
+	[ "$old" = "$new" ]
+}

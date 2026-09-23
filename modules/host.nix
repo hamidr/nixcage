@@ -369,6 +369,15 @@ in
     ## One guest per host, from this host's pkgs (ADR-019 decision 3).
     nixcage.microvm.guest = pkgs.nixos ([ ./guest.nix ] ++ cfg.microvm.guestModules);
 
+    ## The one key a CLI older than this module reads, kept where it looks
+    ## for one release. A machine rebuilds with this module while the nixcage
+    ## someone installed separately is still the one before it, and without
+    ## this that CLI tells a person who has just imported the module to go
+    ## and import it.
+    environment.etc."nixcage/config".text = ''
+      WORKSPACE_ROOTS=${lib.concatStringsSep ":" workspaceRoots}
+    '';
+
     environment.etc."nixcage/profile".source = container.profile;
 
     ## The container homes and skeletons live where the VM keeps them, so

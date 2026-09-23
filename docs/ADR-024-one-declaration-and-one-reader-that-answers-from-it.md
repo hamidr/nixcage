@@ -88,14 +88,20 @@ A host that declared workspace roots must never be treated as a host that
 declared nothing, which is what a version-blind reader would do the first
 time the format changes.
 
-**7. The files this replaces are read when the new one is absent, and the
-session says so.** A CLI newer than the module it stands on finds
-`/etc/nixcage/config` and `/etc/nixcage/container` where it expected
-`/etc/nixcage/declaration`, reads them as it does today, and prints once that
-it is reading a declaration from an older nixcage and that
-`nixos-rebuild switch` will produce the current one. The compatibility path
-is removed one release after this lands, and until then it is the only thing
-that makes a partial upgrade safe.
+**7. A partial upgrade is safe in both directions, for one release.** A CLI
+newer than the module it stands on finds `/etc/nixcage/config` and
+`/etc/nixcage/container` where it expected `/etc/nixcage/declaration`, reads
+them as it does today, and prints once that it is reading a declaration from
+an older nixcage and that `nixos-rebuild switch` will produce the current
+one.
+
+A CLI older than the module is the same seam from the other side, and it
+cannot be taught anything: it is already installed. So the module keeps
+rendering `/etc/nixcage/config`, the one key such a CLI reads, beside the
+declaration. Without it a machine that rebuilds with this module tells a
+person who has just imported it to go and import it. Both halves are removed
+one release after this lands, and until then they are what makes upgrading
+one side at a time safe.
 
 ## Consequences
 
