@@ -847,6 +847,10 @@ cmd_list() {
 }
 
 ## The records as the container script prints them, wherever the cages are.
+##
+## On macOS the cages are inside the VM, and a question about them does not
+## start one: a caller asking what exists gets told the machine holding the
+## answer is off, rather than waiting out a boot it did not ask for.
 container_records() {
   if [[ "$OS" == "linux" ]]; then
     local container
@@ -854,7 +858,11 @@ container_records() {
     sudo "$container" list --json
     return
   fi
-  ensure_vm
+  if ! vm_is_running; then
+    log_err "The VM is not running, so nothing here can say what cages it holds."
+    log_err "Start it with 'nixcage enter' in a project, or 'nixcage rebuild'."
+    exit 1
+  fi
   vm_ssh -- sudo nixcage-container list --json
 }
 

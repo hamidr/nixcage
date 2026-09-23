@@ -83,3 +83,25 @@ teardown() {
 	[ "$status" -eq 0 ]
 	[[ "$(cat "$TEST_TEMP_CALLS")" == "$NIXCAGE_CONTAINER list --json" ]]
 }
+
+
+# Listing is a question, not an instruction: asking what cages exist must not
+# start a virtual machine to answer.
+@test "list on macos does not boot the VM to answer" {
+	unset NIXCAGE_OS
+	export NIXCAGE_OS=macos
+	write_cache 22022 "$TEST_TEMP_DIR/src"
+	run_nixcage list
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"not running"* ]]
+	[ ! -f "$TEST_TEMP_CALLS" ]
+}
+
+@test "list --json on macos with no VM says nothing rather than an empty set" {
+	unset NIXCAGE_OS
+	export NIXCAGE_OS=macos
+	write_cache 22022 "$TEST_TEMP_DIR/src"
+	run_nixcage list --json
+	[ "$status" -ne 0 ]
+	[ -z "${lines[0]:-}" ] || [[ "${lines[0]}" != "{"* ]]
+}
