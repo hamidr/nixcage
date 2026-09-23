@@ -521,12 +521,23 @@ let
         ## microVM's scope bounds qemu and kills the guest (ADR-019).
         local cage_bounds
         cage_bounds="$(nixcage_bounds_declared "$project" "''${CAGE_BOUNDS:-}")"
+        ## Undeclared there is no host default to fall back on, so the machine
+        ## is read instead of leaving the session with what the substrate
+        ## boots by itself (ADR-023 decision 10). Announced, because a number
+        ## nobody asked for and nobody declared is one a caller should see.
+        local bounds_default="''${BOUNDS_DEFAULT:-}"
+        if [ -z "''${NIXCAGE_DECLARED:-}" ]; then
+          bounds_default="$(nixcage_bounds_machine)"
+          if [ -n "$bounds_default" ]; then
+            echo "nixcage-container: nothing was declared here, so this session gets half of this machine: $bounds_default" >&2
+          fi
+        fi
         NIXCAGE_ENTER_MEMORY="$(nixcage_bounds_resolve "$NIXCAGE_ENTER_MEMORY" \
           "$(nixcage_bounds_field 1 "$cage_bounds")" \
-          "$(nixcage_bounds_field 1 "''${BOUNDS_DEFAULT:-}")")"
+          "$(nixcage_bounds_field 1 "$bounds_default")")"
         NIXCAGE_ENTER_CPUS="$(nixcage_bounds_resolve "$NIXCAGE_ENTER_CPUS" \
           "$(nixcage_bounds_field 2 "$cage_bounds")" \
-          "$(nixcage_bounds_field 2 "''${BOUNDS_DEFAULT:-}")")"
+          "$(nixcage_bounds_field 2 "$bounds_default")")"
 
         ## The name is checked here as well as where it is declared, because
         ## this is the last point before it becomes part of a flake reference

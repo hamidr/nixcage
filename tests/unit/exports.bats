@@ -252,3 +252,12 @@ teardown() {
 	run grep -qE '\[ -f "\$CONTAINER_CONFIG" \]' "$(CONTAINER_NIX)"
 	assert_failure
 }
+
+# ADR-022 left the number to the host and ADR-023 has no host, so undeclared
+# the machine is read rather than left to systemd-vmspawn's 2 GiB and one
+# vCPU. Asserted on the source, because what it reads is /proc on the machine
+# the session runs on.
+@test "an undeclared session's bounds come from the machine" {
+	run grep -qE 'nixcage_bounds_machine' "$(CONTAINER_NIX)"
+	assert_success
+}

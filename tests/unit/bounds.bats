@@ -93,3 +93,48 @@ setup() {
 	run nixcage_bounds_field 2 "1G -"
 	[ "$output" = "" ]
 }
+
+# What a machine nobody declared anything about gives a session (ADR-023
+# decision 10). ADR-022 declined to choose a number in a module, which does
+# not know the machine it will be applied to; this code is standing on the
+# machine and reads it. Over a proc root the suite points at fixtures.
+
+write_proc() {
+	mkdir -p "$TEST_TEMP_DIR/proc"
+	printf 'MemTotal:       %s kB\n' "$1" >"$TEST_TEMP_DIR/proc/meminfo"
+	local i
+	: >"$TEST_TEMP_DIR/proc/cpuinfo"
+	for ((i = 0; i < $2; i++)); do
+		printf 'processor\t: %s\n\n' "$i" >>"$TEST_TEMP_DIR/proc/cpuinfo"
+	done
+}
+
+@test "an undeclared session is given half of what the machine has" {
+	setup_temp_dir
+	write_proc 16777216 8
+	run nixcage_bounds_machine "$TEST_TEMP_DIR/proc"
+	[ "$status" -eq 0 ]
+	[ "$output" = "8192M 4" ]
+	teardown_temp_dir
+}
+
+# Half of one core is not a cage, and half of a small machine still has to
+# boot a kernel.
+@test "a single-core machine still gives a session one cpu" {
+	setup_temp_dir
+	write_proc 2097152 1
+	run nixcage_bounds_machine "$TEST_TEMP_DIR/proc"
+	[ "$output" = "1024M 1" ]
+	teardown_temp_dir
+}
+
+# A machine nixcage cannot read is one it says nothing about, rather than one
+# it guesses at: the substrate's own default is then what the session gets,
+# which is what ADR-022 left in place.
+@test "a machine that cannot be read is not guessed at" {
+	setup_temp_dir
+	run nixcage_bounds_machine "$TEST_TEMP_DIR/nothing"
+	[ "$status" -eq 0 ]
+	[ "$output" = "" ]
+	teardown_temp_dir
+}

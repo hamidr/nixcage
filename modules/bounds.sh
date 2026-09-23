@@ -63,3 +63,35 @@ nixcage_bounds_resolve() {
 		fi
 	done
 }
+
+## nixcage_bounds_machine [proc]
+## Half of what this machine has, in the spellings systemd takes. Undeclared
+## there is no host to say what a cage may use and no module to guess in
+## (ADR-023 decision 10), and without this the first microVM anybody boots
+## gets systemd-vmspawn's 2 GiB and one vCPU, which is the cage ADR-022 exists
+## to stop handing out. A flag and a declaration both still outrank it.
+##
+## A machine that cannot be read is said nothing about rather than guessed at,
+## and the substrate's own default is then what the session gets.
+nixcage_bounds_machine() {
+	local proc="${1:-/proc}" kb cpus
+	[ -r "$proc/meminfo" ] && [ -r "$proc/cpuinfo" ] || return 0
+	while read -r field value _; do
+		if [ "$field" = "MemTotal:" ]; then
+			kb="$value"
+			break
+		fi
+	done <"$proc/meminfo"
+	[ -n "${kb:-}" ] || return 0
+	cpus=0
+	while read -r field _; do
+		if [ "$field" = "processor" ]; then
+			cpus=$((cpus + 1))
+		fi
+	done <"$proc/cpuinfo"
+	if [ "$cpus" -gt 1 ]; then
+		cpus=$((cpus / 2))
+	fi
+	[ "$cpus" -gt 0 ] || return 0
+	echo "$((kb / 2048))M $cpus"
+}
