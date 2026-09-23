@@ -241,10 +241,10 @@ for daily use. The README points at `nix profile install
 github:hamidr/nixcage` for that, which is also the honest upgrade path from
 trying nixcage to keeping it.
 
-An undeclared microVM session gets systemd-vmspawn's 2 GiB and one vCPU unless
-`--memory` and `--cpus` say otherwise. ADR-022 declined to guess a number on
-the host's behalf, and here there is no host to declare one, so the flags are
-the only answer. The README says this where it says what the mode is.
+An undeclared microVM session is bounded by what decision 10 reads off the
+machine, which is a share rather than a measurement of what the session needs;
+`--memory` and `--cpus` outrank it. The README says this where it says what
+the mode is.
 
 ADR-003 put the host in charge deliberately, and this softens that: a machine
 can now hold cages nobody declared. The boundary that remains is root -- every
