@@ -199,3 +199,16 @@ write_host_config() {
 	[[ "$called" == "nixcage-container enter"* ]]
 	[[ "$called" != *--profile* ]]
 }
+
+
+# A declared host rendered its identity from nixcage.git.*, so the session is
+# given none: reading the invoking user's git would contradict what its
+# administrator applied (ADR-023 decision 11).
+@test "enter on a declared host names no identity" {
+	write_host_config "$TEST_TEMP_DIR/src"
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" != *--git-name* ]]
+}

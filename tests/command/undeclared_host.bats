@@ -110,3 +110,40 @@ teardown() {
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"nix run github:hamidr/nixcage"* ]]
 }
+
+
+# Who a session commits as where nothing rendered an identity: the host's own
+# git is asked, and only the two fields cross (ADR-023 decision 11).
+stub_git_identity() {
+	cat >"$TEST_TEMP_DIR/bin/git" <<GIT
+#!/usr/bin/env bash
+case "\$*" in
+"config --get user.name")  echo "$1" ;;
+"config --get user.email") echo "$2" ;;
+*) exit 1 ;;
+esac
+GIT
+	chmod +x "$TEST_TEMP_DIR/bin/git"
+}
+
+@test "enter with no host config names the identity the host's git holds" {
+	stub_git_identity "Ada Lovelace" ada@example.org
+	mkdir -p "$TEST_TEMP_DIR/proj"
+	cd "$TEST_TEMP_DIR/proj"
+	run_nixcage enter
+	[ "$status" -eq 0 ]
+	local called
+	called="$(cat "$TEST_TEMP_DIR/sudo-calls")"
+	[[ "$called" == *"--git-name Ada Lovelace"* ]]
+	[[ "$called" == *"--git-email ada@example.org"* ]]
+}
+
+@test "a host whose git holds no identity names none" {
+	printf '#!/usr/bin/env bash\nexit 1\n' >"$TEST_TEMP_DIR/bin/git"
+	chmod +x "$TEST_TEMP_DIR/bin/git"
+	mkdir -p "$TEST_TEMP_DIR/proj"
+	cd "$TEST_TEMP_DIR/proj"
+	run_nixcage enter
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" != *--git-name* ]]
+}

@@ -460,6 +460,20 @@ container_words() {
   echo "$NIXCAGE_CONTAINER"
 }
 
+## Who a session commits as where no module rendered an identity (ADR-023
+## decision 11). The two fields are read from the invoking user's git and
+## handed over; ~/.gitconfig itself is never bound into a cage, because it
+## carries credential.helper and signing configuration (ADR-008).
+git_identity_args() {
+  host_declared && return 0
+  local name email
+  name="$(git config --get user.name 2>/dev/null || true)"
+  email="$(git config --get user.email 2>/dev/null || true)"
+  [[ -n "$name" ]] && { echo --git-name; echo "$name"; }
+  [[ -n "$email" ]] && { echo --git-email; echo "$email"; }
+  return 0
+}
+
 ## Where nixcage's own outputs are realised from, when a session needs one
 ## this nixcage did not carry. Overridable so the suite and a working tree can
 ## point it at themselves.
@@ -640,6 +654,10 @@ cmd_enter() {
     # hypervisor where vmspawn looks, so this session is where they are
     # realised. A cage already on the substrate is given what was realised
     # before, since its record makes it a microVM session without the flag.
+    local -a identity=()
+    while IFS= read -r word; do
+      [[ -n "$word" ]] && identity+=("$word")
+    done < <(git_identity_args)
     local -a microvm=()
     if ! host_declared &&
        { [[ " ${substrate[*]-} " == *" microvm "* ]] || [[ -s "$MICROVM_CACHE" ]]; }; then
@@ -650,7 +668,7 @@ cmd_enter() {
     fi
     [[ $# -eq 0 ]] && log_info "Entering container $name..."
     sudo "$container" enter "${substrate[@]}" "${profile[@]}" "${microvm[@]}" \
-      "${agent_fwd[@]}" "$name" "$project_dir" "$@"
+      "${identity[@]}" "${agent_fwd[@]}" "$name" "$project_dir" "$@"
     return
   fi
 

@@ -36,6 +36,8 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_PRINT_ARGV=""
 	NIXCAGE_ENTER_PROFILE=""
 	NIXCAGE_ENTER_GUEST=""
+	NIXCAGE_ENTER_GIT_NAME=""
+	NIXCAGE_ENTER_GIT_EMAIL=""
 	NIXCAGE_ENTER_SUBSTRATE=""
 	NIXCAGE_ENTER_DISK=""
 	NIXCAGE_ENTER_BINDS=()
@@ -155,6 +157,18 @@ nixcage_enter_parse() {
 				return 1
 			fi
 			NIXCAGE_ENTER_GUEST="$2"
+			shift 2 || return 1
+			;;
+		## Who a session commits as, where no module rendered an identity.
+		## Two fields and nothing else: the invoking user's ~/.gitconfig
+		## carries credential.helper and signing configuration, which is what
+		## ADR-008 keeps out of a cage.
+		--git-name)
+			NIXCAGE_ENTER_GIT_NAME="${2:-}"
+			shift 2 || return 1
+			;;
+		--git-email)
+			NIXCAGE_ENTER_GIT_EMAIL="${2:-}"
 			shift 2 || return 1
 			;;
 		## A directory vmspawn has to find a program in: the hypervisor it

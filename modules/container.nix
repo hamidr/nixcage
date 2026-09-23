@@ -135,7 +135,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--memory <size>] [--cpus <n>] [--substrate nspawn|microvm] [--disk <size>] [--profile <path>] [--guest <path>] [--microvm-path <path>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--memory <size>] [--cpus <n>] [--substrate nspawn|microvm] [--disk <size>] [--profile <path>] [--guest <path>] [--microvm-path <path>] [--git-name <name>] [--git-email <address>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name>"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -746,6 +746,16 @@ let
         ## someone else binds its own file over this one.
         if [ -f /etc/nixcage/gitconfig ]; then
           cp /etc/nixcage/gitconfig "$rootfs/etc/gitconfig"
+        elif [ -n "$NIXCAGE_ENTER_GIT_NAME" ] || [ -n "$NIXCAGE_ENTER_GIT_EMAIL" ]; then
+          ## The same minimal file, from the identity the session named
+          ## (ADR-023 decision 11). Signing still goes through the forwarded
+          ## agent, as it does where a module rendered this.
+          {
+            echo "[user]"
+            [ -n "$NIXCAGE_ENTER_GIT_NAME" ] && echo "  name = $NIXCAGE_ENTER_GIT_NAME"
+            [ -n "$NIXCAGE_ENTER_GIT_EMAIL" ] && echo "  email = $NIXCAGE_ENTER_GIT_EMAIL"
+            true
+          } >"$rootfs/etc/gitconfig"
         fi
 
         ## Commits are signed through the invoking user's agent: the socket

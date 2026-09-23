@@ -505,3 +505,21 @@ teardown() {
 	assert_failure
 	assert_output --partial "not a store path: /usr/bin"
 }
+
+
+# Who a session commits as, where no module rendered an identity (ADR-023
+# decision 11). The invoking user's ~/.gitconfig is never bound in: it carries
+# credential.helper and signing configuration, which ADR-008 keeps out of a
+# cage. Only the two fields cross.
+
+@test "given --git-name and --git-email, a session commits as that identity" {
+	nixcage_enter_parse --git-name "Ada Lovelace" --git-email ada@example.org n /srv/w
+	[ "$NIXCAGE_ENTER_GIT_NAME" = "Ada Lovelace" ]
+	[ "$NIXCAGE_ENTER_GIT_EMAIL" = ada@example.org ]
+}
+
+@test "given neither, a session has whatever the host rendered" {
+	nixcage_enter_parse n /srv/w
+	[ -z "$NIXCAGE_ENTER_GIT_NAME" ]
+	[ -z "$NIXCAGE_ENTER_GIT_EMAIL" ]
+}
