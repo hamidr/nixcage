@@ -161,3 +161,22 @@ GIT
 	[[ "$output" == *secretEnv* ]]
 	[[ "$output" == *principalSubjects* ]]
 }
+
+
+# rm and status reach the same layer enter does: on a host that declared
+# nothing there is no nixcage-container on PATH to find (ADR-023).
+@test "rm with no host config removes through the layer this nixcage carries" {
+	mkdir -p "$TEST_TEMP_DIR/proj"
+	cd "$TEST_TEMP_DIR/proj"
+	run bash -c "echo y | bash '$NIXCAGE_BIN' rm"
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "$NIXCAGE_CONTAINER rm "* ]]
+}
+
+@test "status with no host config lists through the layer this nixcage carries" {
+	mkdir -p "$TEST_TEMP_DIR/proj"
+	cd "$TEST_TEMP_DIR/proj"
+	run_nixcage status
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "$NIXCAGE_CONTAINER list"* ]]
+}

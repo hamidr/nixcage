@@ -455,7 +455,9 @@ container_words() {
     log_err "This nixcage carries no container layer to run a session from."
     log_err "Run it from the store: nix run github:hamidr/nixcage -- enter"
     log_err "Or import nixcage's nixosModules.host and rebuild."
-    exit 1
+    # Inside a command substitution an exit ends only the subshell, so the
+    # status is what the caller acts on.
+    return 1
   fi
   echo "$NIXCAGE_CONTAINER"
 }
@@ -828,7 +830,9 @@ cmd_rm() {
   fi
 
   if [[ "$OS" == "linux" ]]; then
-    sudo nixcage-container rm "$name"
+    local container
+    container="$(container_words)" || exit 1
+    sudo "$container" rm "$name"
   else
     ensure_vm
     vm_ssh -- sudo nixcage-container rm "$name"
@@ -854,7 +858,9 @@ cmd_status() {
       echo "                something a host declares"
     fi
     echo "  Containers:"
-    sudo nixcage-container list 2>/dev/null | sed 's/^/    /' || true
+    local container
+    container="$(container_words)" || exit 1
+    sudo "$container" list 2>/dev/null | sed 's/^/    /' || true
     return
   fi
 
