@@ -261,3 +261,16 @@ teardown() {
 	run grep -qE 'nixcage_bounds_machine' "$(CONTAINER_NIX)"
 	assert_success
 }
+
+
+# A declared host keeps what its administrator applied: the flags that name a
+# layer, a guest or a directory for vmspawn to search are refused there
+# (ADR-023 decision 8).
+@test "a declared host refuses the flags that replace what it rendered" {
+	run grep -q 'nixcage_declaration_carried_flag' "$(CONTAINER_NIX)"
+	assert_success
+	# Refused rather than warned about: a session that is not what it asked
+	# for is the failure ADR-019 already rejected for a fixed substrate.
+	run grep -q 'is for a host that declared none' "$(CONTAINER_NIX)"
+	assert_success
+}

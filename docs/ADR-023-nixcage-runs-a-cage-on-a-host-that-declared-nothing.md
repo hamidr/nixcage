@@ -132,7 +132,11 @@ deliberately: a dependant that provisions its own layer is the same case as
 nixcage running undeclared, and a preserved environment variable would make
 the coupling invisible to the thing that documents the interface. A declared
 host passes none of them and keeps reading `/etc/nixcage/profile` and
-`MICROVM_GUEST`, with qemu and virtiofsd already on the layer's path.
+`MICROVM_GUEST`, with qemu and virtiofsd already on the layer's path; it also
+refuses all three, because ADR-009's argument that a caller widens nothing it
+could not widen itself assumes general root, and a host whose sudoers grants
+`nixcage-container` alone has not given that. What a session is built from
+stays the answer of whoever declared one.
 
 **9. The guest is built from the revision the host is already running, where
 the host can name one.** A NixOS machine answers with `nixos-version --json`,

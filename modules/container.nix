@@ -465,6 +465,16 @@ let
         local network_addr="$NIXCAGE_ENTER_NETWORK_ADDR"
         local network_ns="$NIXCAGE_ENTER_NETWORK_NS"
         local no_nix_daemon="$NIXCAGE_ENTER_NO_NIX_DAEMON"
+        ## What a session is built from is the host's answer where it gave
+        ## one, so a declared host refuses the flags that would replace it
+        ## rather than letting a caller choose what root runs here.
+        local carried
+        carried="$(nixcage_declaration_carried_flag "''${NIXCAGE_DECLARED:-}" \
+          "$NIXCAGE_ENTER_PROFILE" "$NIXCAGE_ENTER_GUEST" \
+          "''${#NIXCAGE_ENTER_MICROVM_PATHS[@]}")"
+        [ -z "$carried" ] ||
+          die "this host declared what a session is built from; $carried is for a host that declared none"
+
         ## The layer this session is built from: the one the host rendered,
         ## else the one the caller named. Resolved once here, because every
         ## path below spells it and a session with neither has nothing to run.

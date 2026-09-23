@@ -62,3 +62,36 @@ teardown() {
 	[[ "$output" == *nixcage.principalUidRange* ]]
 	[[ "$output" == *nixosModules.host* ]]
 }
+
+
+# What a session is built from is the host's answer where it gave one (ADR-023
+# decision 8). A caller that can run nixcage-container on a host whose sudoers
+# grants it alone would otherwise choose the userland a root session is built
+# from, on a machine whose administrator declared exactly that.
+
+@test "an undeclared host takes the layer the caller named" {
+	run nixcage_declaration_carried_flag "" /nix/store/a-profile "" 0
+	[ "$status" -eq 0 ]
+	[ "$output" = "" ]
+}
+
+@test "a declared host refuses a named layer" {
+	run nixcage_declaration_carried_flag 1 /nix/store/a-profile "" 0
+	assert_output --profile
+}
+
+@test "a declared host refuses a named guest" {
+	run nixcage_declaration_carried_flag 1 "" /nix/store/a-system 0
+	assert_output --guest
+}
+
+@test "a declared host refuses a named directory for vmspawn to search" {
+	run nixcage_declaration_carried_flag 1 "" "" 2
+	assert_output --microvm-path
+}
+
+@test "a declared host that was named nothing is not refused" {
+	run nixcage_declaration_carried_flag 1 "" "" 0
+	[ "$status" -eq 0 ]
+	[ "$output" = "" ]
+}

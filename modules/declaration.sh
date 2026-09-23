@@ -29,3 +29,24 @@ nixcage_declaration_read() {
 nixcage_declaration_refusal() {
 	printf '%s needs %s: import nixcage nixosModules.host and set it' "$1" "$2"
 }
+
+## nixcage_declaration_carried_flag <declared> <profile> <guest> <microvm paths>
+## The first of the flags naming what a session is built from that a declared
+## host may not be given, or nothing.
+##
+## ADR-009 lets a caller widen a session because that caller already runs as
+## root outside every cage. Where an administrator grants nixcage-container
+## through sudoers and nothing else, that is not so, and these three flags
+## would let the caller choose the userland a root session is built from and
+## the toplevel vmspawn boots. A host that declared its own answer keeps it.
+nixcage_declaration_carried_flag() {
+	local declared="$1" profile="$2" guest="$3" paths="$4"
+	[ -n "$declared" ] || return 0
+	if [ -n "$profile" ]; then
+		echo --profile
+	elif [ -n "$guest" ]; then
+		echo --guest
+	elif [ "$paths" -gt 0 ]; then
+		echo --microvm-path
+	fi
+}
