@@ -41,6 +41,7 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
 	NIXCAGE_ENTER_STORE_ROOTS=()
+	NIXCAGE_ENTER_MICROVM_PATHS=()
 	NIXCAGE_ENTER_ARGV=()
 }
 
@@ -154,6 +155,17 @@ nixcage_enter_parse() {
 				return 1
 			fi
 			NIXCAGE_ENTER_GUEST="$2"
+			shift 2 || return 1
+			;;
+		## A directory vmspawn has to find a program in: the hypervisor it
+		## searches PATH for, and virtiofsd. A declared host put both where
+		## vmspawn looks and passes none of these.
+		--microvm-path)
+			if ! nixcage_store_root_ok "${2:-}"; then
+				echo "nixcage: not a store path: ${2:-}" >&2
+				return 1
+			fi
+			NIXCAGE_ENTER_MICROVM_PATHS+=("$2")
 			shift 2 || return 1
 			;;
 		--store-root)

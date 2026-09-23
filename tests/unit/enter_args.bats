@@ -481,3 +481,27 @@ teardown() {
 	assert_failure
 	assert_output --partial "not a store path: /var/lib/guest"
 }
+
+# What vmspawn has to find on its own path: a hypervisor and virtiofsd. A host
+# that declared nothing put neither where vmspawn looks, so the session names
+# them, in the store's own spelling like every other path that crosses sudo
+# (ADR-023).
+
+@test "given --microvm-path, a session records each directory in order" {
+	nixcage_enter_parse --microvm-path /nix/store/q-qemu \
+		--microvm-path /nix/store/v-virtiofsd n /srv/w
+	[ "${#NIXCAGE_ENTER_MICROVM_PATHS[@]}" = 2 ]
+	[ "${NIXCAGE_ENTER_MICROVM_PATHS[0]}" = /nix/store/q-qemu ]
+	[ "${NIXCAGE_ENTER_MICROVM_PATHS[1]}" = /nix/store/v-virtiofsd ]
+}
+
+@test "given no --microvm-path, a session has none" {
+	nixcage_enter_parse n /srv/w
+	[ "${#NIXCAGE_ENTER_MICROVM_PATHS[@]}" = 0 ]
+}
+
+@test "a microvm path outside the store stops the parse" {
+	run nixcage_enter_parse --microvm-path /usr/bin n /srv/w
+	assert_failure
+	assert_output --partial "not a store path: /usr/bin"
+}

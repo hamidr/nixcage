@@ -254,3 +254,13 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	run grep -qE -- '--set NIXCAGE_PROFILE' "$NIXCAGE_ROOT/flake.nix"
 	assert_success
 }
+
+# A microVM session on a host that declared nothing realises these by name
+# (ADR-023 decision 6), so a flake that stopped exporting one would be found
+# in the middle of an enter rather than here.
+@test "the flake exports what a microvm session is realised from" {
+	for attr in guest qemu virtiofsd; do
+		run nix eval --raw "$NIXCAGE_ROOT#packages.x86_64-linux.$attr.drvPath"
+		assert_success
+	done
+}

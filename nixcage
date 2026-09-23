@@ -460,6 +460,117 @@ container_words() {
   echo "$NIXCAGE_CONTAINER"
 }
 
+## Where nixcage's own outputs are realised from, when a session needs one
+## this nixcage did not carry. Overridable so the suite and a working tree can
+## point it at themselves.
+NIXCAGE_SELF_FLAKE="${NIXCAGE_SELF_FLAKE:-github:hamidr/nixcage}"
+
+MICROVM_CACHE="$STATE_DIR/microvm"
+
+## The revision the host is already running, where it can name one. A guest
+## built against it shares the machine's glibc, systemd, bash and kernel
+## instead of fetching a second set (ADR-023 decision 9).
+host_nixpkgs_revision() {
+  command -v nixos-version >/dev/null 2>&1 || return 0
+  nixos-version --json 2>/dev/null | jq -r '.nixpkgsRevision // empty' 2>/dev/null || true
+}
+
+## systemd-vmspawn searches PATH for qemu-system-<arch> and supports no other
+## backend, so a machine that already runs virtual machines needs nothing from
+## nixcage (ADR-023 decision 7).
+machine_has_qemu() {
+  command -v "qemu-system-$(uname -m)" >/dev/null 2>&1
+}
+
+## One output path of a flake attribute, realised now.
+nix_out_path() {
+  local out
+  out="$(nix build --no-link --print-out-paths "$@")" || return 1
+  [[ -n "$out" ]] || return 1
+  tail -n 1 <<<"$out"
+}
+
+## What a microVM session needs that no declaration put on this machine: the
+## guest it boots, virtiofsd for its shares, and qemu where the machine has
+## none of its own. Realised when a session first asks for one and cached
+## after that, so a caller who never boots a microVM never pays for one
+## (ADR-023 decision 6). Answers the flags the session is given.
+microvm_cached_args() {
+  [[ -s "$MICROVM_CACHE" ]] || return 1
+  local key path
+  # A path the store no longer holds is not a cache entry: it was collected,
+  # and the session would be given a name nothing answers to.
+  while IFS='=' read -r key path; do
+    [[ -e "$path" ]] || return 1
+  done <"$MICROVM_CACHE"
+  while IFS='=' read -r key path; do
+    case "$key" in
+    GUEST) echo --guest; echo "$path" ;;
+    PATH)  echo --microvm-path; echo "$path" ;;
+    esac
+  done <"$MICROVM_CACHE"
+}
+
+## Realise what is missing. Separate from reading the cache because it
+## prompts, prints and may refuse: a function whose output is captured cannot
+## do any of the three, and its exit would only end the subshell doing the
+## capturing.
+microvm_realise() {
+  if microvm_cached_args >/dev/null; then
+    return 0
+  fi
+
+  local want_qemu=""
+  machine_has_qemu || want_qemu=1
+
+  # Announced before it is spent: undeclared, this is the one thing nixcage
+  # does that costs more than the session it was asked for.
+  log_warn "This host declared nothing, so a microVM session is built here first."
+  log_warn "  the guest:  204 derivations, 302.2 MiB of downloads"
+  log_warn "  virtiofsd:  49 MiB"
+  [[ -n "$want_qemu" ]] &&
+    log_warn "  qemu:       1562 MiB (this machine has no qemu-system-$(uname -m) of its own)"
+  read -rp "Realise them now? [y/N] " answer
+  if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+    log_err "Nothing realised. A microVM session needs them; an nspawn session does not."
+    exit 1
+  fi
+
+  local rev guest="" virtiofsd qemu
+  rev="$(host_nixpkgs_revision)"
+  if [[ -n "$rev" ]]; then
+    guest="$(nix_out_path "$NIXCAGE_SELF_FLAKE#guest" \
+      --override-input nixpkgs "github:NixOS/nixpkgs/$rev")" || guest=""
+    if [[ -z "$guest" ]]; then
+      log_warn "The guest does not evaluate against this host's revision ($rev); using nixcage's own input."
+    fi
+  else
+    log_info "This host names no nixpkgs revision, so the guest is built from nixcage's own input."
+  fi
+  if [[ -z "$guest" ]]; then
+    guest="$(nix_out_path "$NIXCAGE_SELF_FLAKE#guest")" || {
+      log_err "Could not realise the guest a microVM session boots."
+      exit 1
+    }
+  fi
+  virtiofsd="$(nix_out_path "$NIXCAGE_SELF_FLAKE#virtiofsd")" || {
+    log_err "Could not realise virtiofsd, which vmspawn shares a directory with."
+    exit 1
+  }
+
+  mkdir -p "$STATE_DIR"
+  : >"$MICROVM_CACHE"
+  echo "GUEST=$guest" >>"$MICROVM_CACHE"
+  echo "PATH=$virtiofsd" >>"$MICROVM_CACHE"
+  if [[ -n "$want_qemu" ]]; then
+    qemu="$(nix_out_path "$NIXCAGE_SELF_FLAKE#qemu")" || {
+      log_err "Could not realise qemu, which is the only backend vmspawn has."
+      exit 1
+    }
+    echo "PATH=$qemu" >>"$MICROVM_CACHE"
+  fi
+}
+
 ## The layer a session names across sudo (ADR-023 decision 8). Empty on a
 ## declared host, which reads its own.
 container_profile_args() {
@@ -525,9 +636,21 @@ cmd_enter() {
     while IFS= read -r word; do
       [[ -n "$word" ]] && profile+=("$word")
     done < <(container_profile_args)
+    # A microVM on a host that declared nothing has no guest to boot and no
+    # hypervisor where vmspawn looks, so this session is where they are
+    # realised. A cage already on the substrate is given what was realised
+    # before, since its record makes it a microVM session without the flag.
+    local -a microvm=()
+    if ! host_declared &&
+       { [[ " ${substrate[*]-} " == *" microvm "* ]] || [[ -s "$MICROVM_CACHE" ]]; }; then
+      microvm_realise
+      while IFS= read -r word; do
+        [[ -n "$word" ]] && microvm+=("$word")
+      done < <(microvm_cached_args)
+    fi
     [[ $# -eq 0 ]] && log_info "Entering container $name..."
-    sudo "$container" enter "${substrate[@]}" "${profile[@]}" "${agent_fwd[@]}" \
-      "$name" "$project_dir" "$@"
+    sudo "$container" enter "${substrate[@]}" "${profile[@]}" "${microvm[@]}" \
+      "${agent_fwd[@]}" "$name" "$project_dir" "$@"
     return
   fi
 

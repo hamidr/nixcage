@@ -121,15 +121,18 @@ says what it is about to fetch and build and asks before doing it. A declared
 host is unaffected: `nixcage.microvm.enable` already puts qemu and virtiofsd
 where vmspawn looks, which is a decision its administrator made once.
 
-**8. Three store paths cross sudo as flags, not as environment.** `sudo`
-clears the environment, so the layer, the profile and the guest reach the
-privileged side named: the CLI runs `sudo <store>/bin/nixcage-container`, and
-`enter` takes `--profile <path>` and, for a microVM, `--guest <path>`. This
-widens the exported interface (ADR-009) by two options, deliberately: a
-dependant that provisions its own layer is the same case as nixcage running
-undeclared, and a preserved environment variable would make the coupling
-invisible to the thing that documents the interface. A declared host passes
-neither and keeps reading `/etc/nixcage/profile` and `MICROVM_GUEST`.
+**8. Store paths cross sudo as flags, not as environment.** `sudo` clears the
+environment, so everything the privileged side is built from reaches it named:
+the CLI runs `sudo <store>/bin/nixcage-container`, and `enter` takes
+`--profile <path>` and, for a microVM, `--guest <path>` and `--microvm-path
+<path>`. The last is a directory vmspawn searches, since it finds the
+hypervisor and virtiofsd on its own path rather than being told where they
+are. This widens the exported interface (ADR-009) by three options,
+deliberately: a dependant that provisions its own layer is the same case as
+nixcage running undeclared, and a preserved environment variable would make
+the coupling invisible to the thing that documents the interface. A declared
+host passes none of them and keeps reading `/etc/nixcage/profile` and
+`MICROVM_GUEST`, with qemu and virtiofsd already on the layer's path.
 
 **9. The guest is built from the revision the host is already running, where
 the host can name one.** A NixOS machine answers with `nixos-version --json`,

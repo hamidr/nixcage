@@ -54,6 +54,16 @@
             lib.optionalAttrs (container ? script) {
               container = container.script;
               containerProfile = container.profile;
+              ## What a microVM session needs and an nspawn session does not,
+              ## which is why they are outputs of their own rather than part
+              ## of what the CLI carries: realised the first time a session
+              ## asks for one (ADR-023 decision 6). The guest is built here
+              ## from nixcage's pinned nixpkgs; a session on a host that names
+              ## a revision overrides that input to the host's own
+              ## (decision 9).
+              guest = (pkgs.nixos [ ./modules/guest.nix ]).config.system.build.toplevel;
+              qemu = pkgs.qemu_kvm;
+              virtiofsd = pkgs.virtiofsd;
             }
             // {
               default = pkgs.stdenv.mkDerivation {
