@@ -8,7 +8,7 @@ one of these behind it is a number nobody has checked.
 - Measured for: `x86_64-linux`
 - Measured on: `aarch64-darwin`
 - Date: 2026-09-23
-- Revision: `511a621`
+- Revision: `af79291`
 
 ## What a microVM session realises the first time it is asked for
 
