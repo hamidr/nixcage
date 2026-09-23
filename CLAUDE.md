@@ -53,6 +53,13 @@ factory of roles over one repository, is built entirely on those. Architecture:
 - `modules/principal-uid.sh` -- allocation of the uid a cage is mapped onto.
   A principal is whatever a caller wants a durable number for; nixcage promises
   only that one name always answers with one number and that none is reissued.
+- `modules/declaration.sh` -- what a host declared, and what stands in for it
+  where nothing was (ADR-024): one reader with two implementations, sourced by
+  the CLI and by `nixcage-container` so one format has one parser. Every
+  setting's undeclared value is stated in `nixcage_declaration_reset`, which
+  is where a new option says what it means on a host that declared nothing.
+- `modules/gitconfig.sh` -- the identity a session commits as, rendered where
+  the session is, from the fields a host declared or a caller named.
 - `modules/bridges.nix` -- `nixcage.bridges.<name>` (ADR-018), imported by
   both the host module and the VM module: a bridge a cage may be placed on,
   with no static ports, its address, and the two settings an empty bridge
@@ -97,7 +104,8 @@ factory of roles over one repository, is built entirely on those. Architecture:
   `git.*`, `storage.dataset`, `principalUidRange`, `microvm.*`,
   `substrate.default` and `cages.<path>.substrate`; renders
   `/etc/nixcage/config` for the CLI and `/etc/nixcage/container` for the guest,
-  installs the container layer on the host.
+  installs the container layer on the host. Everything it declares goes into
+  one rendered file, `/etc/nixcage/declaration`, carrying a version.
 - `templates/config/` -- the flake template users instantiate at
   `~/.config/nixcage` (their VM configuration; sops-nix wired in).
 - `examples/project/` -- an ordinary project flake showing the devShell

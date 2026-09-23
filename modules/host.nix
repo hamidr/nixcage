@@ -275,39 +275,38 @@ in
     {
     environment.systemPackages = [ container.script ];
 
-    ## Rendered only when an identity exists: an incomplete gitconfig would
-    ## replace git's own "who are you" error with a stranger one.
-    environment.etc."nixcage/gitconfig" =
-      lib.mkIf (cfg.git.userName != null && cfg.git.userEmail != null)
-        {
-          text = container.gitConfigText cfg.git;
-        };
-
-    ## Rendered only when a uid range is declared: an ordinary session never
-    ## reads it, and the uid and storage verbs refuse to answer without it.
-    environment.etc."nixcage/container" = lib.mkIf (cfg.principalUidRange != null) {
-      text = ''
+    ## One declaration a host renders and one reader answers from, versioned
+    ## because a nixcage installed on its own can stand on a module older or
+    ## newer than itself. Every key a session or the CLI reads is here; what
+    ## is not here is the profile, which is a symlink to a store path rather
+    ## than something a line of text says better.
+    environment.etc."nixcage/declaration".text = ''
+      DECLARATION_VERSION=1
+      HOST_PLATFORM=linux
+      WORKSPACE_ROOTS=${lib.concatStringsSep ":" cfg.workspaceRoots}
+      SUBSTRATE_DEFAULT=${substrateDefault}
+      CAGE_SUBSTRATES="${cageSubstrates}"
+      ${cfg.boundsConfigText}${lib.optionalString cfg.microvm.enable ''
+        MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}
+      ''}${lib.optionalString (cfg.principalUidRange != null) ''
         PRINCIPAL_UID_BASE=${toString cfg.principalUidRange.base}
         PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}
-        PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
-        STORAGE_DATASET=${lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset}
-        HOST_PLATFORM=linux
-        SUBSTRATE_DEFAULT=${substrateDefault}
-        CAGE_SUBSTRATES="${cageSubstrates}"
-        ${cfg.boundsConfigText}        ${lib.optionalString cfg.microvm.enable "MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}"}
-      '';
-    };
+      ''}PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
+      STORAGE_DATASET=${lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset}
+      SECRET_ENV="${
+        lib.concatStringsSep " " (lib.mapAttrsToList (var: secret: "${var}=${secret}") cfg.secretEnv)
+      }"
+      ${lib.optionalString (cfg.git.userName != null) ''
+        GIT_USER_NAME="${cfg.git.userName}"
+      ''}${lib.optionalString (cfg.git.userEmail != null) ''
+        GIT_USER_EMAIL="${cfg.git.userEmail}"
+      ''}GIT_SIGNING=${if cfg.git.signing.enable then "1" else ""}
+    '';
 
     ## One guest per host, from this host's pkgs (ADR-019 decision 3).
     nixcage.microvm.guest = pkgs.nixos ([ ./guest.nix ] ++ cfg.microvm.guestModules);
 
     environment.etc."nixcage/profile".source = container.profile;
-    environment.etc."nixcage/secret-env".text = lib.concatStrings (
-      lib.mapAttrsToList (var: secret: "${var}=${secret}\n") cfg.secretEnv
-    );
-    environment.etc."nixcage/config".text = ''
-      WORKSPACE_ROOTS=${lib.concatStringsSep ":" cfg.workspaceRoots}
-    '';
 
     ## The container homes and skeletons live where the VM keeps them, so
     ## the container script needs no platform branch.

@@ -45,7 +45,22 @@ OS="${NIXCAGE_OS:-$(detect_os)}"
 # macOS configuration source; on Linux the host's nixosModules.host renders
 # /etc/nixcage/config instead and there is no VM.
 NIXCAGE_FLAKE="${NIXCAGE_FLAKE:-$HOME/.config/nixcage}"
-HOST_CONFIG="${NIXCAGE_HOST_CONFIG:-/etc/nixcage/config}"
+# What a host declared, read through the same module the guest script reads it
+# with. Sourced rather than copied: two readers of one format is the thing
+# this replaced. The package names the file; a working tree has it beside the
+# script.
+NIXCAGE_DECLARATION_SH="${NIXCAGE_DECLARATION_SH:-$(dirname "${BASH_SOURCE[0]}")/modules/declaration.sh}"
+# The path is a variable, so shellcheck cannot follow it from here; the dev
+# shell lints the file itself.
+# shellcheck disable=SC1090
+source "$NIXCAGE_DECLARATION_SH"
+
+HOST_CONFIG="${NIXCAGE_HOST_CONFIG:-/etc/nixcage/declaration}"
+# The two files a nixcage before this one rendered, read when the declaration
+# is absent so a CLI newer than the module it stands on does not take a host
+# with workspace roots for a host with none.
+LEGACY_HOST_CONFIG="${NIXCAGE_LEGACY_HOST_CONFIG:-/etc/nixcage/config}"
+LEGACY_CONTAINER_CONFIG="${NIXCAGE_LEGACY_CONTAINER_CONFIG:-/etc/nixcage/container}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nixcage"
 
 # All values the CLI needs from the config flake, cached at build time so
@@ -87,25 +102,42 @@ cfg_read() {
   fi
 }
 
-# Whether this machine has been told anything about nixcage. The one place
-# the question is asked, so that an option added later has one place to say
-# what it means where nothing was declared.
-host_declared() {
-  [[ -f "$HOST_CONFIG" ]]
+# Read what nixosModules.host rendered, once per invocation. A host that
+# declared nothing is not an error: it gets the undeclared answer to every
+# setting the file would carry, which for the roots is no roots at all. A
+# declaration this nixcage cannot read is an error, because a host with roots
+# must never be taken for a host with none.
+#
+# Once, because every verb asks whether this host declared anything and the
+# answer cannot depend on which verb asked first.
+declaration_read_once() {
+  [[ -z "${NIXCAGE_DECLARATION_READ:-}" ]] || return 0
+  local status=0
+  nixcage_declaration_read "$HOST_CONFIG" || status=$?
+  if [[ "$status" == 2 ]]; then
+    exit 1
+  fi
+  if [[ -z "${NIXCAGE_DECLARED:-}" ]]; then
+    nixcage_declaration_read_legacy "$LEGACY_HOST_CONFIG" "$LEGACY_CONTAINER_CONFIG"
+    if [[ -n "${NIXCAGE_DECLARATION_LEGACY:-}" ]]; then
+      log_warn "Reading a declaration an older nixcage rendered."
+      log_warn "Apply the matching nixcage with nixos-rebuild switch for the current one."
+    fi
+  fi
+  NIXCAGE_DECLARATION_READ=1
 }
 
-# Read the config rendered by nixosModules.host on a Linux host. A host that
-# declared nothing is not an error: it gets the undeclared answer to every
-# setting the file would carry, which for the roots is no roots at all.
+# Whether this machine has been told anything about nixcage. The answer comes
+# from the one reader, which is also what makes "what does this mean where
+# nothing was declared" a question with one place to answer it.
+host_declared() {
+  declaration_read_once
+  [[ -n "${NIXCAGE_DECLARED:-}" ]]
+}
+
 host_read_config() {
-  VM_WORKSPACE_ROOTS=""
-  host_declared || return 0
-  local key val
-  while IFS='=' read -r key val || [[ -n "$key" ]]; do
-    case "$key" in
-    WORKSPACE_ROOTS) VM_WORKSPACE_ROOTS="$val" ;;
-    esac
-  done <"$HOST_CONFIG"
+  declaration_read_once
+  VM_WORKSPACE_ROOTS="${WORKSPACE_ROOTS:-}"
 }
 
 # Read the build-time cache (SSH_PORT, WORKSPACE_ROOTS) into globals.

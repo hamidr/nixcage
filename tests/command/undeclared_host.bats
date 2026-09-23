@@ -10,7 +10,9 @@ setup() {
 	setup_temp_dir
 	export NIXCAGE_OS=linux
 	# The path the declaration would be at, deliberately never written.
-	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/host-config"
+	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declaration"
+	export NIXCAGE_LEGACY_HOST_CONFIG="$TEST_TEMP_DIR/legacy-config"
+	export NIXCAGE_LEGACY_CONTAINER_CONFIG="$TEST_TEMP_DIR/legacy-container"
 	export HOME="$TEST_TEMP_DIR/home"
 	# What the package baked in: a nixcage the store built carries the layer
 	# a session is given, since undeclared nothing else provides one.

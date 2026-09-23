@@ -10,8 +10,9 @@ load ../test_helper/common
 setup() {
 	setup_temp_dir
 	export NIXCAGE_OS=linux
-	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/host-config"
-	echo "WORKSPACE_ROOTS=$TEST_TEMP_DIR" >"$NIXCAGE_HOST_CONFIG"
+	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declaration"
+	printf 'DECLARATION_VERSION=1\nWORKSPACE_ROOTS=%s\n' "$TEST_TEMP_DIR" \
+		>"$NIXCAGE_HOST_CONFIG"
 	mkdir -p "$TEST_TEMP_DIR/bin" "$TEST_TEMP_DIR/proj"
 	export PATH="$TEST_TEMP_DIR/bin:$PATH"
 	cat >"$TEST_TEMP_DIR/bin/sudo" <<EOF

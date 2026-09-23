@@ -45,9 +45,9 @@ teardown() {
 	assert_line "$TEST_TEMP_DIR/store/g-nixos=system"
 }
 
-@test "a workspace root with an equals sign in its path survives the host config" {
-	HOST_CONFIG="$TEST_TEMP_DIR/host-config"
-	echo "WORKSPACE_ROOTS=/srv/a=b:/srv/c" >"$HOST_CONFIG"
+@test "a workspace root with an equals sign in its path survives the declaration" {
+	HOST_CONFIG="$TEST_TEMP_DIR/declaration"
+	printf 'DECLARATION_VERSION=1\nWORKSPACE_ROOTS=/srv/a=b:/srv/c\n' >"$HOST_CONFIG"
 	host_read_config
 	[ "$VM_WORKSPACE_ROOTS" = "/srv/a=b:/srv/c" ]
 }

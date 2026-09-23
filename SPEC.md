@@ -54,17 +54,24 @@ The guest is always Linux. On macOS hosts the runner is a Darwin-native qemu
 ### 3.0 Linux: the host module
 
 On Linux there is no VM and no config flake. `nixosModules.host` is imported
-into the host's NixOS configuration; it declares `nixcage.workspaceRoots` and
-`nixcage.secretEnv`, installs `nixcage-container` and the container profile,
-and renders `/etc/nixcage/config` (`WORKSPACE_ROOTS=a:b`) for the CLI
-(override path with `NIXCAGE_HOST_CONFIG`, used by tests). With
-`nixcage.microvm.enable` it also builds the guest a microVM cage boots, from
-the host's own pkgs, and renders its path with `HOST_PLATFORM`,
-`SUBSTRATE_DEFAULT` and `CAGE_SUBSTRATES` into `/etc/nixcage/container`;
-the substrate options are `nixcage.substrate.default` (`nspawn`) and
-`nixcage.cages.<path>.substrate`, and they are the host module's alone. It
-renders the bounds a cage may use (`BOUNDS_DEFAULT`, `CAGE_BOUNDS`) the same
-way (ADR-022), and `/etc/nixcage/gitconfig` from `nixcage.git.*`. Containers bind
+into the host's NixOS configuration; it installs `nixcage-container` and the
+container profile, and renders one file, `/etc/nixcage/declaration` (override
+path with `NIXCAGE_HOST_CONFIG`, used by tests), which both the CLI and the
+guest script read through `modules/declaration.sh` (ADR-024). It carries
+`DECLARATION_VERSION`, `HOST_PLATFORM`, `WORKSPACE_ROOTS`,
+`SUBSTRATE_DEFAULT`, `CAGE_SUBSTRATES`, `BOUNDS_DEFAULT`, `CAGE_BOUNDS`,
+`MICROVM_GUEST`, `PRINCIPAL_UID_BASE`, `PRINCIPAL_UID_SIZE`,
+`PRINCIPAL_SUBJECTS`, `STORAGE_DATASET`, `SECRET_ENV` and the `GIT_*` fields.
+A declaration whose version this nixcage does not read stops the session
+rather than reading as absent; where it is missing entirely, the files a
+nixcage before ADR-024 rendered (`/etc/nixcage/config`,
+`/etc/nixcage/container`, `/etc/nixcage/secret-env`,
+`/etc/nixcage/gitconfig`) are read instead and the session says so, until one
+release from now. With `nixcage.microvm.enable` the module also builds the
+guest a microVM cage boots, from the host's own pkgs, and names it in the
+declaration; the substrate options are `nixcage.substrate.default` (`nspawn`)
+and `nixcage.cages.<path>.substrate`, and they are the host module's alone.
+Containers bind
 the host store read-only and build through the host nix-daemon; `secretEnv`
 resolves against the host's own sops-nix `/run/secrets`. The CLI commands on
 Linux are `enter`, `rm`, and `status`, executing `sudo nixcage-container`
@@ -129,6 +136,8 @@ machines (the nixos-rebuild hostname convention). A starter is scaffolded with
 | `nixcage.containerPackages` | list of package | `[ ]` | What every session's userland carries on top of the minimal one; `enter` takes binds and environment, never packages |
 | `nixcage.storage.dataset` | null or str | `null` | Host module only: the pool `storage ensure` makes datasets in; without one it makes directories (ADR-017) |
 | `nixcage.microvm.guest` | read-only | -- | Host module only: the guest as evaluated, built from the host's own pkgs |
+
+The VM module renders the same one declaration inside the VM.
 
 Everything must be evaluable at build time; the CLI holds no configuration of
 its own. Values the CLI needs at runtime (`sshPort`, `workspaceRoots`) are

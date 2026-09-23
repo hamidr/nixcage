@@ -1,7 +1,7 @@
 ---
 id: ADR-024
 title: A host renders one declaration, and one reader answers from it, undeclared included
-status: proposed
+status: implemented
 date: 2026-09-23
 status_date: 2026-09-23
 summary: one versioned file replaces the four under /etc/nixcage, read by one function with two implementations

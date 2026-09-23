@@ -92,7 +92,7 @@ MICROVM='{ nixcage.microvm.enable = true; nixcage.principalUidRange.base = 70000
 GUEST='sys.config.nixcage.microvm.guest.config'
 
 @test "with microvm enabled, the host module names the guest it built in the container config" {
-	run eval_module host "$MICROVM" 'sys.config.environment.etc."nixcage/container".text'
+	run eval_module host "$MICROVM" 'sys.config.environment.etc."nixcage/declaration".text'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" == *"MICROVM_GUEST=/nix/store/"*"-nixos-system-nixcage-guest-"* ]]
 	[[ "$(jq -r . <<<"$output")" == *"SUBSTRATE_DEFAULT=nspawn"* ]]
@@ -100,13 +100,13 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 
 @test "the host's default substrate is what the config carries" {
 	run eval_module host '{ nixcage.microvm.enable = true; nixcage.substrate.default = "microvm"; nixcage.principalUidRange.base = 700000; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" == *"SUBSTRATE_DEFAULT=microvm"* ]]
 }
 
 @test "with microvm off, no guest is built and the config names none" {
-	run eval_module host '{ nixcage.principalUidRange.base = 700000; }' 'sys.config.environment.etc."nixcage/container".text'
+	run eval_module host '{ nixcage.principalUidRange.base = 700000; }' 'sys.config.environment.etc."nixcage/declaration".text'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" != *"MICROVM_GUEST"* ]]
 	[[ "$(jq -r . <<<"$output")" == *"SUBSTRATE_DEFAULT=nspawn"* ]]
@@ -114,7 +114,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 
 @test "a default of microvm with microvm off is refused at evaluation" {
 	run eval_module host '{ nixcage.substrate.default = "microvm"; nixcage.principalUidRange.base = 700000; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_failure
 	assert_output --partial "nixcage.substrate.default is microvm but nixcage.microvm.enable is false"
 }
@@ -172,7 +172,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	# already reads.
 	run eval_module host '{ nixcage.microvm.enable = true; nixcage.principalUidRange.base = 700000;
 	  nixcage.cages."/srv/trusted".substrate = "nspawn"; nixcage.cages."/srv/untrusted".substrate = "microvm"; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" == *'CAGE_SUBSTRATES="/srv/trusted nspawn
 /srv/untrusted microvm"'* ]]
@@ -180,7 +180,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 
 @test "a cage declared microvm on a host that builds no guest is refused at evaluation" {
 	run eval_module host '{ nixcage.principalUidRange.base = 700000; nixcage.cages."/srv/x".substrate = "microvm"; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_failure
 	assert_output --partial "nixcage.cages./srv/x.substrate is microvm but nixcage.microvm.enable is false"
 }
@@ -192,7 +192,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 @test "the host's default bounds are rendered for the container script" {
 	run eval_module host '{ nixcage.principalUidRange.base = 700000;
 	  nixcage.bounds = { memory = "4G"; cpus = 4; }; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" == *'BOUNDS_DEFAULT="4G 4"'* ]]
 }
@@ -200,7 +200,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 @test "a quantity the host left unset is rendered as nothing said" {
 	run eval_module host '{ nixcage.principalUidRange.base = 700000;
 	  nixcage.bounds.memory = "4G"; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" == *'BOUNDS_DEFAULT="4G -"'* ]]
 }
@@ -209,7 +209,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	run eval_module host '{ nixcage.principalUidRange.base = 700000;
 	  nixcage.cages."/srv/big".bounds = { memory = "8G"; cpus = 8; };
 	  nixcage.cages."/srv/small".bounds.memory = "1G"; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" == *'CAGE_BOUNDS="/srv/big 8G 8
 /srv/small 1G -"'* ]]
@@ -218,7 +218,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 @test "a size nixcage cannot hand to systemd is refused at evaluation" {
 	run eval_module host '{ nixcage.principalUidRange.base = 700000;
 	  nixcage.bounds.memory = "4GiB"; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_failure
 }
 
@@ -228,7 +228,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	run eval_module vm '{ nixcage.principalUidRange.base = 700000;
 	  nixcage.authorizedKeys = [ "ssh-ed25519 AAAA test" ];
 	  nixcage.bounds = { memory = "2G"; cpus = 2; }; }' \
-		'sys.config.environment.etc."nixcage/container".text'
+		'sys.config.environment.etc."nixcage/declaration".text'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" == *'BOUNDS_DEFAULT="2G 2"'* ]]
 }

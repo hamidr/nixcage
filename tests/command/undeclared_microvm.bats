@@ -9,7 +9,9 @@ load ../test_helper/common
 setup() {
 	setup_temp_dir
 	export NIXCAGE_OS=linux
-	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/host-config"
+	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declaration"
+	export NIXCAGE_LEGACY_HOST_CONFIG="$TEST_TEMP_DIR/legacy-config"
+	export NIXCAGE_LEGACY_CONTAINER_CONFIG="$TEST_TEMP_DIR/legacy-container"
 	export HOME="$TEST_TEMP_DIR/home"
 	export NIXCAGE_CONTAINER=/nix/store/aaa-nixcage-container/bin/nixcage-container
 	export NIXCAGE_PROFILE=/nix/store/bbb-nixcage-container-profile
@@ -172,7 +174,8 @@ EOF
 # A declared host built its guest with nixos-rebuild and put qemu where
 # vmspawn looks, which is a decision its administrator made once.
 @test "a declared host realises nothing and names nothing" {
-	echo "WORKSPACE_ROOTS=$TEST_TEMP_DIR" >"$NIXCAGE_HOST_CONFIG"
+	printf 'DECLARATION_VERSION=1\nWORKSPACE_ROOTS=%s\n' "$TEST_TEMP_DIR" \
+		>"$NIXCAGE_HOST_CONFIG"
 	enter_microvm
 	[ "$status" -eq 0 ]
 	[ ! -f "$TEST_TEMP_DIR/nix-calls" ]

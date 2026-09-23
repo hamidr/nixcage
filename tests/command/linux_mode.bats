@@ -9,7 +9,10 @@ setup() {
 	# Force the Linux code path regardless of the machine running the tests.
 	export NIXCAGE_OS=linux
 	# Host config normally rendered to /etc/nixcage/config by nixosModules.host.
-	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/host-config"
+	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declaration"
+	# Never the machine's own: these tests run on a developer's host.
+	export NIXCAGE_LEGACY_HOST_CONFIG="$TEST_TEMP_DIR/legacy-config"
+	export NIXCAGE_LEGACY_CONTAINER_CONFIG="$TEST_TEMP_DIR/legacy-container"
 	# Stub sudo and nixcage-container so 'enter' can be observed without root.
 	mkdir -p "$TEST_TEMP_DIR/bin"
 	export PATH="$TEST_TEMP_DIR/bin:$PATH"
@@ -24,8 +27,19 @@ teardown() {
 	teardown_temp_dir
 }
 
+# What nixosModules.host renders: one versioned declaration.
 write_host_config() {
-	echo "WORKSPACE_ROOTS=${1:-$TEST_TEMP_DIR/src}" >"$NIXCAGE_HOST_CONFIG"
+	cat >"$NIXCAGE_HOST_CONFIG" <<-EOF
+		DECLARATION_VERSION=1
+		HOST_PLATFORM=linux
+		WORKSPACE_ROOTS=${1:-$TEST_TEMP_DIR/src}
+	EOF
+}
+
+# What a nixcage before the declaration rendered, which a CLI newer than the
+# module it stands on still has to read.
+write_legacy_host_config() {
+	echo "WORKSPACE_ROOTS=${1:-$TEST_TEMP_DIR/src}" >"$NIXCAGE_LEGACY_HOST_CONFIG"
 }
 
 @test "rebuild on linux fails pointing at nixos-rebuild" {
@@ -231,4 +245,39 @@ write_host_config() {
 	run_nixcage exec -- nixcage-container list
 	[ "$status" -eq 0 ]
 	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "nixcage-container list" ]]
+}
+
+# A CLI newer than the module it stands on (ADR-024 decision 7). Removed one
+# release after the declaration lands.
+@test "a declaration an older nixcage rendered is read, and said to be old" {
+	write_legacy_host_config "$TEST_TEMP_DIR/src"
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"older nixcage"* ]]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == "nixcage-container enter"* ]]
+}
+
+@test "a declaration an older nixcage rendered still gates on its roots" {
+	write_legacy_host_config "$TEST_TEMP_DIR/src"
+	mkdir -p "$TEST_TEMP_DIR/elsewhere/proj"
+	cd "$TEST_TEMP_DIR/elsewhere/proj"
+	run_nixcage enter
+	[ "$status" -ne 0 ]
+	[[ "$output" == *workspaceRoots* ]]
+}
+
+# A host that declared roots must never read as a host that declared nothing,
+# which is what a version-blind reader would do the first time the format
+# changes (ADR-024 decision 6).
+@test "a declaration from a newer nixcage stops the session" {
+	printf 'DECLARATION_VERSION=99\nWORKSPACE_ROOTS=%s\n' "$TEST_TEMP_DIR/src" \
+		>"$NIXCAGE_HOST_CONFIG"
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter
+	[ "$status" -ne 0 ]
+	[[ "$output" == *99* ]]
+	[ ! -f "$TEST_TEMP_DIR/sudo-calls" ]
 }

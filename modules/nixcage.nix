@@ -299,30 +299,30 @@ in
       pkgs.age
     ];
 
-    ## Rendered only when an identity exists: an incomplete gitconfig would
-    ## replace git's own "who are you" error with a stranger one.
-    environment.etc."nixcage/gitconfig" =
-      lib.mkIf (cfg.git.userName != null && cfg.git.userEmail != null)
-        {
-          text = container.gitConfigText cfg.git;
-        };
-
-    ## Rendered only when a uid range is declared: an ordinary session never
-    ## reads it, and the uid and storage verbs refuse to answer without it.
-    environment.etc."nixcage/container" = lib.mkIf (cfg.principalUidRange != null) {
-      text = ''
+    ## The same one declaration the host module renders, for the same reader
+    ## (ADR-024). The roots are here as well as in the build-time cache: the
+    ## cache is what the CLI on the other side of the transport reads, and
+    ## this is what the session inside the VM reads.
+    environment.etc."nixcage/declaration".text = ''
+      DECLARATION_VERSION=1
+      HOST_PLATFORM=macos
+      WORKSPACE_ROOTS=${lib.concatStringsSep ":" cfg.workspaceRoots}
+      ${cfg.boundsConfigText}${lib.optionalString (cfg.principalUidRange != null) ''
         PRINCIPAL_UID_BASE=${toString cfg.principalUidRange.base}
         PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}
-        PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
-        STORAGE_DATASET=${stateDataset}
-        HOST_PLATFORM=macos
-        ${cfg.boundsConfigText}      '';
-    };
+      ''}PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
+      STORAGE_DATASET=${stateDataset}
+      SECRET_ENV="${
+        lib.concatStringsSep " " (lib.mapAttrsToList (var: secret: "${var}=${secret}") cfg.secretEnv)
+      }"
+      ${lib.optionalString (cfg.git.userName != null) ''
+        GIT_USER_NAME="${cfg.git.userName}"
+      ''}${lib.optionalString (cfg.git.userEmail != null) ''
+        GIT_USER_EMAIL="${cfg.git.userEmail}"
+      ''}GIT_SIGNING=${if cfg.git.signing.enable then "1" else ""}
+    '';
 
     environment.etc."nixcage/profile".source = container.profile;
-    environment.etc."nixcage/secret-env".text = lib.concatStrings (
-      lib.mapAttrsToList (var: secret: "${var}=${secret}\n") cfg.secretEnv
-    );
 
     ## Storage (ADR-017). Everything nixcage keeps -- every session home and
     ## every directory it hands out -- lives on a ZFS pool of the VM's own.

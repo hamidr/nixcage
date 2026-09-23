@@ -246,11 +246,13 @@ teardown() {
 }
 
 @test "the guest script reads the declaration through the one reader" {
-	run grep -qE 'nixcage_declaration_read "\$CONTAINER_CONFIG"' "$(CONTAINER_NIX)"
+	run grep -qE 'nixcage_declaration_read "\$DECLARATION"' "$(CONTAINER_NIX)"
 	assert_success
-	# The file test that reader replaced must not come back beside it.
-	run grep -qE '\[ -f "\$CONTAINER_CONFIG" \]' "$(CONTAINER_NIX)"
-	assert_failure
+	# Every setting comes from that read, so no other file under /etc/nixcage
+	# is opened here except the two an older nixcage rendered and the profile
+	# symlink, which is a store path rather than text.
+	run bash -c "grep -oE '/etc/nixcage/[a-z-]+' '$(CONTAINER_NIX)' | sort -u | tr '\n' ' '"
+	assert_output "/etc/nixcage/config /etc/nixcage/container /etc/nixcage/declaration /etc/nixcage/gitconfig /etc/nixcage/profile /etc/nixcage/secret-env "
 }
 
 # ADR-022 left the number to the host and ADR-023 has no host, so undeclared

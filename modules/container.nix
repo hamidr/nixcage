@@ -108,6 +108,7 @@ let
       . ${./substrate.sh}
       . ${./bounds.sh}
       . ${./declaration.sh}
+      . ${./gitconfig.sh}
       . ${./enter-args.sh}
       . ${./dev-shell.sh}
       . ${./scope.sh}
@@ -119,16 +120,19 @@ let
       ## scope.sh names the same directory for the records it reads; one
       ## spelling, taken from there.
       STATE_DIR="$NIXCAGE_STATE_DIR"
-      ## Rendered by the platform module: the uid range principals are
-      ## allocated from, and the dataset holding nixcage's state where there is
-      ## one. Absent on a host that declares neither.
-      CONTAINER_CONFIG=/etc/nixcage/container
+      ## What the platform module rendered: one file, versioned, holding
+      ## every setting a session or the CLI reads. Absent on a host that
+      ## declared nothing, and on one whose nixcage is older than this script,
+      ## which is what the two names beneath it are for.
+      DECLARATION=/etc/nixcage/declaration
+      LEGACY_CONFIG=/etc/nixcage/config
+      LEGACY_CONTAINER=/etc/nixcage/container
       ## Resolve the /etc symlink to its store path: the container has its
       ## own /etc, but the store bind makes store paths valid inside. Absent
       ## where nothing rendered /etc/nixcage (ADR-023), and then the session
       ## names the layer it was built from with --profile.
       PROFILE_LINK=/etc/nixcage/profile
-      SECRET_ENV=/etc/nixcage/secret-env
+      LEGACY_SECRET_ENV=/etc/nixcage/secret-env
       ## What a vsock address resolves through (ADR-019 decision 6). systemd
       ## ships the snippet and NixOS includes it in ssh_config; naming it here
       ## makes exec and the agent forward work on a host that includes nothing
@@ -159,7 +163,33 @@ let
       ## declaration already meant. The verbs whose promises need one refuse
       ## for themselves.
       read_container_config() {
-        nixcage_declaration_read "$CONTAINER_CONFIG"
+        local status=0
+        nixcage_declaration_read "$DECLARATION" || status=$?
+        [ "$status" = 2 ] && die "this host's declaration is not one this nixcage reads"
+        [ -n "''${NIXCAGE_DECLARED:-}" ] && return 0
+        ## A module older than this script rendered the files this one
+        ## replaced. Read rather than ignored: a host with workspace roots
+        ## must not answer as a host with none (ADR-024 decision 7).
+        nixcage_declaration_read_legacy "$LEGACY_CONFIG" "$LEGACY_CONTAINER"
+        if [ -n "''${NIXCAGE_DECLARATION_LEGACY:-}" ]; then
+          echo "nixcage-container: reading a declaration an older nixcage rendered; nixos-rebuild switch renders the current one" >&2
+        fi
+        return 0
+      }
+
+      ## The variable and secret pairs this host declared, from the field it
+      ## declares them in or, on a host whose nixcage is older, the file they
+      ## used to have of their own.
+      secret_pairs() {
+        if [ -n "''${NIXCAGE_DECLARATION_LEGACY:-}" ] && [ -f "$LEGACY_SECRET_ENV" ]; then
+          local var secret
+          while IFS='=' read -r var secret; do
+            [ -n "$var" ] || continue
+            printf '%s=%s\n' "$var" "$secret"
+          done <"$LEGACY_SECRET_ENV"
+          return 0
+        fi
+        nixcage_declaration_secret_pairs
       }
 
       ## Where allocations are recorded. The file was called role-uids while the
@@ -182,16 +212,16 @@ let
         local out="$1"
         : >"$out"
         chmod 600 "$out"
-        [ -f "$SECRET_ENV" ] || return 0
-        local var secret
-        while IFS='=' read -r var secret; do
+        local pair var secret
+        while IFS= read -r pair; do
+          var="''${pair%%=*}" secret="''${pair#*=}"
           [ -n "$var" ] || continue
           if [ -r "/run/secrets/$secret" ]; then
             printf 'export %s=%q\n' "$var" "$(cat "/run/secrets/$secret")" >>"$out"
           else
             echo "nixcage-container: secret '$secret' for $var not found; skipping" >&2
           fi
-        done <"$SECRET_ENV"
+        done < <(secret_pairs)
       }
 
       ## The subjects a cage has, declared by the host. Cage root is not one of
@@ -285,16 +315,16 @@ let
           NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc" \
           TERM="''${TERM:-xterm}"
         [ -z "$user" ] || printf -- '--setenv=%s\n' USER="$user" LOGNAME="$user"
-        [ -f "$SECRET_ENV" ] || return 0
-        local var secret
-        while IFS='=' read -r var secret; do
+        local pair var secret
+        while IFS= read -r pair; do
+          var="''${pair%%=*}" secret="''${pair#*=}"
           [ -n "$var" ] || continue
           if [ -r "/run/secrets/$secret" ]; then
             printf -- '--setenv=%s=%s\n' "$var" "$(cat "/run/secrets/$secret")"
           else
             echo "nixcage-container: secret '$secret' for $var not found; skipping" >&2
           fi
-        done <"$SECRET_ENV"
+        done < <(secret_pairs)
       }
 
       enter_microvm() {
@@ -764,22 +794,18 @@ let
           mapfile -t store_args <<<"$store_binds"
         fi
 
-        ## Git identity, rendered by the platform module from nixcage.git.
-        ## Absent when the user declared none, in which case git behaves as
-        ## it does anywhere else without an identity. A caller entering as
-        ## someone else binds its own file over this one.
-        if [ -f /etc/nixcage/gitconfig ]; then
+        ## Git identity: the one the session named, else the one this host
+        ## declared, rendered here either way so both produce one file from
+        ## one renderer. A caller entering as someone else binds its own file
+        ## over this one, and a host that declared none leaves git to say
+        ## "who are you" as it does anywhere else.
+        local git_name="''${NIXCAGE_ENTER_GIT_NAME:-''${GIT_USER_NAME:-}}"
+        local git_email="''${NIXCAGE_ENTER_GIT_EMAIL:-''${GIT_USER_EMAIL:-}}"
+        nixcage_gitconfig_text "$git_name" "$git_email" "''${GIT_SIGNING:-}" \
+          ${pkgs.openssh}/bin/ssh-keygen >"$rootfs/etc/gitconfig"
+        if [ -f /etc/nixcage/gitconfig ] && [ ! -s "$rootfs/etc/gitconfig" ]; then
+          ## A module older than this script rendered the file itself.
           cp /etc/nixcage/gitconfig "$rootfs/etc/gitconfig"
-        elif [ -n "$NIXCAGE_ENTER_GIT_NAME" ] || [ -n "$NIXCAGE_ENTER_GIT_EMAIL" ]; then
-          ## The same minimal file, from the identity the session named
-          ## (ADR-023 decision 11). Signing still goes through the forwarded
-          ## agent, as it does where a module rendered this.
-          {
-            echo "[user]"
-            [ -n "$NIXCAGE_ENTER_GIT_NAME" ] && echo "  name = $NIXCAGE_ENTER_GIT_NAME"
-            [ -n "$NIXCAGE_ENTER_GIT_EMAIL" ] && echo "  email = $NIXCAGE_ENTER_GIT_EMAIL"
-            true
-          } >"$rootfs/etc/gitconfig"
         fi
 
         ## Commits are signed through the invoking user's agent: the socket
@@ -1047,31 +1073,8 @@ let
       esac
     '';
   };
-  ## The git configuration a session sees, rendered from nixcage.git by
-  ## whichever platform module is in use. Signing goes through the agent the
-  ## CLI forwards, so no key is named here: with user.signingKey unset git
-  ## calls gpg.ssh.defaultKeyCommand and signs with the first agent key.
-  gitConfigText =
-    git:
-    ''
-      [user]
-        name = ${git.userName}
-        email = ${git.userEmail}
-    ''
-    + pkgs.lib.optionalString git.signing.enable ''
-      [gpg]
-        format = ssh
-      [gpg "ssh"]
-        program = ${pkgs.openssh}/bin/ssh-keygen
-        defaultKeyCommand = ssh-add -L
-      [commit]
-        gpgsign = true
-      [tag]
-        gpgsign = true
-    '';
 in
 {
   profile = containerProfile;
   script = nixcageContainer;
-  inherit gitConfigText;
 }
