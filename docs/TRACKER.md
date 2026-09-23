@@ -4,7 +4,7 @@ GENERATED FILE -- do not edit. Rebuild with `docmeta-tracker <docs-root>`.
 Every fact here comes from the frontmatter of the document it names; change the
 document, then regenerate.
 
-**Generated:** 2026-09-22
+**Generated:** 2026-09-23
 
 **Next PRD number:** 003
 
@@ -43,4 +43,4 @@ document, then regenerate.
 | [ADR-020](ADR-020-a-file-crosses-into-a-microvm-staged-in-a-directory-of-its-own.md) | A file asked as a bind crosses into a microVM staged in a directory of its own, and lands where the same enter on nspawn puts it | implemented | -- | ADR-009, ADR-019 | a file bind works on microvm; the host stages a copy in a shared directory and the guest binds it onto its target |  |
 | [ADR-021](ADR-021-a-project-is-any-directory-under-a-workspace-root.md) | A project is any directory under a workspace root, not only a flake directory | implemented | -- | ADR-002, ADR-005 | enter validates the workspace root alone; a directory with no flake.nix opens the base container shell |  |
 | [ADR-022](ADR-022-a-cage-is-bounded-by-what-the-host-declares.md) | A cage is bounded by what the host declares, and a session may ask for something else | implemented | -- | ADR-003, ADR-009, ADR-012, ADR-017, ADR-019 | nixcage.bounds and cages.<path>.bounds give memory and cpus to both substrates; the flag still wins |  |
-| [ADR-023](ADR-023-nixcage-runs-a-cage-on-a-host-that-declared-nothing.md) | nixcage runs a cage on a host that declared nothing, with the guest built when a session first asks for one | proposed | -- | ADR-003, ADR-009, ADR-019, ADR-021, ADR-022 | with no /etc/nixcage/config a session cages the current directory; uid and storage refuse, the guest builds on demand |  |
+| [ADR-023](ADR-023-nixcage-runs-a-cage-on-a-host-that-declared-nothing.md) | nixcage runs a cage on a host that declared nothing, with the guest built when a session first asks for one | implementing | -- | ADR-003, ADR-009, ADR-019, ADR-021, ADR-022 | with no /etc/nixcage/config a session cages the current directory; uid and storage refuse, the guest builds on demand |  |

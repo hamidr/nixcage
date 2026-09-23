@@ -1,9 +1,9 @@
 ---
 id: ADR-023
 title: nixcage runs a cage on a host that declared nothing, with the guest built when a session first asks for one
-status: proposed
+status: implementing
 date: 2026-09-22
-status_date: 2026-09-22
+status_date: 2026-09-23
 summary: with no /etc/nixcage/config a session cages the current directory; uid and storage refuse, the guest builds on demand
 depends_on: [ADR-003, ADR-009, ADR-019, ADR-021, ADR-022]
 supersedes: []
