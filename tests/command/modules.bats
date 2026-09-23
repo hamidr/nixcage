@@ -232,3 +232,25 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	assert_success
 	[[ "$(jq -r . <<<"$output")" == *'BOUNDS_DEFAULT="2G 2"'* ]]
 }
+
+# Where nothing was declared there is no module to install the container
+# layer, so the layer is what nixcage itself carries (ADR-023). Evaluated for
+# real: a flake that stopped exporting it would otherwise be found by whoever
+# ran nix run on a machine that declared nothing.
+@test "the flake exports the container layer a session is built from" {
+	run nix eval --raw "$NIXCAGE_ROOT#packages.x86_64-linux.container.drvPath"
+	assert_success
+	run nix eval --raw "$NIXCAGE_ROOT#packages.x86_64-linux.containerProfile.drvPath"
+	assert_success
+}
+
+@test "the linux CLI is built with the layer named in its environment" {
+	run nix eval --json \
+		"$NIXCAGE_ROOT#packages.x86_64-linux.default.drvPath" \
+		--apply 'p: p'
+	assert_success
+	run grep -qE -- '--set NIXCAGE_CONTAINER' "$NIXCAGE_ROOT/flake.nix"
+	assert_success
+	run grep -qE -- '--set NIXCAGE_PROFILE' "$NIXCAGE_ROOT/flake.nix"
+	assert_success
+}

@@ -440,6 +440,36 @@ check_workspace_root() {
   exit 1
 }
 
+## What runs where the cages are, and what a session is built from. A host
+## that imported the module installed the layer and the symlink to it, so the
+## name on PATH and the file it reads are the answer. Where nothing was
+## declared there is neither, and the answer is what this nixcage was built
+## with: the store paths the package baked in, which is why the container
+## layer is in what `nix run` fetches.
+container_words() {
+  if host_declared; then
+    echo nixcage-container
+    return 0
+  fi
+  if [[ -z "${NIXCAGE_CONTAINER:-}" ]]; then
+    log_err "This nixcage carries no container layer to run a session from."
+    log_err "Run it from the store: nix run github:hamidr/nixcage -- enter"
+    log_err "Or import nixcage's nixosModules.host and rebuild."
+    exit 1
+  fi
+  echo "$NIXCAGE_CONTAINER"
+}
+
+## The layer a session names across sudo (ADR-023 decision 8). Empty on a
+## declared host, which reads its own.
+container_profile_args() {
+  if host_declared || [[ -z "${NIXCAGE_PROFILE:-}" ]]; then
+    return 0
+  fi
+  echo --profile
+  echo "$NIXCAGE_PROFILE"
+}
+
 cmd_enter() {
   local project_dir="$PWD"
 
@@ -488,8 +518,16 @@ cmd_enter() {
   fi
 
   if [[ "$OS" == "linux" ]]; then
+    local container
+    container="$(container_words)"
+    local -a profile=()
+    local word
+    while IFS= read -r word; do
+      [[ -n "$word" ]] && profile+=("$word")
+    done < <(container_profile_args)
     [[ $# -eq 0 ]] && log_info "Entering container $name..."
-    sudo nixcage-container enter "${substrate[@]}" "${agent_fwd[@]}" "$name" "$project_dir" "$@"
+    sudo "$container" enter "${substrate[@]}" "${profile[@]}" "${agent_fwd[@]}" \
+      "$name" "$project_dir" "$@"
     return
   fi
 

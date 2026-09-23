@@ -184,3 +184,18 @@ write_host_config() {
 	run cat "$TEST_TEMP_DIR/sudo-calls"
 	[[ "$output" != *--auth-sock* ]]
 }
+
+# A declared host rendered the layer and the symlink to it, so the session is
+# given neither: what it reads is what its administrator applied (ADR-023).
+@test "enter on a declared host names no profile and runs the host's own container" {
+	export NIXCAGE_CONTAINER=/nix/store/aaa-nixcage-container/bin/nixcage-container
+	write_host_config "$TEST_TEMP_DIR/src"
+	mkdir -p "$TEST_TEMP_DIR/src/proj"
+	cd "$TEST_TEMP_DIR/src/proj"
+	run_nixcage enter
+	[ "$status" -eq 0 ]
+	local called
+	called="$(cat "$TEST_TEMP_DIR/sudo-calls")"
+	[[ "$called" == "nixcage-container enter"* ]]
+	[[ "$called" != *--profile* ]]
+}

@@ -12,6 +12,10 @@ setup() {
 	# The path the declaration would be at, deliberately never written.
 	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/host-config"
 	export HOME="$TEST_TEMP_DIR/home"
+	# What the package baked in: a nixcage the store built carries the layer
+	# a session is given, since undeclared nothing else provides one.
+	export NIXCAGE_CONTAINER=/nix/store/aaa-nixcage-container/bin/nixcage-container
+	export NIXCAGE_PROFILE=/nix/store/bbb-nixcage-container-profile
 	mkdir -p "$TEST_TEMP_DIR/bin" "$HOME"
 	export PATH="$TEST_TEMP_DIR/bin:$PATH"
 	cat >"$TEST_TEMP_DIR/bin/sudo" <<EOF
@@ -30,7 +34,10 @@ teardown() {
 	cd "$TEST_TEMP_DIR/proj"
 	run_nixcage enter
 	[ "$status" -eq 0 ]
-	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == *"enter proj-"*" $TEST_TEMP_DIR/proj"* ]]
+	local called
+	called="$(cat "$TEST_TEMP_DIR/sudo-calls")"
+	[[ "$called" == *" enter "* ]]
+	[[ "$called" == *" proj-"*" $TEST_TEMP_DIR/proj"* ]]
 }
 
 @test "enter with no host config never mentions nixosModules.host" {
@@ -79,4 +86,27 @@ teardown() {
 	[ "$status" -eq 0 ]
 	[[ "$output" == *proj-* ]]
 	[[ "$output" == *Aborted* ]]
+}
+
+# What a session is built from where nothing rendered /etc/nixcage: the layer
+# this nixcage was built with, named across sudo because sudo clears the
+# environment (ADR-023).
+@test "enter with no host config runs the layer this nixcage was built with" {
+	mkdir -p "$TEST_TEMP_DIR/proj"
+	cd "$TEST_TEMP_DIR/proj"
+	run_nixcage enter
+	[ "$status" -eq 0 ]
+	local called
+	called="$(cat "$TEST_TEMP_DIR/sudo-calls")"
+	[[ "$called" == "$NIXCAGE_CONTAINER enter"* ]]
+	[[ "$called" == *"--profile $NIXCAGE_PROFILE"* ]]
+}
+
+@test "enter with no host config and no layer says where one comes from" {
+	unset NIXCAGE_CONTAINER NIXCAGE_PROFILE
+	mkdir -p "$TEST_TEMP_DIR/proj"
+	cd "$TEST_TEMP_DIR/proj"
+	run_nixcage enter
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"nix run github:hamidr/nixcage"* ]]
 }
