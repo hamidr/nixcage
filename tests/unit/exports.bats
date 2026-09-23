@@ -233,3 +233,22 @@ teardown() {
 	run grep -q 'nixcage_scope_list_json' "$(CONTAINER_NIX)"
 	assert_success
 }
+
+# A host that declared nothing still runs a cage (ADR-023), but the two verbs
+# whose promises are the machine's cannot be kept without a declaration: a uid
+# that is never reissued, and a dataset the pool is mounted at. They refuse
+# naming the option that carries what they need, rather than inventing one.
+@test "uid and storage refuse where nothing was declared" {
+	run grep -qE 'nixcage_declaration_refusal uid nixcage.principalUidRange' "$(CONTAINER_NIX)"
+	assert_success
+	run grep -qE 'nixcage_declaration_refusal .storage ensure. nixcage.storage.dataset' "$(CONTAINER_NIX)"
+	assert_success
+}
+
+@test "the guest script reads the declaration through the one reader" {
+	run grep -qE 'nixcage_declaration_read "\$CONTAINER_CONFIG"' "$(CONTAINER_NIX)"
+	assert_success
+	# The file test that reader replaced must not come back beside it.
+	run grep -qE '\[ -f "\$CONTAINER_CONFIG" \]' "$(CONTAINER_NIX)"
+	assert_failure
+}

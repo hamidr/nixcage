@@ -107,6 +107,7 @@ let
       . ${./store-closure.sh}
       . ${./substrate.sh}
       . ${./bounds.sh}
+      . ${./declaration.sh}
       . ${./enter-args.sh}
       . ${./dev-shell.sh}
       . ${./scope.sh}
@@ -142,11 +143,13 @@ let
         printf '%s' "$1" | grep -qE '^[a-zA-Z0-9-]+$' || die "invalid container name: $1"
       }
 
+      ## What the host declared, or the undeclared answer to it (ADR-023).
+      ## Absent is not a failure here: a session takes its uid from the
+      ## project and its subjects from nobody, which is what an empty
+      ## declaration already meant. The verbs whose promises need one refuse
+      ## for themselves.
       read_container_config() {
-        [ -f "$CONTAINER_CONFIG" ] ||
-          die "no principal uid range declared: set nixcage.principalUidRange"
-        # shellcheck disable=SC1090
-        . "$CONTAINER_CONFIG"
+        nixcage_declaration_read "$CONTAINER_CONFIG"
       }
 
       ## Where allocations are recorded. The file was called role-uids while the
@@ -792,9 +795,15 @@ let
         ## Allocating is what makes a subject's number answerable, so it
         ## happens either way: a caller asking for a subject of a principal
         ## that has never been seen gets that principal allocated first.
+        ## A number invented here would be handed out against the same state
+        ## directory a declared host writes, and ADR-009 promises a principal's
+        ## number is never reissued.
+        [ -n "''${PRINCIPAL_UID_BASE:-}" ] ||
+          die "$(nixcage_declaration_refusal uid nixcage.principalUidRange)"
+
         local base
         base="$(nixcage_principal_uid "$(uid_store)" \
-          "''${PRINCIPAL_UID_BASE:?}" "''${PRINCIPAL_UID_SIZE:?}" \
+          "''${PRINCIPAL_UID_BASE}" "''${PRINCIPAL_UID_SIZE:?}" \
           "$principal" "$(declared_block)")" || exit 1
 
         if [ -z "$subject" ]; then
@@ -825,6 +834,11 @@ let
           nixcage_bind_path_ok "$path" || die "not a usable path: $path"
           printf '%s' "$uid" | grep -qE '^[0-9]+$' || die "not a uid: $uid"
           read_container_config
+          ## Where there is a pool this is a dataset and where there is not it
+          ## is a directory (ADR-017), but which of the two is the host's
+          ## answer to give. Undeclared there is no answer, not a default.
+          [ -n "''${NIXCAGE_DECLARED:-}" ] ||
+            die "$(nixcage_declaration_refusal 'storage ensure' nixcage.storage.dataset)"
           nixcage_storage_ensure "$STATE_DIR" "''${STORAGE_DATASET:-}" \
             "$path" "$uid" "$quota"
           ;;
