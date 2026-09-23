@@ -833,16 +833,20 @@ cmd_list() {
   for row in "${rows[@]}"; do
     read -r -a cell <<<"$row"
     for i in 0 1 2 3; do
-      [[ "${#cell[i]}" -gt "${width[i]}" ]] && width[i]="${#cell[i]}"
+      local field="${cell[i]:-}"
+      [[ "${#field}" -gt "${width[i]}" ]] && width[i]="${#field}"
     done
   done
+  # A field the query left empty makes a row shorter than its header, and a
+  # record nixcage did not write is a record nixcage did not check: the
+  # columns read what is there and print a dash for what is not.
   for row in "${rows[@]}"; do
     read -r -a cell <<<"$row"
     printf '%-*s  %-*s  %-*s  %s\n' \
-      "${width[0]}" "${cell[0]}" \
-      "${width[1]}" "${cell[1]}" \
-      "${width[2]}" "${cell[2]}" \
-      "${cell[3]}"
+      "${width[0]}" "${cell[0]:--}" \
+      "${width[1]}" "${cell[1]:--}" \
+      "${width[2]}" "${cell[2]:--}" \
+      "${cell[3]:--}"
   done
 }
 

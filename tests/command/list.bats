@@ -105,3 +105,14 @@ teardown() {
 	[ "$status" -ne 0 ]
 	[ -z "${lines[0]:-}" ] || [[ "${lines[0]}" != "{"* ]]
 }
+
+
+# A row is four fields because the query gives four; the columns still do not
+# assume it, because a record nixcage did not write is a record nixcage did
+# not check.
+@test "a record with fields missing is printed rather than crashing the verb" {
+	printf '{"name":""}\n{"name":"real-1234abcd","uid":7}\n' >"$TEST_TEMP_RECORDS"
+	run_nixcage list
+	[ "$status" -eq 0 ]
+	[[ "$output" == *real-1234abcd* ]]
+}
