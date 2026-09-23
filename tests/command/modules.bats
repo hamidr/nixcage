@@ -318,3 +318,43 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	assert_failure
 	assert_output --partial '..'
 }
+
+
+# A cage is named by its project's path in a table whose lines are read word
+# by word, so a path with whitespace in it matches nothing and every
+# declaration for that cage is silently ignored. Refused where an
+# administrator is watching instead.
+@test "a cage whose path holds whitespace is refused at evaluation" {
+	run eval_module host '{ nixcage.cages."/srv/my proj".substrate = "nspawn"; }' \
+		'sys.config.environment.etc."nixcage/declaration".text'
+	assert_failure
+	assert_output --partial "/srv/my proj"
+}
+
+@test "a cage declared only for its bounds is refused the same way" {
+	run eval_module host '{ nixcage.cages."/srv/my proj".bounds.memory = "8G"; }' \
+		'sys.config.environment.etc."nixcage/declaration".text'
+	assert_failure
+}
+
+@test "a cage declared only for its binds is refused the same way" {
+	run eval_module host '{ nixcage.cages."/srv/my proj".binds = [ "/a:/b" ]; }' \
+		'sys.config.environment.etc."nixcage/declaration".text'
+	assert_failure
+}
+
+# The roots are one colon-separated line for the same reason, so a root with
+# a colon in it would read as two roots, neither of them real.
+@test "a workspace root with a colon in it is refused at evaluation" {
+	run eval_module host '{ nixcage.workspaceRoots = [ "/srv/a:b" ]; }' \
+		'sys.config.environment.etc."nixcage/declaration".text'
+	assert_failure
+	assert_output --partial "/srv/a:b"
+}
+
+
+@test "the VM module refuses a root with a colon too" {
+	run eval_module vm '{ nixcage.workspaceRoots = [ "/srv/a:b" ]; }' \
+		'sys.config.environment.etc."nixcage/declaration".text'
+	assert_failure
+}

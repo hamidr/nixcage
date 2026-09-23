@@ -28,6 +28,28 @@ let
       throw "nixcage.substrate.default is microvm but nixcage.microvm.enable is false"
     else
       cfg.substrate.default;
+  ## A cage is named by its project's path in a table whose lines are read
+  ## word by word, so a path with whitespace in it would match nothing and
+  ## every declaration for that cage would be silently ignored. Refused here,
+  ## where an administrator is watching, rather than at an enter that quietly
+  ## does none of what was declared.
+  cages = lib.mapAttrs (
+    path: cage:
+    if lib.match ".*[[:space:]].*" path != null then
+      throw "nixcage.cages.\"${path}\" cannot be declared: a cage's path is read as one word, so it may hold no whitespace"
+    else
+      cage
+  ) cfg.cages;
+
+  ## The roots are one colon-separated line for the same reason.
+  workspaceRoots = map (
+    root:
+    if lib.hasInfix ":" root then
+      throw "nixcage.workspaceRoots has a root with a colon in it: ${root}"
+    else
+      root
+  ) cfg.workspaceRoots;
+
   ## One line per declared bind, its cage's path and the spec a session turns
   ## into an argument. A path with a .. segment would resolve somewhere the
   ## session's own check reads as allowed, so it is refused here as a
@@ -43,7 +65,7 @@ let
           else
             "${path} ${bind}"
         ) cage.binds
-      ) cfg.cages
+      ) cages
     )
   );
 
@@ -56,7 +78,7 @@ let
         throw "nixcage.cages.${path}.substrate is microvm but nixcage.microvm.enable is false"
       else
         "${path} ${cage.substrate}"
-    ) (lib.filterAttrs (_: cage: cage.substrate != null) cfg.cages)
+    ) (lib.filterAttrs (_: cage: cage.substrate != null) cages)
   );
 in
 {
@@ -323,7 +345,7 @@ in
     environment.etc."nixcage/declaration".text = ''
       DECLARATION_VERSION=1
       HOST_PLATFORM=linux
-      WORKSPACE_ROOTS=${lib.concatStringsSep ":" cfg.workspaceRoots}
+      WORKSPACE_ROOTS=${lib.concatStringsSep ":" workspaceRoots}
       SUBSTRATE_DEFAULT=${substrateDefault}
       CAGE_SUBSTRATES="${cageSubstrates}"
       CAGE_BINDS="${cageBinds}"

@@ -9,6 +9,15 @@
 }:
 let
   cfg = config.nixcage;
+  ## The roots are one colon-separated line, so a root with a colon in it
+  ## would read as two roots, neither of them real.
+  workspaceRoots = map (
+    root:
+    if lib.hasInfix ":" root then
+      throw "nixcage.workspaceRoots has a root with a colon in it: ${root}"
+    else
+      root
+  ) cfg.workspaceRoots;
   container = import ./container.nix {
     inherit pkgs;
     extraPackages = cfg.containerPackages;
@@ -306,7 +315,7 @@ in
     environment.etc."nixcage/declaration".text = ''
       DECLARATION_VERSION=1
       HOST_PLATFORM=macos
-      WORKSPACE_ROOTS=${lib.concatStringsSep ":" cfg.workspaceRoots}
+      WORKSPACE_ROOTS=${lib.concatStringsSep ":" workspaceRoots}
       ${cfg.boundsConfigText}${lib.optionalString (cfg.principalUidRange != null) ''
         PRINCIPAL_UID_BASE=${toString cfg.principalUidRange.base}
         PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}

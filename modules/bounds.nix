@@ -33,10 +33,18 @@ let
       '';
     };
   };
+  ## A cage is named by its project's path in a table read word by word, so
+  ## a path with whitespace in it would match nothing and the bounds declared
+  ## for it would be silently ignored. Refused where an administrator is
+  ## watching, as the other tables over the same paths refuse it.
   cageBounds = lib.concatStringsSep "\n" (
-    lib.mapAttrsToList (path: cage: "${path} ${word cage.bounds.memory} ${word cage.bounds.cpus}") (
-      lib.filterAttrs (_: cage: cage.bounds.memory != null || cage.bounds.cpus != null) (cfg.cages or { })
-    )
+    lib.mapAttrsToList (
+      path: cage:
+      if lib.match ".*[[:space:]].*" path != null then
+        throw "nixcage.cages.\"${path}\" cannot be declared: a cage's path is read as one word, so it may hold no whitespace"
+      else
+        "${path} ${word cage.bounds.memory} ${word cage.bounds.cpus}"
+    ) (lib.filterAttrs (_: cage: cage.bounds.memory != null || cage.bounds.cpus != null) (cfg.cages or { }))
   );
 in
 {
