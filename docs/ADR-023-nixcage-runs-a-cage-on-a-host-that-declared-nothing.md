@@ -99,7 +99,7 @@ still wants the module, and that is said rather than discovered.
 
 **6. What every session needs travels with the CLI; what only a microVM needs
 is realised when one is asked for.** The closure of what `nix run` fetches is
-`nixcage-container` and the container profile. The guest, qemu and virtiofsd
+`nixcage-container` and the container profile. The guest, qemu, virtiofsd and openssh
 are realised together on the first `enter --substrate microvm` and their store
 paths cached in the state directory, the way `rebuild` caches the runner on
 macOS and the way 1.2.0 cached its own build under `.nixcage-vm/`. The numbers
@@ -189,6 +189,11 @@ of these is something the tool is taking on faith rather than reading:
 - Nix with flakes, and reachable substituters on first use.
 - The host's architecture is the one the guest is built for, `x86_64-linux` or
   `aarch64-linux`.
+- `systemd-machined` answers, since `machinectl show` is where `exec` reads a
+  microVM cage's key and address. What resolves that address is not assumed:
+  systemd ships the ssh snippet giving `vsock/*` its `ProxyCommand` and
+  nixcage names it on the command line rather than relying on the
+  distribution's `ssh_config` including it.
 - `/var/lib/nixcage` is root-writable and stable, and no second nixcage of a
   different version is writing records there at the same time (decision 4).
 - The project directory belongs to the invoking user, since the session's uid

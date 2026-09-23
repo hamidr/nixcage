@@ -26,7 +26,8 @@ EOF
 	# it cached is still there rather than naming a collected path to a
 	# session.
 	export FAKE_STORE="$TEST_TEMP_DIR/store"
-	mkdir -p "$FAKE_STORE/g-nixos-system" "$FAKE_STORE/q-qemu" "$FAKE_STORE/v-virtiofsd"
+	mkdir -p "$FAKE_STORE/g-nixos-system" "$FAKE_STORE/q-qemu" "$FAKE_STORE/v-virtiofsd" \
+		"$FAKE_STORE/o-openssh"
 	cat >"$TEST_TEMP_DIR/bin/nix" <<EOF
 #!/usr/bin/env bash
 echo "\$@" >>"$TEST_TEMP_DIR/nix-calls"
@@ -35,6 +36,7 @@ for word in "\$@"; do
   *#*guest*)      echo "$FAKE_STORE/g-nixos-system" ;;
   *#*qemu*)       echo "$FAKE_STORE/q-qemu" ;;
   *#*virtiofsd*)  echo "$FAKE_STORE/v-virtiofsd" ;;
+  *#*openssh*)    echo "$FAKE_STORE/o-openssh" ;;
   esac
 done
 EOF
@@ -156,6 +158,7 @@ for word in "\$@"; do
   case "\$word" in
   *#*guest*)     echo $FAKE_STORE/g-nixos-system ;;
   *#*virtiofsd*) echo $FAKE_STORE/v-virtiofsd ;;
+  *#*openssh*)   echo $FAKE_STORE/o-openssh ;;
   esac
 done
 EOF
@@ -177,4 +180,13 @@ EOF
 	called="$(cat "$TEST_TEMP_DIR/sudo-calls")"
 	[[ "$called" != *--guest* ]]
 	[[ "$called" != *--microvm-path* ]]
+}
+
+
+@test "an undeclared microvm session is given an ssh to reach the guest with" {
+	stub_machine_qemu
+	enter_microvm
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/nix-calls")" == *openssh* ]]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == *"--microvm-path $FAKE_STORE/o-openssh"* ]]
 }

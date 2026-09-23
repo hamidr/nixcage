@@ -110,6 +110,16 @@ nixcage_microvm_ssh_target() {
 	printf '%s\n' "$key" "$address"
 }
 
+## The ssh configuration a vsock address resolves through, named rather than
+## inherited. systemd ships the snippet that gives vsock/* its ProxyCommand,
+## and NixOS includes it in ssh_config; a host that declared nothing has no
+## such drop-in, so naming it makes the transport the same on every host
+## (ADR-023). Empty leaves ssh to the host's own configuration.
+nixcage_microvm_ssh_config_words() {
+	[ -n "${NIXCAGE_SSH_CONFIG:-}" ] || return 0
+	printf '%s\n' -F "$NIXCAGE_SSH_CONFIG"
+}
+
 ## nixcage_exec_microvm_words <key> <address> <uid> <gid> <tty> [--setenv=K=V...] -- [cmd...]
 ## The words, one per line: ssh over vsock as the guest's root, then one
 ## remote line the guest's shell re-splits, so every word of it is quoted
@@ -129,6 +139,7 @@ nixcage_exec_microvm_words() {
 	done
 	while [ "${1:-}" = "--" ]; do shift; done
 	printf '%s\n' ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
+	nixcage_microvm_ssh_config_words
 	[ -z "$tty" ] || printf '%s\n' -t
 	printf '%s\n' -i "$key" "root@$address" --
 	local remote="cd /workspace && exec"
@@ -148,8 +159,9 @@ nixcage_exec_microvm_words() {
 nixcage_agent_forward_words() {
 	local key="$1" address="$2" sock="$3"
 	printf '%s\n' ssh -q -N -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-		-o LogLevel=ERROR -o ExitOnForwardFailure=yes \
-		-R "/run/ssh-agent.sock:$sock" -i "$key" "root@$address"
+		-o LogLevel=ERROR -o ExitOnForwardFailure=yes
+	nixcage_microvm_ssh_config_words
+	printf '%s\n' -R "/run/ssh-agent.sock:$sock" -i "$key" "root@$address"
 }
 
 ## nixcage_agent_forward <name> <host socket> <timeout>

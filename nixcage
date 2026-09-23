@@ -544,6 +544,7 @@ microvm_realise() {
   log_warn "This host declared nothing, so a microVM session is built here first."
   log_warn "  the guest:  204 derivations, 302.2 MiB of downloads"
   log_warn "  virtiofsd:  49 MiB"
+  log_warn "  openssh:    what exec and the agent forward reach the guest with"
   [[ -n "$want_qemu" ]] &&
     log_warn "  qemu:       1562 MiB (this machine has no qemu-system-$(uname -m) of its own)"
   read -rp "Realise them now? [y/N] " answer
@@ -573,18 +574,29 @@ microvm_realise() {
     log_err "Could not realise virtiofsd, which vmspawn shares a directory with."
     exit 1
   }
+  # exec on a microVM cage and the agent forward are ssh over vsock, and the
+  # session looks for that ssh on its own path.
+  local openssh
+  openssh="$(nix_out_path "$NIXCAGE_SELF_FLAKE#openssh")" || {
+    log_err "Could not realise openssh, which exec and the agent forward use."
+    exit 1
+  }
 
-  mkdir -p "$STATE_DIR"
-  : >"$MICROVM_CACHE"
-  echo "GUEST=$guest" >>"$MICROVM_CACHE"
-  echo "PATH=$virtiofsd" >>"$MICROVM_CACHE"
+  qemu=""
   if [[ -n "$want_qemu" ]]; then
     qemu="$(nix_out_path "$NIXCAGE_SELF_FLAKE#qemu")" || {
       log_err "Could not realise qemu, which is the only backend vmspawn has."
       exit 1
     }
-    echo "PATH=$qemu" >>"$MICROVM_CACHE"
   fi
+
+  mkdir -p "$STATE_DIR"
+  {
+    echo "GUEST=$guest"
+    echo "PATH=$virtiofsd"
+    echo "PATH=$openssh"
+    [[ -z "$qemu" ]] || echo "PATH=$qemu"
+  } >"$MICROVM_CACHE"
 }
 
 ## The layer a session names across sudo (ADR-023 decision 8). Empty on a

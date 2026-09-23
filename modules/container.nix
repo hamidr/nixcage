@@ -129,6 +129,14 @@ let
       ## names the layer it was built from with --profile.
       PROFILE_LINK=/etc/nixcage/profile
       SECRET_ENV=/etc/nixcage/secret-env
+      ## What a vsock address resolves through (ADR-019 decision 6). systemd
+      ## ships the snippet and NixOS includes it in ssh_config; naming it here
+      ## makes exec and the agent forward work on a host that includes nothing
+      ## (ADR-023).
+      ## Read by microvm-session.sh, which is sourced by store path and so
+      ## cannot be followed from here.
+      # shellcheck disable=SC2034
+      NIXCAGE_SSH_CONFIG=${pkgs.systemd}/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf
 
       die() { echo "nixcage-container: $*" >&2; exit 1; }
 

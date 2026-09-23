@@ -210,3 +210,36 @@ STUB
 	assert_success
 	assert_output ""
 }
+
+
+# A vsock address resolves through systemd-ssh-proxy, and nothing else does.
+# NixOS includes systemd's own snippet in ssh_config; a host that declared
+# nothing has no such drop-in, so the snippet is named on the command line and
+# the transport works the same on every host (ADR-023).
+
+@test "ssh is given systemd's own proxy configuration for a vsock address" {
+	NIXCAGE_SSH_CONFIG=/nix/store/s-systemd/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf
+	NIXCAGE_EXEC_ENV=env NIXCAGE_EXEC_SETPRIV=setpriv
+	run nixcage_exec_microvm_words /k vsock/1 1000 100 "" --
+	assert_success
+	assert_line "-F"
+	assert_line "/nix/store/s-systemd/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf"
+}
+
+@test "the agent forward is given the same configuration" {
+	NIXCAGE_SSH_CONFIG=/nix/store/s-systemd/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf
+	run nixcage_agent_forward_words /k vsock/1 /run/user/1000/ssh-agent.sock
+	assert_success
+	assert_line "-F"
+	assert_line "/nix/store/s-systemd/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf"
+}
+
+# A host whose ssh already resolves the address needs nothing named, and the
+# words stay what they were.
+@test "with no configuration named, ssh is left to the host's own" {
+	NIXCAGE_SSH_CONFIG=""
+	NIXCAGE_EXEC_ENV=env NIXCAGE_EXEC_SETPRIV=setpriv
+	run nixcage_exec_microvm_words /k vsock/1 1000 100 "" --
+	assert_success
+	refute_line "-F"
+}

@@ -64,6 +64,10 @@
               guest = (pkgs.nixos [ ./modules/guest.nix ]).config.system.build.toplevel;
               qemu = pkgs.qemu_kvm;
               virtiofsd = pkgs.virtiofsd;
+              ## exec on a microVM cage and the agent forward are both ssh
+              ## over vsock, and an undeclared host has no openssh where the
+              ## session looks for one.
+              openssh = pkgs.openssh;
             }
             // {
               default = pkgs.stdenv.mkDerivation {
