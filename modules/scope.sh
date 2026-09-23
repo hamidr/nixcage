@@ -161,7 +161,7 @@ nixcage_scope_json_string() {
 	printf '"%s"' "$v"
 }
 
-## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--home=<path>] [root...]
+## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--home=<path>] [--writer=<path>] [--declared=<1|>] [root...]
 ## One object on one line, so list --json can extend it without parsing it.
 ## A field the session was not given is absent rather than empty; the
 ## substrate is absent for nspawn, which every cage ran on before ADR-019,
@@ -169,15 +169,24 @@ nixcage_scope_json_string() {
 ## recorded when a caller named one, since exec on a microvm cage reads
 ## the session's group from it and the default is under the state
 ## directory only when nobody asked otherwise.
+##
+## The writer and whether that session had a declaration are recorded where
+## the caller names them (ADR-023 decision 4): one machine can hold cages
+## written by a nixcage from the store and cages written by one a module
+## installed, and a record that says which is a message rather than a puzzle.
+## Absent where nobody names them, which is what every record held before.
 nixcage_scope_record_write() {
 	local name="$1" uid="$2" subject="$3" bridge="$4" address="$5" netns="$6" substrate="$7"
 	shift 7
 	nixcage_scope_name_ok "$name" || return 1
 	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep home=""
+	local writer="" declared="" marked=""
 	local -a roots=()
 	for root in "$@"; do
 		case "$root" in
 		--home=*) home="${root#--home=}" ;;
+		--writer=*) writer="${root#--writer=}" ;;
+		--declared=*) declared="${root#--declared=}" marked=1 ;;
 		*) roots+=("$root") ;;
 		esac
 	done
@@ -190,6 +199,14 @@ nixcage_scope_record_write() {
 	[ -z "$substrate" ] || [ "$substrate" = nspawn ] ||
 		record+=",\"substrate\":$(nixcage_scope_json_string "$substrate")"
 	[ -z "$home" ] || record+=",\"home\":$(nixcage_scope_json_string "$home")"
+	[ -z "$writer" ] || record+=",\"writer\":$(nixcage_scope_json_string "$writer")"
+	if [ -n "$marked" ]; then
+		if [ -n "$declared" ]; then
+			record+=',"declared":true'
+		else
+			record+=',"declared":false'
+		fi
+	fi
 	if [ "${#roots[@]}" -gt 0 ]; then
 		record+=',"roots":['
 		sep=""

@@ -311,3 +311,31 @@ STUB
 	assert_success
 	assert_output ""
 }
+
+
+# Which nixcage wrote a record, and whether that session had a declaration to
+# read (ADR-023 decision 4). A machine can hold cages written by a nixcage
+# from the store and cages written by one a module installed, so a format that
+# diverges later is a message rather than a puzzle.
+
+@test "a record names the nixcage that wrote it and says it was undeclared" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" "" \
+		--writer=/nix/store/aaa-nixcage-container/bin/nixcage-container --declared=
+	local record="$NIXCAGE_STATE_DIR/containers/builder/placement"
+	[ "$(jq -r .writer "$record")" = /nix/store/aaa-nixcage-container/bin/nixcage-container ]
+	[ "$(jq -r .declared "$record")" = false ]
+}
+
+@test "a record of a declared session says so" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" "" \
+		--writer=/nix/store/aaa-nixcage-container/bin/nixcage-container --declared=1
+	[ "$(jq -r .declared "$NIXCAGE_STATE_DIR/containers/builder/placement")" = true ]
+}
+
+# Absent is what every record held before this, so one written by an older
+# nixcage still reads.
+@test "a record written without a writer keeps the shape it always had" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" ""
+	run jq -c 'keys' "$NIXCAGE_STATE_DIR/containers/builder/placement"
+	assert_output '["name","uid"]'
+}
