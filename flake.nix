@@ -110,6 +110,15 @@
           ## but the CLI, and a cage entered on each for real. Linux only,
           ## because a NixOS test is a Linux virtual machine.
           checks = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            ## The layer an undeclared host runs is built from this flake's
+            ## own nixpkgs, and a microvm session refuses a vmspawn before
+            ## 261 (microvm-session.sh). A pin behind that makes every
+            ## undeclared microvm session a refusal, so the pin is checked.
+            carriedVmspawn =
+              assert lib.assertMsg (lib.versionAtLeast pkgs.systemd.version "261")
+                "the carried layer's systemd ${pkgs.systemd.version} has a vmspawn older than 261";
+              pkgs.runCommand "nixcage-carried-vmspawn" { } "touch $out";
+
             ## The sequence a dependant performs, against a real machine: a
             ## uid for a principal, storage given to that uid, a session that
             ## runs as it, and a way back to the host. The parts have tests of
