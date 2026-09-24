@@ -188,3 +188,23 @@ EOF
 	run nixcage_storage_ensure "$STATE" "" "$STATE" 700000
 	assert_failure
 }
+
+# A directory nixcage gave a uid is written by that uid, which can leave a
+# symlink in it. mkdir -p and chown follow one, so a path through it would
+# have root make and give away whatever the link names.
+@test "a path through a symlink under the state directory is refused" {
+	mkdir -p "$STATE/worktrees" "$TEST_TEMP_DIR/target"
+	ln -s "$TEST_TEMP_DIR/target" "$STATE/worktrees/acme"
+	run nixcage_storage_ensure "$STATE" "" "$STATE/worktrees/acme/builder" 700000
+	assert_failure
+	assert_output --partial "symlink"
+	[ ! -d "$TEST_TEMP_DIR/target/builder" ]
+}
+
+@test "a path that is itself a symlink is refused" {
+	mkdir -p "$STATE/worktrees" "$TEST_TEMP_DIR/target"
+	ln -s "$TEST_TEMP_DIR/target" "$STATE/worktrees/builder"
+	run nixcage_storage_ensure "$STATE" "" "$STATE/worktrees/builder" 700000
+	assert_failure
+	assert_output --partial "symlink"
+}

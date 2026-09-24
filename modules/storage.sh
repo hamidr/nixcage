@@ -63,6 +63,22 @@ nixcage_storage_ancestors() {
 	done
 }
 
+## Answer whether any part of <path> below <state> is a symlink. A place
+## nixcage gave a uid is written by that uid, and mkdir -p and chown both
+## follow a link, so a path through one would have root make and give away
+## whatever the link names. The state directory itself is the admin's.
+nixcage_storage_has_symlink() {
+	local state="$1" path="$2"
+	local rest="${path#"$state"/}" prefix="$state"
+	while [ -n "$rest" ]; do
+		prefix="$prefix/${rest%%/*}"
+		[ ! -L "$prefix" ] || return 0
+		[ "$rest" != "${rest#*/}" ] || break
+		rest="${rest#*/}"
+	done
+	return 1
+}
+
 ## Give <path> to <uid>, as a dataset where there is a pool for one and as an
 ## ordinary directory where there is not, and bound it by <quota> either way it
 ## can be bounded.
@@ -85,6 +101,11 @@ nixcage_storage_ensure() {
 		;;
 	esac
 
+	if nixcage_storage_has_symlink "$state" "$path"; then
+		echo "nixcage: $path passes through a symlink under $state" >&2
+		return 1
+	fi
+
 	local dataset=""
 	if [ -n "$root" ]; then
 		dataset="$(nixcage_storage_dataset_for "$state" "$root" "$path")" || return 1
@@ -92,7 +113,7 @@ nixcage_storage_ensure() {
 
 	if [ -z "$dataset" ]; then
 		mkdir -p "$path" || return 1
-		chown "$uid:$uid" "$path" || return 1
+		chown -h "$uid:$uid" "$path" || return 1
 		echo "$path"
 		return 0
 	fi
@@ -104,7 +125,7 @@ nixcage_storage_ensure() {
 		## that looks like an empty directory in their place.
 		if [ -d "$path" ] && [ -n "$(ls -A "$path")" ]; then
 			echo "nixcage: $path already holds files; leaving it a directory rather than mounting a dataset over it" >&2
-			chown "$uid:$uid" "$path" || return 1
+			chown -h "$uid:$uid" "$path" || return 1
 			echo "$path"
 			return 0
 		fi
@@ -119,6 +140,6 @@ nixcage_storage_ensure() {
 	## Cleared when the caller no longer names one, so what the caller says is
 	## the whole truth about the bound.
 	zfs set "refquota=${quota:-none}" "$dataset" || return 1
-	chown "$uid:$uid" "$path" || return 1
+	chown -h "$uid:$uid" "$path" || return 1
 	echo "$path"
 }
