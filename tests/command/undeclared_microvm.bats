@@ -138,6 +138,10 @@ enter_microvm() {
 
 @test "a host that names no revision gets nixcage's own input, and is told" {
 	stub_machine_qemu
+	# Stubbed rather than left absent: on a NixOS machine running the suite the
+	# real nixos-version names the revision the host is on.
+	printf '#!/usr/bin/env bash\necho {}\n' >"$TEST_TEMP_DIR/bin/nixos-version"
+	chmod +x "$TEST_TEMP_DIR/bin/nixos-version"
 	enter_microvm
 	[ "$status" -eq 0 ]
 	[[ "$(cat "$TEST_TEMP_DIR/nix-calls")" != *override-input* ]]
