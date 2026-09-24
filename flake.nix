@@ -177,14 +177,19 @@
                     )
 
                 with subtest("a session runs as the uid it was given"):
-                    host.succeed("mkdir -p /srv/proj")
+                    # Owned by that uid, as a dependant's worktree is.
+                    host.succeed("mkdir -p /srv/proj && chown " + first + " /srv/proj")
                     out = host.succeed(
                         "nixcage exec -- nixcage-container enter --uid " + first
                         + " --setenv K=V --bind-ro /srv:/srv-ro"
-                        + " cage /srv/proj sh -c 'id -u; echo $K; test -e /srv-ro/proj'"
+                        + " cage /srv/proj sh -c 'echo $K; test -e /srv-ro/proj;"
+                        + " touch /workspace/written'"
                     )
-                    assert first in out, (first, out)
                     assert "V" in out, out
+                    # Root inside is subject 0 of the cage's block (ADR-010),
+                    # so the uid it was given shows on the host, not in id.
+                    owner = host.succeed("stat -c %u /srv/proj/written").strip()
+                    assert owner == first, (owner, first)
 
                 with subtest("what the session was given is in its record"):
                     record = host.succeed(
