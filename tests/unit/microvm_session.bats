@@ -243,3 +243,41 @@ STUB
 	assert_success
 	refute_line "-F"
 }
+
+# A microvm cage's scope exists before its guest's sshd answers, so an exec
+# as soon as status says running met "Connection reset by peer" for about
+# four seconds of every boot (found 2026-09-24). exec waits for a probe to
+# get through before it runs the command, which therefore runs once.
+
+# A probe that fails the given number of times, then succeeds.
+flaky_probe() {
+	local failures="$1"
+	cat >"$TEST_TEMP_DIR/probe" <<EOF2
+#!/usr/bin/env bash
+n=\$(cat "$TEST_TEMP_DIR/tries" 2>/dev/null || echo 0)
+echo \$((n + 1)) >"$TEST_TEMP_DIR/tries"
+[ "\$n" -ge $failures ]
+EOF2
+	chmod +x "$TEST_TEMP_DIR/probe"
+}
+
+@test "an exec waits until the guest answers" {
+	flaky_probe 2
+	NIXCAGE_MICROVM_AWAIT_INTERVAL=0 run nixcage_microvm_await 5 "$TEST_TEMP_DIR/probe"
+	assert_success
+	[ "$(cat "$TEST_TEMP_DIR/tries")" -eq 3 ]
+}
+
+@test "a guest that is already up is asked once" {
+	flaky_probe 0
+	NIXCAGE_MICROVM_AWAIT_INTERVAL=0 run nixcage_microvm_await 5 "$TEST_TEMP_DIR/probe"
+	assert_success
+	[ "$(cat "$TEST_TEMP_DIR/tries")" -eq 1 ]
+}
+
+@test "a guest that never answers is given up on, saying so" {
+	flaky_probe 99
+	NIXCAGE_MICROVM_AWAIT_INTERVAL=0 run nixcage_microvm_await 3 "$TEST_TEMP_DIR/probe"
+	assert_failure
+	assert_output --partial "did not answer within 3"
+}

@@ -151,6 +151,25 @@ nixcage_exec_microvm_words() {
 	printf '%s\n' "$remote"
 }
 
+## nixcage_microvm_await <timeout> <probe...>
+## Runs the probe once a second until it succeeds, for at most <timeout>
+## tries. The scope exists, and status says running, a few seconds before
+## the guest's sshd answers; exec probes first so the command it was given
+## runs once rather than being retried. NIXCAGE_MICROVM_AWAIT_INTERVAL is
+## the pause, for the suite.
+nixcage_microvm_await() {
+	local timeout="$1" tries=0
+	shift
+	until "$@" </dev/null >/dev/null 2>&1; do
+		tries=$((tries + 1))
+		if [ "$tries" -ge "$timeout" ]; then
+			echo "nixcage: the guest did not answer within ${timeout}s" >&2
+			return 1
+		fi
+		sleep "${NIXCAGE_MICROVM_AWAIT_INTERVAL:-1}"
+	done
+}
+
 ## nixcage_agent_forward_words <key> <address> <host socket>
 ## The ssh that carries the host's agent into the guest: a remote unix
 ## socket forward, so what appears in the guest is a socket sshd made,

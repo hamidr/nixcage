@@ -1060,6 +1060,12 @@ let
         local -a asked=()
         mapfile -d "" -t asked < <(nixcage_microvm_env_read "$STATE_DIR/containers/$name/session-env")
         env_words+=(''${asked[@]+"''${asked[@]}"})
+        local -a probe=()
+        while IFS= read -r word; do
+          probe+=("$word")
+        done < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \
+          nixcage_exec_microvm_words "$key" "$address" "$uid" "$gid" "" -- true)
+        nixcage_microvm_await "$NIXCAGE_MICROVM_BOOT_TIMEOUT" "''${probe[@]}" || exit 1
         while IFS= read -r word; do
           words+=("$word")
         done < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \
