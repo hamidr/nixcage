@@ -301,6 +301,83 @@
             };
           };
 
+          ## Checks that boot a machine inside the test VM, so they want the
+          ## runner to nest KVM twice, which CI's runners do not: kept out of
+          ## `checks` and run on a host that nests, with
+          ## `nix build .#hostChecks.microvm`. The microVM path is otherwise
+          ## covered only by unit tests of its parts.
+          legacyPackages.hostChecks = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            microvm = pkgs.testers.runNixOSTest {
+              name = "nixcage-microvm-session";
+
+              nodes.host = {
+                imports = [ inputs.self.nixosModules.host ];
+                nixcage.workspaceRoots = [ "/srv" ];
+                nixcage.microvm.enable = true;
+                ## A person whose agent a session is handed.
+                users.users.alice.isNormalUser = true;
+                environment.systemPackages = [
+                  self'.packages.default
+                  pkgs.hello
+                ];
+                virtualisation.memorySize = 4096;
+                virtualisation.cores = 2;
+              };
+
+              testScript = ''
+                start_all()
+                host.wait_for_unit("multi-user.target")
+                host.succeed("mkdir -p /srv/proj")
+                # The guest may boot the very kernel the host runs; its own
+                # boot is what shows it is a kernel of its own.
+                boot = "cat /proc/sys/kernel/random/boot_id"
+                host_boot = host.succeed(boot).strip()
+
+                def container(words):
+                    return "nixcage exec -- nixcage-container " + words
+
+                with subtest("a microvm session runs in a kernel of its own"):
+                    out = host.succeed(
+                        container("enter --no-agent --substrate microvm vm /srv/proj " + boot)
+                    )
+                    assert host_boot not in out, (host_boot, out)
+
+                with subtest("an exec as soon as the cage runs reaches the guest"):
+                    host.succeed("runuser -u alice -- ssh-agent -a /tmp/alice-agent.sock")
+                    host.succeed(
+                        container(
+                            "enter --auth-sock /tmp/alice-agent.sock"
+                            + " --setenv NIXCAGE_PATH_PREFIX=${pkgs.hello}/bin"
+                            + " vm /srv/proj sleep 120"
+                        )
+                        + " >/tmp/session.log 2>&1 &"
+                    )
+                    host.wait_until_succeeds(
+                        container("status vm") + " | grep -q '^running'", timeout=60
+                    )
+                    out = host.succeed(container("exec vm -- " + boot))
+                    assert host_boot not in out, (host_boot, out)
+
+                with subtest("an exec has the PATH the session was asked for"):
+                    out = host.succeed(container("exec vm -- sh -c 'command -v hello'"))
+                    assert "${pkgs.hello}/bin/hello" in out, out
+
+                with subtest("the session reaches the caller's agent and leaves it theirs"):
+                    before = host.succeed("stat -c %u /tmp/alice-agent.sock").strip()
+                    # 1 is an agent with no keys; 2 is no agent reached.
+                    host.wait_until_succeeds(
+                        container("exec vm -- sh -c 'ssh-add -l; test $? = 1'"), timeout=30
+                    )
+                    after = host.succeed("stat -c %u /tmp/alice-agent.sock").strip()
+                    assert after == before, (after, before)
+
+                with subtest("stop ends the guest"):
+                    host.succeed(container("stop vm"))
+                    host.succeed(container("status vm") + " | grep -qx stopped")
+              '';
+            };
+          };
+
           devShells.default = pkgs.mkShell {
             buildInputs = with pkgs; [
               bash
