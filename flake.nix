@@ -300,7 +300,7 @@
                     # What a partial upgrade leaves: a CLI newer than the
                     # module it stands on. Last, because it takes the
                     # declaration away.
-                    declared.succeed("rm /etc/nixcage/declaration")
+                    declared.succeed("rm /etc/nixcage/declaration /etc/nixcage/config")
                     declared.succeed(
                         "printf 'WORKSPACE_ROOTS=/srv\\n' > /etc/nixcage/config"
                     )
