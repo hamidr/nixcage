@@ -1,9 +1,9 @@
 ---
 id: ADR-014
 title: A cage without the daemon sees the closure of its roots, not the store
-status: implementing
+status: implemented
 date: 2026-09-15
-status_date: 2026-09-15
+status_date: 2026-09-24
 summary: enter --no-nix-daemon binds each path of its roots' closure and nothing else of /nix/store; --store-root names a root
 depends_on: [ADR-009, ADR-011]
 supersedes: []
@@ -106,5 +106,20 @@ the one query over every root and the bind per path, driven by
 of the profile, the paths its own line names and the roots when the
 daemon is absent, and the whole store otherwise, which
 `tests/unit/exports.bats` asserts by shape and the guest script's build
-on a Linux builder checks. Open: the measurement above, which needs a
-machine with a JVM profile.
+on a Linux builder checks.
+
+Measured 2026-09-24 on a NixOS host (i9-10900, systemd 261, nixcage
+5.1.6), a cage entered six times each way running `true`, the root the
+JVM profile fabriek builds for its widgets backend role (217 paths of
+its own):
+
+```
+whole store, with the daemon                  0.147-0.177 s, median 0.163 s
+closure, profile as root: 392 paths bound     0.232-0.276 s, median 0.247 s
+closure, profile and a NixOS system: 687      0.279-0.296 s, median 0.289 s
+```
+
+The closure costs about 0.14 ms a path over a whole-store start, so a
+thousand paths start in about 0.33 s, 0.17 s over the whole store: within
+the one second claimed. A thousand was not measured directly; the two
+counts that were lie on one line.

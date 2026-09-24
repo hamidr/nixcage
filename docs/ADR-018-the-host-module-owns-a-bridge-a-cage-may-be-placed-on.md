@@ -1,9 +1,9 @@
 ---
 id: ADR-018
 title: The host module owns a bridge a cage may be placed on
-status: implementing
+status: implemented
 date: 2026-09-16
-status_date: 2026-09-16
+status_date: 2026-09-24
 summary: nixcage.bridges.<name> declares a bridge with its address and the two settings an empty bridge needs to be usable
 depends_on: [ADR-003, ADR-011, ADR-015]
 supersedes: []
@@ -64,5 +64,10 @@ four settings, imported by `modules/host.nix` and `modules/nixcage.nix`;
 `tests/command/modules.bats` evaluates both as NixOS systems with one
 bridge and with none, reads the address, the carrier setting and the
 sysctl back, and sees a sixteen-character name and one outside the
-alphabet refused. Open: the machine half above, which the dependant's
-machine will show when it adopts the option.
+alphabet refused. The dependant never adopted the option (fabriek
+declares its bridges itself), so the machine half is `checks.bridged`
+instead, 2026-09-24: on a NixOS machine declaring `nixcage.bridges.nc0`,
+the bridge holds 10.66.0.1/24 before any cage exists, and a service bound
+there answers; the same check then places twenty-eight cages on it. That
+machine runs NetworkManager with scripted networking, not networkd, so
+the carrier setting, which is networkd's, is shown by evaluation only.

@@ -81,13 +81,24 @@
                 ## What the host the race was seen on runs: something that
                 ## takes an interest in every new link.
                 networking.networkmanager.enable = true;
-                environment.systemPackages = [ self'.packages.default ];
+                environment.systemPackages = [
+                  self'.packages.default
+                  pkgs.socat
+                ];
                 virtualisation.memorySize = 2048;
               };
 
               testScript = ''
                 start_all()
                 host.wait_for_unit("multi-user.target")
+
+                # ADR-018: the bridge is the host's before any cage is on it.
+                with subtest("the bridge has its address before any cage, and a service there answers"):
+                    host.succeed("ip -4 addr show nc0 | grep -q 'inet 10.66.0.1/24'")
+                    host.succeed(
+                        "socat TCP-LISTEN:7000,bind=10.66.0.1,fork SYSTEM:'echo up' >/dev/null 2>&1 &"
+                    )
+                    host.wait_until_succeeds("socat -T2 - TCP:10.66.0.1:7000 </dev/null | grep -qx up", timeout=10)
 
                 def enter(i):
                     name = f"a-bridged-cage-named-{i:02d}"
