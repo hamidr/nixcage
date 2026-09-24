@@ -17,7 +17,7 @@ setup() {
 	# No interface exists until made: "link show" answers as ip does for
 	# a name it does not have. An empty set lists as nothing to nft.
 	local tool
-	for tool in ip nft bridge; do
+	for tool in ip nft bridge udevadm; do
 		printf '#!/usr/bin/env bash\nprintf "%s %%s\\n" "$*" >>"%s"\ncase "$1 $2" in "link show") exit 1 ;; esac\n' "$tool" "$CALLS" >"$TEST_TEMP_DIR/bin/$tool"
 		chmod +x "$TEST_TEMP_DIR/bin/$tool"
 	done
@@ -126,6 +126,17 @@ teardown() {
 	assert_line --index 4 "nft add element bridge nixcage placements { \"$host\" . 10.77.0.10 }"
 	assert_line --index 5 "bridge link set dev $host isolated on"
 	assert_line --index 6 "ip link set $host up"
+}
+
+# nspawn refuses a --network-interface udev has not finished with ("Network
+# interface ... is not initialized yet"), and a pair just made often is not:
+# 2 enters in 12 failed on a NixOS host (found 2026-09-24). The make waits
+# for udev on the cage end, last, once everything else about it is done.
+@test "a make waits for udev to finish with the cage end before handing it on" {
+	run nixcage_veth_make builder fabriek-acme 10.77.0.10/24
+	assert_success
+	run tail -1 "$CALLS"
+	assert_output "udevadm wait --initialized=yes --timeout=10 /sys/class/net/$(nixcage_veth_cage_name builder)"
 }
 
 @test "a make under a name with a stale element deletes that element before adding its own, and no other" {

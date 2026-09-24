@@ -74,7 +74,9 @@ nixcage_veth_unpin() {
 ## already there is a session that was killed rather than ended and took no
 ## trap with it; the name is the cage's, so the stale pair goes before the
 ## new one comes. The address is the placement's, with or without its
-## prefix; the pin is the address alone.
+## prefix; the pin is the address alone. Last, the cage end is waited for
+## until udev has finished with it: nspawn refuses an interface udev has
+## not initialized, and a pair just made often is not yet.
 nixcage_veth_make() {
 	local name="$1" bridge="$2" addr="${3:-}" host cage
 	[ -n "$addr" ] || return 1
@@ -90,7 +92,8 @@ nixcage_veth_make() {
 		nixcage_veth_unpin "$host" &&
 		nft add element bridge nixcage placements "{ \"$host\" . $addr }" &&
 		bridge link set dev "$host" isolated on &&
-		ip link set "$host" up
+		ip link set "$host" up &&
+		udevadm wait --initialized=yes --timeout=10 "/sys/class/net/$cage"
 }
 
 ## Deleting one end of a veth deletes the pair, wherever the other end is.
