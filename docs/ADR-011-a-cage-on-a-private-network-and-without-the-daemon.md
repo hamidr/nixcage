@@ -1,9 +1,9 @@
 ---
 id: ADR-011
 title: A cage may be placed on a private network, and may be given no nix daemon
-status: proposed
+status: implemented
 date: 2026-09-12
-status_date: 2026-09-12
+status_date: 2026-09-24
 summary: two enter options a dependant asked for: one veth on a named bridge at a named address, and no daemon socket
 depends_on: [ADR-009, ADR-010]
 supersedes: []
@@ -103,5 +103,14 @@ order; a parse inherits neither from the last one; a namespace path is
 parsed into the namespace and no bridge, a relative one is refused, and a
 parse inherits no namespace either. The guest script builds, which runs
 shellcheck over the nspawn line. What the cage actually sees is the
-dependant's proof, `tests/manual/isolation.sh` in cageworks, which enters a
-role by hand beside its running actor.
+dependant's proof, `tests/manual/isolation.sh` in fabriek (cageworks when
+this was written), which enters a role by hand beside its running actor.
+
+Run 2026-09-24 on a NixOS host with nixcage 5.1.6, against a factory with
+one nspawn role and one microvm role on its bridge (`F=widgets`): 27
+checks passed and none failed. A hand session joined the running actor's
+namespace and saw host0 and nothing else; each role held one address of
+its own; a cage reached the proxy and not a peer, not another interface
+of the host and not off the host; a forged source address was dropped at
+the bridge; the roles ran with no daemon on their closures. One scenario
+was gated on operator configuration (a substrate floor), not on nixcage.
