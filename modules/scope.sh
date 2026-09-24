@@ -161,14 +161,16 @@ nixcage_scope_json_string() {
 	printf '"%s"' "$v"
 }
 
-## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--home=<path>] [--writer=<path>] [--declared=<1|>] [--declared-bind=<arg>...] [root...]
+## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--home=<path>] [--profile=<path>] [--writer=<path>] [--declared=<1|>] [--declared-bind=<arg>...] [root...]
 ## One object on one line, so list --json can extend it without parsing it.
 ## A field the session was not given is absent rather than empty; the
 ## substrate is absent for nspawn, which every cage ran on before ADR-019,
 ## so a record from before reads the same as one written now. The home is
 ## recorded when a caller named one, since exec on a microvm cage reads
 ## the session's group from it and the default is under the state
-## directory only when nobody asked otherwise.
+## directory only when nobody asked otherwise. The layer is recorded when
+## a caller named one for the same reason: exec on a microvm cage sets PATH
+## from it, and where nothing was declared it exists nowhere else.
 ##
 ## The writer and whether that session had a declaration are recorded where
 ## the caller names them (ADR-023 decision 4): one machine can hold cages
@@ -179,12 +181,13 @@ nixcage_scope_record_write() {
 	local name="$1" uid="$2" subject="$3" bridge="$4" address="$5" netns="$6" substrate="$7"
 	shift 7
 	nixcage_scope_name_ok "$name" || return 1
-	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep home=""
+	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep home="" profile=""
 	local writer="" declared="" marked=""
 	local -a roots=() declared_binds=()
 	for root in "$@"; do
 		case "$root" in
 		--home=*) home="${root#--home=}" ;;
+		--profile=*) profile="${root#--profile=}" ;;
 		--writer=*) writer="${root#--writer=}" ;;
 		--declared=*) declared="${root#--declared=}" marked=1 ;;
 		--declared-bind=*) declared_binds+=("${root#--declared-bind=}") ;;
@@ -200,6 +203,7 @@ nixcage_scope_record_write() {
 	[ -z "$substrate" ] || [ "$substrate" = nspawn ] ||
 		record+=",\"substrate\":$(nixcage_scope_json_string "$substrate")"
 	[ -z "$home" ] || record+=",\"home\":$(nixcage_scope_json_string "$home")"
+	[ -z "$profile" ] || record+=",\"profile\":$(nixcage_scope_json_string "$profile")"
 	[ -z "$writer" ] || record+=",\"writer\":$(nixcage_scope_json_string "$writer")"
 	if [ -n "$marked" ]; then
 		if [ -n "$declared" ]; then
@@ -232,17 +236,27 @@ nixcage_scope_record_write() {
 	printf '%s}\n' "$record" >"$dir/placement"
 }
 
-## The home a cage's record names, empty when the session took the
-## default or there is no record; read by its own spelling as the
+## A path a cage's record names under <field>, empty when the session
+## was not given one or there is no record; read by its own spelling as the
 ## substrate is.
-nixcage_scope_record_home() {
-	local record="$NIXCAGE_STATE_DIR/containers/$1/placement"
+nixcage_scope_record_path() {
+	local record="$NIXCAGE_STATE_DIR/containers/$1/placement" field="$2"
 	[ -f "$record" ] || return 0
 	local line
 	line="$(<"$record")"
-	if [[ "$line" =~ \"home\":\"([^\"]*)\" ]]; then
+	if [[ "$line" =~ \"$field\":\"([^\"]*)\" ]]; then
 		echo "${BASH_REMATCH[1]}"
 	fi
+}
+
+## The home a cage's record names, empty for the default.
+nixcage_scope_record_home() {
+	nixcage_scope_record_path "$1" home
+}
+
+## The layer a cage's record names, empty where the host's was used.
+nixcage_scope_record_profile() {
+	nixcage_scope_record_path "$1" profile
 }
 
 ## The substrate a cage's record fixed, empty for a cage with none or with

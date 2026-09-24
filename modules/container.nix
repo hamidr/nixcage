@@ -700,7 +700,9 @@ let
         nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns" "$substrate" \
           "--writer=$0" "--declared=''${NIXCAGE_DECLARED:-}" \
           ''${declared_binds[@]+"''${declared_binds[@]/#/--declared-bind=}"} \
-          ''${asked_home:+"--home=$asked_home"} ''${store_roots[@]+"''${store_roots[@]}"} ||
+          ''${asked_home:+"--home=$asked_home"} \
+          ''${NIXCAGE_ENTER_PROFILE:+"--profile=$NIXCAGE_ENTER_PROFILE"} \
+          ''${store_roots[@]+"''${store_roots[@]}"} ||
           die "could not record the placement of $name"
         ## The home holds whatever the session writes there, so it is private
         ## to the subject running. If its contents belong to someone else the
@@ -1032,6 +1034,13 @@ let
         record="$(<"$STATE_DIR/containers/$name/placement")"
         [[ "$record" =~ \"uid\":([0-9]+) ]] || die "$name has no uid in its record"
         uid=$((BASH_REMATCH[1] + offset))
+        ## PATH comes from the layer the session was built from: the one
+        ## enter was named, which only the record still knows, else the
+        ## host's.
+        PROFILE="$(nixcage_scope_record_profile "$name")"
+        [ -n "$PROFILE" ] || PROFILE="$(readlink -f "$PROFILE_LINK" 2>/dev/null || true)"
+        [ -n "$PROFILE" ] ||
+          die "$name has no layer: its record names none and there is no $PROFILE_LINK"
         ## The home is the record's when the session named one (ADR-017),
         ## else the default under the state directory.
         local gid home

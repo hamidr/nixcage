@@ -312,6 +312,26 @@ STUB
 	assert_output ""
 }
 
+# exec on a microvm cage sets PATH from the layer the session was built from,
+# and on a host that declared nothing that layer was named to enter with
+# --profile and exists nowhere else (found 2026-09-24: "PROFILE: unbound
+# variable", then a command with no PATH). The record carries a named layer.
+
+@test "the record carries the layer a session was named" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" microvm --profile=/nix/store/bbbb-layer
+	run cat "$NIXCAGE_STATE_DIR/containers/builder/placement"
+	assert_output '{"name":"builder","uid":700000,"substrate":"microvm","profile":"/nix/store/bbbb-layer"}'
+	run nixcage_scope_record_profile builder
+	assert_output "/nix/store/bbbb-layer"
+}
+
+@test "a record without a named layer says nothing, so the host's is used" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" ""
+	run nixcage_scope_record_profile builder
+	assert_success
+	assert_output ""
+}
+
 
 # Which nixcage wrote a record, and whether that session had a declaration to
 # read (ADR-023 decision 4). A machine can hold cages written by a nixcage
