@@ -173,3 +173,18 @@ EOF
 	assert_output --partial "is outside $STATE"
 	[ ! -d /var/lib/elsewhere/x ]
 }
+
+# Without a pool the path is still one nixcage owns: storage ensure runs as
+# root, and a directory anywhere else is a chown of something that is not
+# nixcage's to give.
+@test "without a pool a path outside the state directory is refused too" {
+	run nixcage_storage_ensure "$STATE" "" "$TEST_TEMP_DIR/elsewhere/x" 700000
+	assert_failure
+	assert_output --partial "is outside $STATE"
+	[ ! -d "$TEST_TEMP_DIR/elsewhere/x" ]
+}
+
+@test "without a pool the state directory itself is not handed out" {
+	run nixcage_storage_ensure "$STATE" "" "$STATE" 700000
+	assert_failure
+}

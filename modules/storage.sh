@@ -74,12 +74,20 @@ nixcage_storage_ancestors() {
 nixcage_storage_ensure() {
 	local state="$1" root="$2" path="$3" uid="$4" quota="${5:-}"
 
+	## Refused with or without a pool: this runs as root, and a directory
+	## outside the state directory is a chown of something nixcage does not
+	## own, where a pool only adds that it is not mounted there either.
+	case "$path" in
+	"$state"/*) ;;
+	*)
+		echo "nixcage: $path is outside $state, which is the only place nixcage gives storage" >&2
+		return 1
+		;;
+	esac
+
 	local dataset=""
 	if [ -n "$root" ]; then
-		dataset="$(nixcage_storage_dataset_for "$state" "$root" "$path")" || {
-			echo "nixcage: $path is outside $state, which is the only place this pool is mounted" >&2
-			return 1
-		}
+		dataset="$(nixcage_storage_dataset_for "$state" "$root" "$path")" || return 1
 	fi
 
 	if [ -z "$dataset" ]; then
