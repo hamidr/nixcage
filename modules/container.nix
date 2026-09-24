@@ -84,6 +84,8 @@ let
       nftables
       ## exec enters a running cage's namespaces and becomes a subject.
       util-linux
+      ## The relay a session reaches the caller's agent through.
+      socat
       ## The agent forward into a microVM is a shell around ssh, ended by
       ## its parent (ADR-019).
       procps
@@ -831,16 +833,31 @@ let
         fi
 
         ## Commits are signed through the invoking user's agent: the socket
-        ## is forwarded in, no key material is. The container is mapped onto
-        ## the project owner, so the socket has to be reachable by that uid
-        ## rather than by whoever forwarded it.
+        ## is forwarded in, no key material is. The session's uid is often
+        ## not the caller's (a principal's block, ADR-010), so what it gets
+        ## is a relay of its own, owned by that uid, which root connects to
+        ## the caller's socket. The caller's socket keeps its owner: taking
+        ## it cut its owner off from their own agent and left it with the
+        ## session's uid after the session ended. The relay dies with this
+        ## script, however it ends.
         local -a agent_bind=()
+        local agent_relay=""
         if [ -n "$auth_sock" ]; then
           if [ -S "$auth_sock" ]; then
-            chown "$session_uid:$session_gid" "$auth_sock"
+            agent_relay="$cdir/agent-$$.sock"
+            rm -f "$agent_relay"
+            setpriv --pdeathsig TERM -- socat \
+              "UNIX-LISTEN:$agent_relay,fork,mode=600,user=$session_uid,group=$session_gid" \
+              "UNIX-CONNECT:$auth_sock" 2>/dev/null &
+            local waited=0
+            until [ -S "$agent_relay" ] || [ "$waited" -ge 50 ]; do
+              sleep 0.1
+              waited=$((waited + 1))
+            done
+            [ -S "$agent_relay" ] || die "could not relay the agent at $auth_sock"
             : >"$rootfs/run/ssh-agent.sock"
             agent_bind=(
-              "--bind=$auth_sock:/run/ssh-agent.sock"
+              "--bind=$agent_relay:/run/ssh-agent.sock"
               "--setenv=SSH_AUTH_SOCK=/run/ssh-agent.sock"
             )
           else
@@ -895,9 +912,13 @@ let
         )
         if [ -n "$NIXCAGE_ENTER_PRINT_ARGV" ]; then
           printf '%s\n' systemd-nspawn "''${nspawn_args[@]}"
+          [ -z "$agent_relay" ] || rm -f "$agent_relay"
           exit 0
         fi
-        systemd-nspawn "''${nspawn_args[@]}"
+        local status=0
+        systemd-nspawn "''${nspawn_args[@]}" || status=$?
+        [ -z "$agent_relay" ] || rm -f "$agent_relay"
+        return "$status"
       }
 
       ## The uid of a named principal, allocated on first use and never

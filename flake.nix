@@ -94,6 +94,8 @@
                   size = 64;
                 };
                 nixcage.principalSubjects = [ "agent" ];
+                ## A person whose agent a session is handed.
+                users.users.alice.isNormalUser = true;
                 environment.systemPackages = [ self'.packages.default ];
                 virtualisation.memorySize = 2048;
               };
@@ -158,6 +160,19 @@
                     # so the uid it was given shows on the host, not in id.
                     owner = host.succeed("stat -c %u /srv/proj/written").strip()
                     assert owner == first, (owner, first)
+
+                with subtest("a session reaches the caller's agent without taking it"):
+                    host.succeed("runuser -u alice -- ssh-agent -a /tmp/alice-agent.sock")
+                    before = host.succeed("stat -c %u /tmp/alice-agent.sock").strip()
+                    out = host.succeed(
+                        "nixcage exec -- nixcage-container enter --uid " + first
+                        + " --auth-sock /tmp/alice-agent.sock cage /srv/proj"
+                        + " sh -c 'ssh-add -l; echo rc=$?'"
+                    )
+                    # 1 is an agent with no keys; 2 is no agent reached.
+                    assert "rc=1" in out, out
+                    after = host.succeed("stat -c %u /tmp/alice-agent.sock").strip()
+                    assert after == before, (after, before)
 
                 with subtest("what the session was given is in its record"):
                     record = host.succeed(
