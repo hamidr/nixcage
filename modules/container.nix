@@ -24,6 +24,10 @@ let
     paths = with pkgs; [
       bashInteractive
       coreutils
+      ## git pages its output for a person at a terminal; without a pager
+      ## on PATH every git log there fails. A session with no terminal is
+      ## told not to page instead (enter-args.sh).
+      less
       nix
       git
       cacert
@@ -347,6 +351,11 @@ let
         while IFS= read -r word; do
           env_words+=("$word")
         done < <(microvm_env_words "$session_home" "$user")
+        local pager_tty="" pager
+        if [ -t 0 ] && [ -t 1 ]; then pager_tty=1; fi
+        while IFS= read -r pager; do
+          env_words+=("--setenv=$pager")
+        done < <(nixcage_enter_pager_env "$pager_tty")
         env_words+=(''${asked_env[@]+"''${asked_env[@]}"})
 
         ## The agent is forwarded as a socket over vsock ssh once the
@@ -882,6 +891,15 @@ let
         ## The line as it would run, held as an array so that --print-argv
         ## can print it one word per line and run nothing: a dependant asserts
         ## what nixcage makes of its flags against this, with no cage.
+        ## The console is read-only without a caller terminal (nspawn's
+        ## default), so nothing in the session may wait on a pager.
+        local -a pager_env=()
+        local pager_tty="" pager
+        if [ -t 0 ] && [ -t 1 ]; then pager_tty=1; fi
+        while IFS= read -r pager; do
+          pager_env+=("--setenv=$pager")
+        done < <(nixcage_enter_pager_env "$pager_tty")
+
         local -a nspawn_args=(
           --quiet --register=no
           --directory="$rootfs"
@@ -906,6 +924,7 @@ let
           --setenv=NIX_SSL_CERT_FILE="$PROFILE/etc/ssl/certs/ca-bundle.crt"
           --setenv=NIXCAGE_DIRENVRC="${pkgs.nix-direnv}/share/nix-direnv/direnvrc"
           ''${shell_env[@]+"''${shell_env[@]}"}
+          ''${pager_env[@]+"''${pager_env[@]}"}
           ''${asked_env[@]+"''${asked_env[@]}"}
           --setenv=TERM="''${TERM:-xterm}"
           "$PROFILE/bin/bash" -c "$shell_cmd" "$@"

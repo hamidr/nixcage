@@ -379,3 +379,15 @@ nixcage_enter_property_args() {
 	[ -z "$NIXCAGE_ENTER_MEMORY" ] || printf -- '--property=MemoryMax=%s\n' "$NIXCAGE_ENTER_MEMORY"
 	[ -z "$NIXCAGE_ENTER_CPUS" ] || printf -- '--property=CPUQuota=%s%%\n' "$((NIXCAGE_ENTER_CPUS * 100))"
 }
+
+## nixcage_enter_pager_env <tty>
+## What a session is told about paging, one K=V per line. Its stdout is a
+## tty whether or not the caller has one (nspawn's read-only console,
+## vmspawn's guest console), so git pages, and a pager on a console nobody
+## types into waits forever. Without a caller terminal paging is off; with
+## one the session's own defaults stand. Given before the caller's own
+## --setenv words, so a caller can still ask for a pager.
+nixcage_enter_pager_env() {
+	[ -z "$1" ] || return 0
+	printf '%s\n' PAGER=cat GIT_PAGER=cat
+}

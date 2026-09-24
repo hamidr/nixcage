@@ -523,3 +523,22 @@ teardown() {
 	[ -z "$NIXCAGE_ENTER_GIT_NAME" ]
 	[ -z "$NIXCAGE_ENTER_GIT_EMAIL" ]
 }
+
+# A session always has a tty on stdout: nspawn's console is read-only and
+# vmspawn's is the guest console when the caller has no terminal. git then
+# pages, and a pager on a console nobody types into waits forever, or fails
+# where there is none (found 2026-09-24: "cannot run less"). A session with
+# no caller terminal is told not to page; one with a terminal is left alone.
+
+@test "a session without a caller terminal is told not to page" {
+	run nixcage_enter_pager_env ""
+	assert_success
+	assert_output "PAGER=cat
+GIT_PAGER=cat"
+}
+
+@test "a session with a caller terminal pages as it likes" {
+	run nixcage_enter_pager_env 1
+	assert_success
+	assert_output ""
+}
