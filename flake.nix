@@ -232,7 +232,9 @@
                 bare.wait_for_unit("multi-user.target")
 
                 with subtest("a declared host enters the cage of a project"):
-                    declared.succeed("mkdir -p /srv/proj")
+                    # The declared bind's source exists before any enter: a
+                    # missing one fails every session of the cage.
+                    declared.succeed("mkdir -p /srv/proj /srv/shared && touch /srv/shared/marker")
                     declared.succeed("cd /srv/proj && nixcage enter -- true")
                     record = declared.succeed(
                         "cat /var/lib/nixcage/containers/*/placement"
@@ -240,7 +242,6 @@
                     assert '"declared":true' in record, record
 
                 with subtest("a cage carries the binds its host declared"):
-                    declared.succeed("mkdir -p /srv/shared && touch /srv/shared/marker")
                     declared.succeed(
                         "cd /srv/proj && nixcage enter -- test -e /shared/marker"
                     )
