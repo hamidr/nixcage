@@ -182,12 +182,15 @@ teardown() {
 # The guest gives argv a stdin that blocks instead of ending.
 
 @test "a session without a tty reads a stdin that waits rather than one that has ended" {
-	nixcage_session_stdin "$TEST_TEMP_DIR/stdin"
-	[ -p "$TEST_TEMP_DIR/stdin" ]
-	# A read on it times out, which is not EOF: EOF returns 1, a timeout
-	# returns more than 128.
-	local status=0
-	read -r -t 1 _ <&3 || status=$?
-	[ "$status" -gt 128 ]
-	exec 3>&-
+	# In a subshell because the function takes fd 3, which is where bats
+	# writes its own results.
+	(
+		nixcage_session_stdin "$TEST_TEMP_DIR/stdin"
+		[ -p "$TEST_TEMP_DIR/stdin" ]
+		# A read on it times out, which is not EOF: EOF returns 1, a timeout
+		# returns more than 128.
+		status=0
+		read -r -t 1 _ <&3 || status=$?
+		[ "$status" -gt 128 ]
+	)
 }
