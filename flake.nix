@@ -63,6 +63,62 @@
           ## but the CLI, and a cage entered on each for real. Linux only,
           ## because a NixOS test is a Linux virtual machine.
           checks = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            ## A bridge-placed cage is a veth nspawn is handed, and nspawn
+            ## refuses one udev has not finished with: on a NixOS host 2
+            ## enters in 12 failed so before nixcage_veth_make waited. Many
+            ## enters, one after another and side by side, every one of them
+            ## succeeding, under names longer than an interface's.
+            bridged = pkgs.testers.runNixOSTest {
+              name = "nixcage-bridged-enters";
+
+              nodes.host = {
+                imports = [ inputs.self.nixosModules.host ];
+                nixcage.workspaceRoots = [ "/srv" ];
+                nixcage.bridges.nc0 = {
+                  address = "10.66.0.1";
+                  prefix = 24;
+                };
+                ## What the host the race was seen on runs: something that
+                ## takes an interest in every new link.
+                networking.networkmanager.enable = true;
+                environment.systemPackages = [ self'.packages.default ];
+                virtualisation.memorySize = 2048;
+              };
+
+              testScript = ''
+                start_all()
+                host.wait_for_unit("multi-user.target")
+
+                def enter(i):
+                    name = f"a-bridged-cage-named-{i:02d}"
+                    return (
+                        f"mkdir -p /srv/p{i} && nixcage exec -- nixcage-container enter"
+                        f" --no-agent --network nc0:10.66.0.{10 + i}/24 {name} /srv/p{i} true"
+                    )
+
+                with subtest("enters one after another all start"):
+                    for i in range(20):
+                        host.succeed(enter(i))
+
+                with subtest("enters side by side all start"):
+                    # Each writes its own status: a record is written before
+                    # nspawn runs, so what lists is no evidence of a start.
+                    jobs = " ".join(
+                        f"( {enter(20 + i)}; echo $? >/tmp/rc-{i} ) &" for i in range(8)
+                    )
+                    host.succeed(f"rm -f /tmp/rc-*; {jobs} wait")
+                    out = host.succeed("cat /tmp/rc-0 /tmp/rc-1 /tmp/rc-2 /tmp/rc-3 /tmp/rc-4 /tmp/rc-5 /tmp/rc-6 /tmp/rc-7")
+                    assert out.split() == ["0"] * 8, out
+
+                with subtest("a placed cage holds the address it was given"):
+                    host.succeed(
+                        "nixcage exec -- nixcage-container enter --no-agent"
+                        + " --network nc0:10.66.0.99/24 a-bridged-cage-named-99 /srv/p0"
+                        + " bash -c 'grep -q 10.66.0.99 /proc/net/fib_trie'"
+                    )
+              '';
+            };
+
             ## The layer an undeclared host runs is built from this flake's
             ## own nixpkgs, and a microvm session refuses a vmspawn before
             ## 261 (microvm-session.sh). A pin behind that makes every
