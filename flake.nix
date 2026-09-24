@@ -93,6 +93,7 @@
 
                   wrapProgram $out/bin/nixcage \
                     --prefix PATH : ${lib.makeBinPath runtimeDeps} \
+                    --set NIXCAGE_DECLARATION_SH ${./modules/declaration.sh} \
                     ${lib.concatStringsSep " " carriedLayer}
                 '';
 
