@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-NIXCAGE_VERSION="5.1.3"
+NIXCAGE_VERSION="5.1.4"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
