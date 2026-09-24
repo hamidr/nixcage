@@ -110,8 +110,11 @@ factory of roles over one repository, is built entirely on those. Architecture:
   `~/.config/nixcage` (their VM configuration; sops-nix wired in).
 - `examples/project/` -- an ordinary project flake showing the devShell
   interface.
+- `package.nix` -- the CLI's one definition, taking `pkgs`: the flake's
+  `packages.default` and `overlays.default` both call it, so the package a
+  machine gets through the overlay is the one the checks run.
 - `flake.nix` -- packages nixcage, exports `nixosModules.nixcage` and
-  `templates.config`, defines the dev shell.
+  `templates.config`, defines the dev shell and the checks.
 - `docs/` -- ADRs and generated TRACKER.md.
 
 ## Development

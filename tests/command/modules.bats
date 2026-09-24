@@ -249,9 +249,9 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 		"$NIXCAGE_ROOT#packages.x86_64-linux.default.drvPath" \
 		--apply 'p: p'
 	assert_success
-	run grep -qE -- '--set NIXCAGE_CONTAINER' "$NIXCAGE_ROOT/flake.nix"
+	run grep -qE -- '--set NIXCAGE_CONTAINER' "$NIXCAGE_ROOT/package.nix"
 	assert_success
-	run grep -qE -- '--set NIXCAGE_PROFILE' "$NIXCAGE_ROOT/flake.nix"
+	run grep -qE -- '--set NIXCAGE_PROFILE' "$NIXCAGE_ROOT/package.nix"
 	assert_success
 }
 
@@ -271,7 +271,7 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 @test "the CLI carries the git it reads an identity with" {
 	run nix eval --json "$NIXCAGE_ROOT#packages.x86_64-linux.default.drvPath"
 	assert_success
-	run bash -c "sed -n '/runtimeDeps = with pkgs/,/];/p' '$NIXCAGE_ROOT/flake.nix' | grep -qx '            git'"
+	run bash -c "sed -n '/runtimeDeps = with pkgs/,/];/p' '$NIXCAGE_ROOT/package.nix' | grep -qxE '[[:space:]]+git'"
 	assert_success
 }
 
