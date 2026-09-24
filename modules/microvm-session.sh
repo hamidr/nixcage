@@ -220,6 +220,22 @@ nixcage_microvm_env_write() {
 	[ $# -eq 0 ] || printf '%s\0' "$@" >"$file"
 }
 
+## nixcage_microvm_exec_path_word <profile> [--setenv=K=V...]
+## The PATH an exec gets when the session was asked for a prefix: the
+## session puts NIXCAGE_PATH_PREFIX on the front of PATH as it starts
+## (dev-shell.sh), and an exec starts none of it. Printed after the asked
+## words so it is the PATH env -i ends with; nothing when none was asked.
+nixcage_microvm_exec_path_word() {
+	local profile="$1" word prefix=""
+	shift
+	for word in "$@"; do
+		case "$word" in
+		--setenv=NIXCAGE_PATH_PREFIX=*) prefix="${word#--setenv=NIXCAGE_PATH_PREFIX=}" ;;
+		esac
+	done
+	[ -z "$prefix" ] || printf -- '--setenv=PATH=%s:%s/bin\n' "$prefix" "$profile"
+}
+
 ## The words back, NUL-terminated, or nothing.
 nixcage_microvm_env_read() {
 	[ -f "$1" ] || return 0

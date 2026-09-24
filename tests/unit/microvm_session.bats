@@ -281,3 +281,22 @@ EOF2
 	assert_failure
 	assert_output --partial "did not answer within 3"
 }
+
+# A session asked with --setenv NIXCAGE_PATH_PREFIX has it put on the front of
+# PATH as it starts (ADR-011), and an nspawn exec inherits that PATH from the
+# leader. A microvm exec starts nothing of the session, so it put the prefix
+# in the environment and left PATH without it: a hand entering a running
+# role found none of the role's tools (found 2026-09-24 in fabriek).
+
+@test "an exec asked with a path prefix has it on the front of PATH" {
+	run nixcage_microvm_exec_path_word /nix/store/p-profile \
+		--setenv=FOO=bar --setenv=NIXCAGE_PATH_PREFIX=/nix/store/r-role/bin
+	assert_success
+	assert_output "--setenv=PATH=/nix/store/r-role/bin:/nix/store/p-profile/bin"
+}
+
+@test "an exec asked with no path prefix says nothing about PATH" {
+	run nixcage_microvm_exec_path_word /nix/store/p-profile --setenv=FOO=bar
+	assert_success
+	assert_output ""
+}

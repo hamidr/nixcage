@@ -1060,6 +1060,9 @@ let
         local -a asked=()
         mapfile -d "" -t asked < <(nixcage_microvm_env_read "$STATE_DIR/containers/$name/session-env")
         env_words+=(''${asked[@]+"''${asked[@]}"})
+        while IFS= read -r word; do
+          env_words+=("$word")
+        done < <(nixcage_microvm_exec_path_word "$PROFILE" ''${asked[@]+"''${asked[@]}"})
         local -a probe=()
         while IFS= read -r word; do
           probe+=("$word")
