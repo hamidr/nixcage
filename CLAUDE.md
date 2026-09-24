@@ -20,7 +20,9 @@ nixcage runs cages; it has no opinion about what is built on them. What a
 dependant may use is four exported primitives and nothing else (ADR-009):
 `nixcage-container enter` with the flags that parameterise a session,
 `nixcage-container uid <principal>`, `nixcage-container storage ensure`, and
-`nixcage exec` to reach the machine the cages are on. cageworks, which runs a
+`nixcage exec` to reach the machine the cages are on; and the verbs over a
+cage those create, `status`, `netns`, `stop`, `exec` (ADR-012), `list`
+(ADR-017) and `rm`, which fabriek uses as it does the four. cageworks, which runs a
 factory of roles over one repository, is built entirely on those. Architecture:
 `docs/ADR-002-shared-vm-project-containers.md`,
 `docs/ADR-003-native-containers-on-linux.md` and

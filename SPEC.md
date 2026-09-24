@@ -129,7 +129,7 @@ machines (the nixos-rebuild hostname convention). A starter is scaffolded with
 | `nixcage.substrate.default` | `nspawn` or `microvm` | `nspawn` | Host module only: what a cage runs on when neither declaration, record nor flag says |
 | `nixcage.cages.<path>.substrate` | `nspawn` or `microvm` | -- | Host module only: fixes a cage's substrate by project path, over its record and the flag |
 | `nixcage.cages.<path>.binds` | list of str | `[ ]` | Host module only: paths this cage always has, `SRC:DST` or `SRC:DST:ro`, added to whatever the session asks for; two binds on one destination are refused (ADR-025) |
-| `nixcage.bounds` | `{ memory; cpus; }` | `null` | What a cage may use: `MemoryMax=`/`CPUQuota=` on nspawn, the guest's own RAM and vCPUs on a microVM (ADR-022) |
+| `nixcage.bounds` | `{ memory; cpus; }` | `null` | What a cage may use: `MemoryMax=`/`CPUQuota=` on nspawn, where memory bounds RAM and swap stays unbounded (ADR-012), the guest's own RAM and vCPUs on a microVM (ADR-022) |
 | `nixcage.cages.<path>.bounds` | `{ memory; cpus; }` | `null` | The same for one cage, over the default and under the session's `--memory`/`--cpus` |
 | `nixcage.git.userName`, `.userEmail`, `.signing.enable` | str, str, bool | `""`, `""`, `true` | The identity a session commits as, rendered to `/etc/nixcage/gitconfig`; signing goes through the forwarded agent (ADR-008) |
 | `nixcage.principalUidRange` | `{ base; size; }` | `{ 700000; 64; }` | The block `nixcage-container uid` allocates from, monotonically, never reissuing (ADR-004, ADR-010) |

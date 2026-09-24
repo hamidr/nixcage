@@ -1,9 +1,9 @@
 ---
 id: ADR-012
 title: A cage has a scope, and nixcage answers for it
-status: proposed
+status: implemented
 date: 2026-09-14
-status_date: 2026-09-14
+status_date: 2026-09-24
 summary: status, netns and stop for a running cage from the scope nspawn gives it; memory and cpu bounds set on it at enter
 depends_on: [ADR-009, ADR-011]
 supersedes: []
@@ -53,7 +53,10 @@ cgroup, and accepts limits. What is missing is nixcage saying so.
 
 **2. Two options on `enter`, set as properties of that scope.**
 `--memory <size>` becomes `--property=MemoryMax=<size>`, `--cpus <n>`
-becomes `--property=CPUQuota=<n*100>%`. A size is digits with an optional
+becomes `--property=CPUQuota=<n*100>%`. `MemoryMax=` bounds the RAM a cage
+holds and not its swap: on a host with swap a cage past its bound swaps
+rather than being killed, and that is the bound (decided 2026-09-24; a
+kill would turn a JVM that swaps briefly into a cage that dies). A size is digits with an optional
 `K`, `M`, `G` or `T`; cpus is a positive integer. Absent, the cage is
 bounded as before, by the machine.
 
@@ -111,6 +114,20 @@ proc tree: a running cage's leader and namespace path, a stopped cage, a
 name that is no cage, and the words `stop` runs. `enter_args.bats` gains
 the two options, their properties, and the refusals for a size that is not
 one and a cpu count that is not one. What needs a machine is one session
-started with `--memory 256M` running a process that takes more, seen
-killed, and `status`, `netns` and `stop` asked of it; recorded here when
-run.
+started with `--memory 256M` running a process that takes more, held to
+256M of RAM, and `status`, `netns` and `stop` asked of it.
+
+Run 2026-09-24 on a NixOS host (systemd 261, 68.9G swap), nixcage 5.1.5:
+
+```
+nixcage enter --memory 256M -- bash -c 'x=$(head -c 400M /dev/zero | tr "\0" a); sleep 20'
+# scope while it held the 400M:
+memory.max=268435456  memory.current=268398592
+memory.swap.max=max   memory.swap.current=420065280
+```
+
+RAM held at the bound, the rest in swap, the process not killed: the
+bound as decided in point 2. `status` printed
+`running 1600412 machine.slice/nc-scope-gate-c78553d2.scope`, `netns`
+printed `/proc/1600412/ns/net`, and `stop` ended the cage in under a
+second with `status` then `stopped`.

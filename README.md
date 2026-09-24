@@ -157,7 +157,8 @@ nixcage = {
   # substrate.default = "nspawn";
   ## What a cage may use, and what one cage may use. A session's --memory
   ## and --cpus outrank both. Unset leaves the substrate's own default:
-  ## unbounded on nspawn, 2 GiB and one vCPU on a microVM. A host that
+  ## unbounded on nspawn, 2 GiB and one vCPU on a microVM. On nspawn the
+  ## memory bounds RAM: past it a cage swaps rather than being killed. A host that
   ## declared nothing at all gets half this machine instead.
   # bounds = { memory = "4G"; cpus = 4; };
   # cages."/home/me/Src/untrusted".bounds = { memory = "8G"; cpus = 8; };

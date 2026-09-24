@@ -1,9 +1,9 @@
 ---
 id: ADR-013
 title: nixcage makes a cage's veth and names it, so a cage name is not bounded by an interface name
-status: proposed
+status: implemented
 date: 2026-09-14
-status_date: 2026-09-14
+status_date: 2026-09-24
 summary: for a bridge placement nixcage makes the veth pair, names the host end from a hash, and tells the caller that name
 depends_on: [ADR-011, ADR-012]
 supersedes: []
@@ -85,4 +85,21 @@ short and a long cage name, both fifteen characters or fewer and stable;
 the `ip` words to make a pair on a bridge and to delete it; the nspawn
 argument. What needs a machine is a cage placed on a bridge reaching the
 bridge's address and nothing else, as ADR-011 measured, with a
-twenty-character name; recorded here when run.
+twenty-character name.
+
+Run 2026-09-24 on a NixOS host (systemd 261), a cage named
+`nc-veth-proof-twenty` placed with `--network fb-1:10.77.1.200/24` on an
+idle fabriek bridge whose host answers on 10.77.1.1:8118:
+
+```
+host end nc-f954ea64bf38 (15 characters), cage end host0
+reached 10.77.1.1:8118    the bridge's address
+unreachable 10.77.0.1:8118  another bridge's address on the same host
+unreachable 1.1.1.1:443     off the host
+```
+
+The same run found enters failing 2 in 12 with "Network interface
+cc-f954ea64bf38 is not initialized yet": nspawn refuses an interface udev
+has not finished with. `nixcage_veth_make` now waits for udev on the cage
+end (`udevadm wait --initialized=yes`), and 20 enters in a row then
+succeeded.
