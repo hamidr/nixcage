@@ -80,7 +80,7 @@
             // {
               default = pkgs.stdenv.mkDerivation {
                 pname = "nixcage";
-                version = "5.1.0";
+                version = "5.1.1";
 
                 src = ./.;
 
@@ -362,7 +362,7 @@
           in
           final.stdenv.mkDerivation {
             pname = "nixcage";
-            version = "5.1.0";
+            version = "5.1.1";
 
             src = ./.;
 
