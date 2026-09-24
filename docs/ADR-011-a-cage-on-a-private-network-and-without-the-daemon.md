@@ -112,5 +112,6 @@ checks passed and none failed. A hand session joined the running actor's
 namespace and saw host0 and nothing else; each role held one address of
 its own; a cage reached the proxy and not a peer, not another interface
 of the host and not off the host; a forged source address was dropped at
-the bridge; the roles ran with no daemon on their closures. One scenario
+the bridge. A role session asked separately had no daemon socket and saw
+253 store paths of the host's 119365, its closure. One scenario
 was gated on operator configuration (a substrate floor), not on nixcage.
