@@ -5,7 +5,7 @@ status: proposed
 date: 2026-09-25
 status_date: 2026-09-25
 summary: nixcage.machines.<name> boots a NixOS guest running the host module; enter and every cage verb take --machine
-depends_on: [ADR-009, ADR-010, ADR-012, ADR-013, ADR-015, ADR-017, ADR-018, ADR-019]
+depends_on: [ADR-009, ADR-010, ADR-012, ADR-013, ADR-014, ADR-015, ADR-017, ADR-018, ADR-019]
 supersedes: []
 superseded_by: []
 ---
@@ -30,53 +30,95 @@ ssh over vsock as the guest's root are all in the tree. What is missing is a
 guest that is a nixcage host instead of a one-shot session, and a way to
 name it from the host.
 
+The boundary is only as good as what the host does with what the guest
+hands it. A guest that is a whole host has root, so everything below
+assumes the guest may be hostile and asks what the host parses, mounts or
+trusts from it.
+
 ## Decision
 
 **1. A machine is declared on the host.** `nixcage.machines.<name>` in the
-host module declares a long-lived microVM: `memory`, `cpus`, `disk` (a zvol
-under `storage.dataset` where a pool exists, else a raw image under the
-state directory), `principalUidRange`, `placement` (a host bridge and the
-list of addresses the machine may speak as), `shares` (host paths bound at
-the same path, read-only unless marked), and `modules`, NixOS modules the
-guest also imports. The name passes the check a cage's name does.
+host module declares a long-lived microVM: `memory`, `cpus`, `diskSize`,
+`uidSlice` (a host range, point 5), `placement` (a host bridge and the list
+of addresses the machine may speak as), `shares` (host paths bound at the
+same path, read-only unless marked writable), and `modules`, NixOS modules
+the guest also imports. The name passes the check a cage's name does.
 
 **2. The guest is a nixcage host.** It is built by the host module from the
 host's own pkgs, as ADR-019's guest is, and imports `nixosModules.host`. It
-boots with systemd as PID 1, runs as root, keeps its state on its disk, and
-sees the host's store as the read-only share ADR-019 uses. It has no nix
-daemon: every cage in it runs `--no-nix-daemon` (ADR-014), with profiles
-built on the host. `--substrate microvm` is refused inside a machine, since
-nothing nests.
+boots with systemd as PID 1, runs as root, and sees the host's store as the
+read-only share ADR-019 uses. It has no nix daemon: every cage in it runs
+`--no-nix-daemon` (ADR-014), with profiles built on the host.
+`--substrate microvm` is refused inside a machine, since nothing nests.
 
-**3. A machine has a lifecycle verb.** `nixcage-container machine
-up|down|status <name>` starts, stops and reports the host unit
-`nixcage-machine-<name>.service`, which runs vmspawn. `up` returns once the
-guest's `nixcage-container` answers over vsock, bounded by the timeout
-`nixcage_microvm_await` already takes. `down` stops every cage in the
-machine and then the guest; its disk and uid slice are kept.
+**3. The guest's disk is a file, and the host never reads it.** The disk is
+a raw image under the host's state directory, on its own dataset with a
+quota where a pool exists, opened only by qemu. It is neither a zvol nor a
+loop device, so no block device appears on the host for udev, blkid or
+`zpool import` to probe, and no filesystem the guest wrote is parsed by the
+host's kernel. The guest formats it ext4 and runs `storage ensure` in
+directory mode, so a quota asked inside a machine is refused rather than
+ignored; the machine's `diskSize` bounds its cages together.
 
-**4. Every verb over a cage takes `--machine <name>`.** `enter`, `status`,
+**4. A machine has a lifecycle verb, and the host alone decides it.**
+`nixcage-container machine up|down|status <name>` starts, stops and reports
+the host unit `nixcage-machine-<name>.service`, which runs vmspawn. `up`
+returns once the guest's `nixcage-container` answers over vsock, bounded by
+the timeout `nixcage_microvm_await` already takes. `down` asks the guest to
+stop its cages, waits that same bound, then stops the unit whatever the
+guest said; the tap, its pins and the share daemons are removed by the host
+in the unit's stop, never by the guest. The disk is kept.
+
+**5. What crosses a share is mapped, and nothing the guest names is
+privileged on the host.** vmspawn's `--bind` translates no ids, so the
+machine's shares are served by virtiofsd instances nixcage starts itself
+under the machine's unit, each with `--sandbox namespace`, handed to qemu
+as `vhost-user-fs` devices through the extra words ADR-019 already passes.
+Every share is `--readonly` unless declared writable. A writable share is
+served with `--translate-uid map:0:<slice base>:<slice size>` and
+`forbid-guest` for every guest uid beyond the slice, and the same for gids,
+so guest root is an unprivileged host uid and a setuid-root file cannot be
+made. The host mounts nothing the guest wrote; a writable share's host
+directory is on a dataset or mount with `nosuid,nodev`, asserted at
+evaluation. The slices of all machines are disjoint from each other and
+from the host's `principalUidRange`, asserted at evaluation, so a file
+under a share is attributable to one machine by its owner. Nothing else is
+claimed for the slice: the host does not see a guest's processes, only
+qemu's.
+
+**6. A cage inside a machine sees its closure, computed by the host.** The
+guest has the store without its database, which the host keeps writing,
+and a read-only store open of a database under writes is documented by Nix
+as unsafe. So `enter --machine` computes the closure on the host with the
+query ADR-014 uses, from the roots it parses with the same parse, and
+hands the guest the path list; the guest binds exactly those paths.
+
+**7. Every verb over a cage takes `--machine <name>`.** `enter`, `status`,
 `stop`, `exec`, `list`, `rm`, `uid` and `storage ensure` with `--machine`
 send their argv as argv to the guest's `nixcage-container` over ssh on
-vsock as root, with the key vmspawn made, and return its status and output
-unchanged. `netns` is refused with `--machine`: a namespace path inside a
-guest names nothing on the host. The caller's agent socket is forwarded as
-`exec` forwards it. Without `--machine` nothing changes.
+vsock as root, with the key vmspawn made, and return its status and output.
+The host opens every connection; the guest has no channel to the host
+beyond its tap and its shares. `netns` is refused with `--machine`: a
+namespace path inside a guest names nothing on the host. The caller's agent
+socket is forwarded as `exec` forwards it, which a caller is told gives the
+guest the use of that agent while the session runs. Without `--machine`
+nothing changes.
 
-**5. A machine's uids are a slice of the host's.** Each machine's
-`principalUidRange` is disjoint from the host's and from every other
-machine's, asserted at evaluation. A number the guest allocates is
-therefore a number no other machine or host cage holds, so a file a share
-carries back and a process the host sees are attributable without a map.
+**8. What a machine answers is data from outside the boundary.** Output of
+a forwarded verb is passed to the caller byte for byte and is never
+evaluated or used by nixcage on the host; `list --json` with `--machine` is
+validated as JSON before it is printed. A uid a machine's `uid` verb
+returns is the guest's number, meaningful inside the guest only. A caller
+treats all of it as it would a remote's.
 
-**6. A machine speaks only as its addresses.** Its tap is made as ADR-019's
-is, on the host bridge its placement names, pinned to every address in
-its list and isolated from the bridge's other ports. Inside, the guest's
-`nixcage.bridges.<b>` gains `uplink`, which enslaves the guest's NIC, so a
-cage placed on it with `--network <b>:<addr>` reaches the host bridge with
-its own address. The guest pins each cage's veth to its address (ADR-015);
-the host's pin bounds the machine to its list. A cage's address is what a
-peer on the host bridge sees, unchanged by the hop.
+**9. A machine speaks only as its addresses.** Its tap is made as
+ADR-019's is, on the host bridge its placement names, pinned to every
+address in its list and isolated from the bridge's other ports. Inside, the
+guest's `nixcage.bridges.<b>` gains `uplink`, which enslaves the guest's
+NIC, so a cage placed on it with `--network <b>:<addr>` reaches the host
+bridge with its own address. The guest pins each cage's veth to its address
+(ADR-015); the host's pin bounds the machine to its list whatever the guest
+does. A cage's address is what a peer on the host bridge sees.
 
 ## Consequences
 
@@ -84,24 +126,31 @@ The exported interface (ADR-009) grows by one flag and one verb. A
 dependant that never says `--machine` sees nothing new. nixcage still
 knows nothing of what a machine is for.
 
+The host's attack surface toward a machine is KVM and qemu's devices, the
+virtiofsd instances (sandboxed, read-only unless declared, ids mapped), the
+tap under the bridge-family table, and the ssh client reading the guest's
+output. The raw disk and the ext4 in it are qemu's to read and the guest's
+to parse.
+
 A machine reserves its memory and pays a boot at `up`, not per session;
-cages inside it start at nspawn speed. A panic or an OOM in a machine
-ends every cage in it and nothing outside it.
+cages inside start at nspawn speed. A panic or an OOM in a machine ends
+every cage in it and nothing outside it.
 
-The guest's disk is a block device, not a share: nothing the cages write is
-parsed by the host's filesystem code, which is the boundary. A dependant
-that must read a cage's output on the host reads it over the network or
-through a declared share, and says which.
+Inside a machine a cage has no quota of its own and ZFS's datasets are not
+there. A dependant that needs one cage bounded apart from its peers puts
+it in a machine of its own.
 
-Every verb gains a transport hop over vsock. Its cost is measured, not
-claimed.
+Every verb gains a vsock hop, and `enter` a closure query on the host.
+Their cost is measured, not claimed.
 
 A machine's lifecycle interleaves with `enter --machine`, `down`, a host
-stop of the unit and a guest crash, across the vsock boundary, which is the
-Formal Modeling Gate. `models/machine.qnt` models absent, booting, ready,
-stopping and failed, with invariants: no forward reaches a machine that is
-not ready, `down` leaves no cage running and no pin behind, and `up` twice
-is `up` once. It runs before implementation.
+stop of the unit, and a guest that crashes, hangs or lies, across the vsock
+boundary: the Formal Modeling Gate. `models/machine.qnt` models absent,
+booting, ready, stopping and failed, with a guest that may stop answering
+at any step, and invariants: no forward reaches a machine that is not
+ready; after `down`, whatever the guest did, no tap, pin or share daemon of
+the machine remains; `up` twice is `up` once. It runs before
+implementation.
 
 macOS is not a host for machines: its cages already share one VM, and it
 cannot nest another.
@@ -115,16 +164,22 @@ steps by hand on `pc`, transcripts under `/tmp/nixcage-machine/`:
 - Boot to ready: `time nixcage-container machine up m1`.
 - Idle cost: `systemctl show -p MemoryCurrent nixcage-machine-m1.service`
   after `up`, and again with one idle cage inside.
-- Forward cost: `time nixcage-container enter --machine m1 c1 /srv/p -- true`
+- Forward cost: `time nixcage-container enter --machine m1 c1 /srv/p true`
   against the same enter without `--machine`, ten runs each.
-- The kernel: `nixcage-container exec --machine m1 c1 -- uname -r` differs
+- The kernel: `nixcage-container exec --machine m1 c1 uname -r` differs
   from the host's `uname -r`.
-- The uids: `stat -c %u` on a file a cage wrote to a share falls inside
-  `m1`'s slice and outside every other range.
-- The pin: from inside `m1`, a frame sourced from an address not in `m1`'s
-  list is dropped at the host tap (`nft list set bridge nixcage
-  placements` names each listed address and no other).
+- The closure: inside a cage in `m1`, `ls /nix/store | wc -l` equals the
+  length of the host's `nix-store --query --requisites` over its roots.
+- The shares: as guest root, `touch` on a read-only share fails; on a
+  writable one the host's `stat -c %u` is the slice's base; `chown 0` and
+  `chmod u+s` on it leave the host file neither root-owned nor setuid.
+- The disk: `lsblk` and `zpool import` on the host list nothing new after
+  `up`.
+- The pin: from guest root in `m1`, a frame sourced from an address not in
+  `m1`'s list is dropped at the host tap; `nft list set bridge nixcage
+  placements` names each listed address and no other.
 - Two machines: a cage in `m1` does not reach a cage in `m2` on the same
   host bridge.
-- `down`: after `nixcage-container machine down m1`, no `nc-*` link and no
-  placement element of `m1` remain.
+- A hostile `down`: with the guest's sshd stopped from inside, `machine
+  down m1` returns within the bound and leaves no `nc-*` link, no placement
+  element and no virtiofsd of `m1`.
