@@ -97,6 +97,35 @@ virtiofs is too slow for. This is for a tool you trust less than the rest,
 or one that needs a kernel of its own (eBPF, mount namespaces, modules).
 See `docs/ADR-019-a-cage-may-run-in-a-microvm-behind-the-same-enter.md`.
 
+### A machine that holds cages
+
+A microVM per cage is a kernel boundary around one session. A machine is
+one around a group: `nixcage.machines.<name>` declares a long-lived
+microVM that is itself a nixcage host, and every cage entered with
+`--machine <name>` runs inside it as an ordinary nspawn cage. An escape
+from any of them lands in the machine, not on this host and not in another
+machine. Its disk is a file only qemu opens; what it may see of this host
+is the store, read-only, and the directories you share, with anything it
+writes there owned by the uid slice you gave it; on a bridge it speaks
+only as the addresses you listed.
+
+```nix
+nixcage.machines.work = {
+  memory = "4G";
+  diskSize = "20G";
+  uidSlice.base = 900000;
+  shares = [ { path = "/srv/checkout"; } ];
+};
+```
+
+```bash
+sudo nixcage-container machine up work
+sudo nixcage-container enter --machine work --no-agent c1 /srv/checkout -- make test
+sudo nixcage-container machine down work
+```
+
+See `docs/ADR-026-a-machine-is-a-microvm-that-is-itself-a-nixcage-host.md`.
+
 ## Install
 
 ```bash
@@ -249,7 +278,8 @@ roots, so a source outside them is not there to bind.
 | `nixcage-container status <name>`, `netns <name>`, `stop <name>` | A running cage from its scope: its leader and cgroup, the namespace path `enter --network ns:` takes (`none` for a microVM, which has no namespace on the host), and an end to it (ADR-012) |
 | `nixcage-container list [--json]` | Every cage entered and not removed; with `--json`, one object per cage with what enter was given (uid, subject, placement, roots) and, while it runs, its scope and leader (ADR-017) |
 | `nixcage-container exec [--subject <name>] <name> [-- cmd]` | A command inside a running cage: its leader's namespaces, its HOME and PATH, as cage root or as a declared subject (ADR-012); over vsock ssh into a microVM cage, as the session's uid with the session's environment (ADR-019) |
-| `nixcage exec [--tty] [--agent] -- <cmd>` | A way to reach the other three from your own machine |
+| `nixcage exec [--tty] [--agent] [--machine <name>] -- <cmd>` | A way to reach the other three from your own machine; with `--machine`, the root of a machine (ADR-026) |
+| `nixcage-container machine up\|down\|status <name>`, and `--machine <name>` first on any verb above but `netns` | A machine's lifecycle, and the verb run by the machine's own nixcage-container (ADR-026) |
 
 You name paths and principals; nixcage names datasets and numbers. Set
 `nixcage.principalUidRange` to allow allocation at all, and

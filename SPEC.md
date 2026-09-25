@@ -1,6 +1,6 @@
 # nixcage Specification
 
-Version: 5.1.6
+Version: 5.2.0
 
 ## 1. Purpose
 
@@ -268,6 +268,27 @@ workspace roots, so a source outside them is not there to bind.
   `list` read the scope as for nspawn (registered under the name escaped as
   a unit name); `netns` answers `none`; `exec` is ssh over vsock as the
   session's uid with the session's environment.
+- A machine (Linux, ADR-026): `nixcage.machines.<name>` declares a
+  long-lived microVM whose guest imports the host module, so it is a
+  nixcage host itself: `memory`, `cpus`, `diskSize` (a raw image under the
+  state directory that only qemu opens, ext4 inside at `/var/lib/nixcage`),
+  `uidSlice` (disjoint from every other slice and from
+  `principalUidRange`, asserted at evaluation), `placement` (a host bridge
+  and the addresses the machine may speak as; its tap is pinned to them and
+  isolated), `shares` (host directories at the same path, read-only unless
+  `writable`; a writable one maps guest ids onto the slice, refuses ids
+  beyond it, and must be on a `nosuid,nodev` mount) and `modules`.
+  `nixcage-container machine up|down|status <name>` starts, stops and
+  reports its unit `nixcage-machine-<name>.service` (`off`, `booting`,
+  `ready`, `stopping`, `failed`); up and down hold the machine's lock
+  exclusively. `machine exec <name> cmd...`, and `nixcage exec --machine
+  <name>`, run a command as the machine's root. `enter`, `uid`, `storage`,
+  `status`, `stop`, `exec`, `list` and `rm` given `--machine <name>` as
+  their first option are run by the machine's own `nixcage-container`,
+  holding the lock shared; `enter` is handed `--no-nix-daemon` and the
+  closure the host computed (`--store-closure`), and its agent as a socket
+  forward. `netns --machine` is refused. `list --json` from a machine is
+  checked to be JSON. A host cage may not take a machine's name.
 
 Container names are `sanitized-basename-<8-char sha256 of abs path>`,
 computed on the host (`container_name_for`).
