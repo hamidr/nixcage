@@ -628,11 +628,16 @@ in
 
     ## Started by `machine up`, never at boot: a dependant decides when a
     ## machine runs. Its stop is the host's cleanup, whatever ended qemu.
+    ## A switch neither restarts nor stops one that runs, since that would
+    ## end every cage in it under its dependant (found on a host
+    ## 2026-09-25); a changed machine takes effect at its next up.
     systemd.services = lib.mapAttrs' (
       name: _:
       lib.nameValuePair "nixcage-machine-${name}" {
         description = "nixcage machine ${name}";
         after = [ "network.target" ];
+        restartIfChanged = false;
+        stopIfChanged = false;
         serviceConfig = {
           Type = "notify";
           NotifyAccess = "all";

@@ -453,3 +453,12 @@ MACHINE='{ nixcage.machines.m1 = { diskSize = "2G"; uidSlice.base = 900000; shar
 	run jq -r .host <<<"$both"
 	refute_output --partial MACHINE_GUEST
 }
+
+@test "a switch leaves a running machine alone: its dependant's up and down move it" {
+	run eval_module host "$MACHINE" '{
+	  restart = sys.config.systemd.services.nixcage-machine-m1.restartIfChanged;
+	  stop = sys.config.systemd.services.nixcage-machine-m1.stopIfChanged;
+	}'
+	assert_success
+	assert_output '{"restart":false,"stop":false}'
+}
