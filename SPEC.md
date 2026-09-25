@@ -1,6 +1,6 @@
 # nixcage Specification
 
-Version: 5.2.0
+Version: 5.2.1
 
 ## 1. Purpose
 

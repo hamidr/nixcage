@@ -32,7 +32,7 @@ let
 in
 pkgs.stdenv.mkDerivation {
   pname = "nixcage";
-  version = "5.2.0";
+  version = "5.2.1";
 
   src = ./.;
 
