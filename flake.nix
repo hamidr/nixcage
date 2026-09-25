@@ -534,6 +534,7 @@
               };
 
               testScript = ''
+                import time
                 start_all()
                 host.wait_for_unit("multi-user.target")
                 boot = "cat /proc/sys/kernel/random/boot_id"
@@ -666,6 +667,22 @@
                     host.succeed(container("machine up m1"))
                     host.succeed(container("machine exec m1 test -e /var/lib/nixcage/kept"))
                     host.succeed(container("machine down m1"))
+
+                with subtest("down does not wait on a guest that stopped answering, and leaves nothing"):
+                    host.succeed(container("machine up m1"))
+                    # The guest's sshd over vsock is what every answer comes
+                    # through; with it gone the guest says nothing at all.
+                    host.execute(container("machine exec m1 systemctl stop sshd-vsock.socket 'sshd-vsock@*'"))
+                    host.succeed(container("machine status m1") + " | grep -qx booting")
+                    t0 = time.monotonic()
+                    host.succeed(container("machine down m1"))
+                    took = time.monotonic() - t0
+                    assert took < 60, took
+                    host.succeed(container("machine status m1") + " | grep -qx off")
+                    m1_tap = host.succeed("printf %s m1 | sha256sum | cut -c1-12").strip()
+                    host.fail("ip link show nc-" + m1_tap)
+                    host.fail("${pkgs.nftables}/bin/nft list set bridge nixcage placements | grep -q 10.66.0.11")
+                    host.fail("pgrep -f 'virtiofsd --shared-dir=/srv/r'")
 
                 with subtest("the host holds no block device for the disk"):
                     host.fail("lsblk -rno NAME | grep -q '^loop'")

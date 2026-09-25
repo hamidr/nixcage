@@ -201,3 +201,42 @@ steps by hand on `pc`, transcripts under `/tmp/nixcage-machine/`:
 - A hostile `down`: with the guest's sshd stopped from inside, `machine
   down m1` returns within the bound and leaves no `nc-*` link, no placement
   element and no virtiofsd of `m1`.
+
+## Verification
+
+Implemented 2026-09-25 in four commits from `134b0ee` to the one that
+records this, after the model (`985ddbb`). `nix build -L
+.#hostChecks.machine`, a NixOS test booting two machines under nested KVM,
+passes seventeen subtests, one per claim of the measurement plan but the
+cost, which the plan measures on `pc`:
+
+- a machine comes up ready and is a kernel of its own; a cage entered with
+  `--machine` runs on the machine's kernel, not the host's (told apart by
+  uptime, since nspawn gives a container a boot id of its own), and its
+  record is the machine's, not the host's;
+- the cage sees exactly the closure the host computed: `ls /nix/store`
+  inside counts what `nix-store -qR` over `STORE_BASE` counts;
+- a host cage cannot take a machine's name; `netns --machine` is refused;
+- a read-only share refuses writes; what guest root writes on a writable
+  one is `900000:900000` here, and stays so after `chown 0` and
+  `chmod u+s`; `chown 70000` is refused;
+- the caller's agent answers inside and keeps its owner;
+- a cage reaches a host service on the bridge as its own address; an
+  address the machine was not given is dropped at the host's tap; a cage
+  in one machine gets no answer from a cage in another, which its own
+  machine reaches;
+- `list --json` from a machine is valid JSON lines, and empty when it
+  holds no cage;
+- state survives `down` and `up` on `/var/lib/nixcage`, which is ext4 on
+  `/dev/vda`; the host lists no loop device;
+- with the guest's sshd stopped from inside, the machine reads `booting`,
+  and `down` returns in 0.37 s leaving no tap, no placement element and no
+  virtiofsd.
+
+Nested, and so only an indication of the plan's numbers: `machine up`
+15 to 19 s, `enter --machine` for one command 2.1 s, a cooperative `down`
+3.7 to 4.0 s.
+
+Not yet done: the measurement plan by hand on `pc`, which needs a machine
+declared in the host's configuration.
+
