@@ -705,6 +705,16 @@
                     host.succeed("systemctl stop caller")
                     host.wait_until_succeeds(container("status --machine m1 held") + " | grep -qx stopped", timeout=30)
 
+                with subtest("a second signal while a session ends does not cut its stop short"):
+                    # A caller's own signal, to its child alone, lands just after systemd's to all.
+                    host.succeed(
+                        "systemd-run --unit=caller2 --property=KillMode=control-group "
+                        + "/run/current-system/sw/bin/nixcage-container enter --machine m1 --no-agent held2 /srv/p sleep 600"
+                    )
+                    host.wait_until_succeeds(container("status --machine m1 held2") + " | grep -q '^running'", timeout=60)
+                    host.succeed("systemctl kill --signal=TERM caller2; sleep 0.05; systemctl kill --kill-whom=main --signal=TERM caller2")
+                    host.wait_until_succeeds(container("status --machine m1 held2") + " | grep -qx stopped", timeout=30)
+
                 with subtest("many forwards in a row share one connection and all answer"):
                     accepted = container("machine exec m1 systemctl show sshd-vsock.socket -p NAccepted --value")
                     before = int(host.succeed(accepted).strip())

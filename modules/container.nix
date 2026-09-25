@@ -1355,7 +1355,10 @@ let
       ## running under nobody).
       machine_session_end() {
         local name="$1" cage="$2" ssh="$3" key address tries
-        trap - TERM INT HUP
+        ## Ignored, not reset: a caller's own signal often lands just after
+        ## systemd's, and a second TERM at the default would end this stop
+        ## before it was sent (found on a host 2026-09-25).
+        trap ''' TERM INT HUP
         if { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name" 2>/dev/null); then
           local -a words=()
           ## Run by the guest's shell, so its expansions are the guest's.
