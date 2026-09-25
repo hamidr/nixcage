@@ -111,7 +111,25 @@ let
         ./guest.nix
         ./machine-guest.nix
         ./host.nix
-        { networking.hostName = lib.mkForce name; }
+        {
+          networking.hostName = lib.mkForce name;
+          ## Each share at its host path, by the tag its position gives it;
+          ## nothing on one is setuid or a device, read-only as declared.
+          fileSystems = lib.listToAttrs (
+            lib.imap0 (
+              i: share:
+              lib.nameValuePair share.path {
+                device = "nixcage-share${toString i}";
+                fsType = "virtiofs";
+                options = [
+                  "nosuid"
+                  "nodev"
+                ]
+                ++ lib.optional (!share.writable) "ro";
+              }
+            ) m.shares
+          );
+        }
       ]
       ++ m.modules
     );
@@ -249,6 +267,32 @@ in
                   other machine's and from principalUidRange, which
                   evaluation asserts.
                 '';
+              };
+              shares = lib.mkOption {
+                type = lib.types.listOf (
+                  lib.types.submodule {
+                    options = {
+                      path = lib.mkOption {
+                        type = lib.types.str;
+                        example = "/srv/checkout";
+                        description = "A host directory, shared at the same path in the machine.";
+                      };
+                      writable = lib.mkOption {
+                        type = lib.types.bool;
+                        default = false;
+                        description = ''
+                          Whether the machine may write it. What it writes is
+                          owned here by the machine's slice, never by an id
+                          outside it, and the directory must be on a mount
+                          with nosuid and nodev, which the machine's start
+                          checks.
+                        '';
+                      };
+                    };
+                  }
+                );
+                default = [ ];
+                description = "Host directories the machine sees (ADR-026 decision 5).";
               };
               modules = lib.mkOption {
                 type = lib.types.listOf lib.types.deferredModule;
@@ -532,6 +576,15 @@ in
           UID_BASE=${toString m.uidSlice.base}
           UID_SIZE=${toString m.uidSlice.size}
           STORE_BASE=${lib.concatStringsSep " " m.guest.config.nixcage.storeBase}
+          SHARES=${
+            lib.concatMapStringsSep " " (
+              share:
+              if builtins.match "/[^:[:space:]]*" share.path == null then
+                throw "nixcage.machines.${name}.shares: ${share.path} is not an absolute path without colons or whitespace"
+              else
+                "${share.path}:${if share.writable then "rw" else "ro"}"
+            ) m.shares
+          }
         '';
       }
     ) cfg.machines;

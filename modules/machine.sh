@@ -45,6 +45,7 @@ nixcage_machine_read() {
 	fi
 	MACHINE_TOPLEVEL="" MACHINE_MEMORY="" MACHINE_CPUS="" MACHINE_DISK_SIZE=""
 	MACHINE_UID_BASE="" MACHINE_UID_SIZE="" MACHINE_STORE_BASE=""
+	MACHINE_SHARES=()
 	while IFS='=' read -r key value; do
 		case "$key" in
 		TOPLEVEL) MACHINE_TOPLEVEL="$value" ;;
@@ -54,6 +55,7 @@ nixcage_machine_read() {
 		UID_BASE) MACHINE_UID_BASE="$value" ;;
 		UID_SIZE) MACHINE_UID_SIZE="$value" ;;
 		STORE_BASE) MACHINE_STORE_BASE="$value" ;;
+		SHARES) read -ra MACHINE_SHARES <<<"$value" ;;
 		esac
 	done <"$NIXCAGE_MACHINES_DIR/$name"
 	local field
@@ -167,4 +169,43 @@ nixcage_machine_enter_words() {
 	done
 	out+=("$@")
 	printf '%s\n' "${out[@]}"
+}
+
+## nixcage_machine_share_words <path> <ro|rw> <socket> <slice base> <slice size>
+## The virtiofsd a share is served by (decision 5), one word per line,
+## started by the machine's unit rather than by vmspawn, whose --bind maps
+## no ids. Read-only unless declared writable. A writable share maps guest
+## uid and gid 0 onward onto the slice, so guest root is its base here, and
+## refuses every id beyond the slice, so no file here can be made to belong
+## to a host id the machine was not given.
+nixcage_machine_share_words() {
+	local path="$1" mode="$2" sock="$3" base="$4" size="$5"
+	printf '%s\n' virtiofsd "--shared-dir=$path" "--socket-path=$sock" --sandbox=namespace
+	if [ "$mode" != rw ]; then
+		printf '%s\n' --readonly
+		return 0
+	fi
+	local beyond=$((4294967295 - size)) kind
+	for kind in uid gid; do
+		printf -- '--translate-%s=map:0:%s:%s\n' "$kind" "$base" "$size"
+		printf -- '--translate-%s=forbid-guest:%s:%s\n' "$kind" "$size" "$beyond"
+	done
+}
+
+## nixcage_machine_share_qemu_words <index> <socket>
+## What qemu is handed for one share, on one line for vmspawn's extra
+## words: the socket as a chardev and a vhost-user-fs device tagged by the
+## share's position, which is the tag the guest mounts.
+nixcage_machine_share_qemu_words() {
+	local i="$1" sock="$2"
+	printf -- '-chardev socket,id=nixcage-share%s,path=%s -device vhost-user-fs-pci,chardev=nixcage-share%s,tag=nixcage-share%s\n' \
+		"$i" "$sock" "$i" "$i"
+}
+
+## nixcage_machine_share_mount_ok <mount options>
+## Whether the host mount a writable share lives on keeps what the guest
+## writes from meaning anything here: no setuid, no device nodes.
+nixcage_machine_share_mount_ok() {
+	local opts=",$1,"
+	[[ "$opts" == *,nosuid,* ]] && [[ "$opts" == *,nodev,* ]]
 }

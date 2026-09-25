@@ -458,7 +458,26 @@
                   cpus = 2;
                   diskSize = "2G";
                   uidSlice.base = 900000;
+                  shares = [
+                    { path = "/srv/ro"; }
+                    {
+                      path = "/srv/rw";
+                      writable = true;
+                    }
+                  ];
                 };
+                virtualisation.fileSystems."/srv/rw" = {
+                  device = "tmpfs";
+                  fsType = "tmpfs";
+                  options = [
+                    "nosuid"
+                    "nodev"
+                    "mode=0777"
+                  ];
+                };
+                systemd.tmpfiles.rules = [ "d /srv/ro 0755 root root -" ];
+                ## A person whose agent a cage in the machine is handed.
+                users.users.alice.isNormalUser = true;
                 environment.systemPackages = [ self'.packages.default ];
                 virtualisation.memorySize = 4096;
                 virtualisation.cores = 2;
@@ -511,6 +530,34 @@
 
                 with subtest("netns with --machine is refused"):
                     host.fail(container("netns --machine m1 c1"))
+
+                with subtest("a read-only share cannot be written from the machine"):
+                    host.succeed("echo hi > /srv/ro/seen")
+                    host.succeed(container("machine exec m1 grep -qx hi /srv/ro/seen"))
+                    host.fail(container("machine exec m1 touch /srv/ro/written"))
+                    host.fail("test -e /srv/ro/written")
+
+                with subtest("what guest root writes on a share is the slice's base here, never root"):
+                    host.succeed(container("machine exec m1 touch /srv/rw/f"))
+                    assert host.succeed("stat -c %u:%g /srv/rw/f").strip() == "900000:900000"
+                    host.succeed(container("machine exec m1 chown 0:0 /srv/rw/f"))
+                    assert host.succeed("stat -c %u /srv/rw/f").strip() == "900000"
+                    host.succeed(container("machine exec m1 chmod u+s /srv/rw/f"))
+                    host.fail("test \"$(stat -c %u /srv/rw/f)\" = 0")
+
+                with subtest("an id beyond the slice cannot be given to a file on a share"):
+                    host.fail(container("machine exec m1 chown 70000 /srv/rw/f"))
+                    assert host.succeed("stat -c %u /srv/rw/f").strip() == "900000"
+
+                with subtest("a cage in a machine reaches the caller's agent, which stays theirs"):
+                    host.succeed("runuser -u alice -- ssh-agent -a /tmp/alice-agent.sock")
+                    before = host.succeed("stat -c %u /tmp/alice-agent.sock").strip()
+                    # 1 is an agent with no keys; 2 is no agent reached.
+                    host.succeed(container(
+                        "enter --machine m1 --auth-sock /tmp/alice-agent.sock c1 /srv/p"
+                        + " sh -c 'ssh-add -l; test $? = 1'"
+                    ))
+                    assert host.succeed("stat -c %u /tmp/alice-agent.sock").strip() == before
 
                 with subtest("down stops the machine, and up finds its disk as it was"):
                     fs = host.succeed(container("machine exec m1 findmnt -no FSTYPE,SOURCE /var/lib/nixcage")).split()

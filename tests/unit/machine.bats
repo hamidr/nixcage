@@ -181,3 +181,56 @@ teardown() {
 	run nixcage_machine_enter_words "/nix/store/aaa-p" /run/g.sock c1 /srv/p --auth-sock /tmp/x
 	assert_line /tmp/x
 }
+
+# Shares (ADR-026 decision 5): served by virtiofsd instances nixcage starts,
+# read-only unless declared writable, and a writable one with every guest id
+# mapped into the machine's slice and every id beyond it refused.
+
+@test "a machine's shares are read as path and mode, in the order declared" {
+	echo "SHARES=/srv/ro:ro /srv/rw:rw" >>"$NIXCAGE_MACHINES_DIR/m1"
+	nixcage_machine_read m1
+	[ "${#MACHINE_SHARES[@]}" = 2 ]
+	[ "${MACHINE_SHARES[0]}" = /srv/ro:ro ]
+	[ "${MACHINE_SHARES[1]}" = /srv/rw:rw ]
+}
+
+@test "a machine that declares no share has none" {
+	nixcage_machine_read m1
+	[ "${#MACHINE_SHARES[@]}" = 0 ]
+}
+
+@test "a read-only share is served read-only, in virtiofsd's own namespace" {
+	run nixcage_machine_share_words /srv/ro ro /run/s0.sock 900000 65536
+	assert_success
+	assert_line --shared-dir=/srv/ro
+	assert_line --socket-path=/run/s0.sock
+	assert_line --sandbox=namespace
+	assert_line --readonly
+	refute_line --partial --translate-uid
+}
+
+@test "a writable share maps guest root onto the slice's base and forbids ids beyond it" {
+	run nixcage_machine_share_words /srv/rw rw /run/s1.sock 900000 65536
+	assert_success
+	refute_line --readonly
+	assert_line --translate-uid=map:0:900000:65536
+	assert_line --translate-gid=map:0:900000:65536
+	assert_line --translate-uid=forbid-guest:65536:4294901759
+	assert_line --translate-gid=forbid-guest:65536:4294901759
+}
+
+@test "a share reaches qemu as a vhost-user-fs device tagged by its position" {
+	run nixcage_machine_share_qemu_words 1 /run/s1.sock
+	assert_output "-chardev socket,id=nixcage-share1,path=/run/s1.sock -device vhost-user-fs-pci,chardev=nixcage-share1,tag=nixcage-share1"
+}
+
+@test "a writable share's host mount must be nosuid and nodev" {
+	run nixcage_machine_share_mount_ok rw,nosuid,nodev,relatime
+	assert_success
+	run nixcage_machine_share_mount_ok rw,nodev,relatime
+	assert_failure
+	run nixcage_machine_share_mount_ok rw,nosuid
+	assert_failure
+	run nixcage_machine_share_mount_ok rw,nosuidx,nodevy
+	assert_failure
+}

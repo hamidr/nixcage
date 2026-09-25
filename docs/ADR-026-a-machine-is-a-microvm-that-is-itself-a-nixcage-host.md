@@ -52,8 +52,9 @@ read-only share ADR-019 uses. It has no nix daemon: every cage in it runs
 `--substrate microvm` is refused inside a machine, since nothing nests.
 
 **3. The guest's disk is a file, and the host never reads it.** The disk is
-a raw image under the host's state directory, on its own dataset with a
-quota where a pool exists, opened only by qemu. It is neither a zvol nor a
+a raw image under the host's state directory, on its own dataset where a
+pool exists, opened only by qemu; its size is fixed when it is made and is
+the bound. It is neither a zvol nor a
 loop device, so no block device appears on the host for udev, blkid or
 `zpool import` to probe, and no filesystem the guest wrote is parsed by the
 host's kernel. The guest formats it ext4 and runs `storage ensure` in
@@ -83,8 +84,8 @@ served with `--translate-uid map:0:<slice base>:<slice size>` and
 `forbid-guest` for every guest uid beyond the slice, and the same for gids,
 so guest root is an unprivileged host uid and a setuid-root file cannot be
 made. The host mounts nothing the guest wrote; a writable share's host
-directory is on a dataset or mount with `nosuid,nodev`, asserted at
-evaluation. The slices of all machines are disjoint from each other and
+directory is on a mount with `nosuid,nodev`, which the machine's start
+checks and refuses to boot without, since evaluation cannot see a mount. The slices of all machines are disjoint from each other and
 from the host's `principalUidRange`, asserted at evaluation, so a file
 under a share is attributable to one machine by its owner. Nothing else is
 claimed for the slice: the host does not see a guest's processes, only

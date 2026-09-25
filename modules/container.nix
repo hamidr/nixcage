@@ -1227,9 +1227,34 @@ let
           (umask 077 && truncate -s "$MACHINE_DISK_SIZE" "$dir/disk.img") ||
             die "could not make machine $name's disk"
         fi
+        ## Each share's virtiofsd, started here so it lives in the unit's
+        ## cgroup and goes with its stop (decision 5).
         local -a words=()
+        local i=0 share path mode sock extra=""
+        for share in ''${MACHINE_SHARES[@]+"''${MACHINE_SHARES[@]}"}; do
+          path="''${share%:*}" mode="''${share##*:}" sock="$dir/share$i.sock"
+          [ -d "$path" ] || die "machine $name's share $path is not a directory"
+          if [ "$mode" = rw ]; then
+            nixcage_machine_share_mount_ok "$(findmnt -no OPTIONS --target "$path")" ||
+              die "machine $name's writable share $path is on a mount without nosuid and nodev"
+          fi
+          rm -f "$sock"
+          mapfile -t words < <(nixcage_machine_share_words "$path" "$mode" "$sock" \
+            "$MACHINE_UID_BASE" "$MACHINE_UID_SIZE")
+          "''${words[@]}" &
+          extra+="''${extra:+ }$(nixcage_machine_share_qemu_words "$i" "$sock")"
+          i=$((i + 1))
+        done
+        local tries
+        for ((i = i - 1; i >= 0; i--)); do
+          for ((tries = 0; tries < 50; tries++)); do
+            [ -S "$dir/share$i.sock" ] && break
+            sleep 0.1
+          done
+          [ -S "$dir/share$i.sock" ] || die "machine $name's share $i did not start"
+        done
         mapfile -t words < <(nixcage_machine_vmspawn_args "$name" "$dir/root" "$MACHINE_TOPLEVEL" \
-          "$MACHINE_UID_BASE" "$MACHINE_UID_SIZE" "$MACHINE_MEMORY" "$MACHINE_CPUS" "$dir/disk.img" "")
+          "$MACHINE_UID_BASE" "$MACHINE_UID_SIZE" "$MACHINE_MEMORY" "$MACHINE_CPUS" "$dir/disk.img" "$extra")
         exec "''${words[@]}"
       }
 

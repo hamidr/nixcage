@@ -381,3 +381,48 @@ GUEST='sys.config.nixcage.microvm.guest.config'
 	new="$(jq -r .new <<<"$output" | sed -n 's/^WORKSPACE_ROOTS=//p')"
 	[ "$old" = "$new" ]
 }
+
+# A machine (ADR-026): what the host renders for it, and what it refuses.
+
+MACHINE='{ nixcage.machines.m1 = { diskSize = "2G"; uidSlice.base = 900000; shares = [ { path = "/srv/ro"; } { path = "/srv/rw"; writable = true; } ]; }; }'
+
+@test "a machine is rendered with its slice, its shares and its guest" {
+	run eval_module host "$MACHINE" 'sys.config.environment.etc."nixcage/machines/m1".text'
+	assert_success
+	assert_output --partial 'UID_BASE=900000'
+	assert_output --partial 'UID_SIZE=65536'
+	assert_output --partial 'SHARES=/srv/ro:ro /srv/rw:rw'
+	assert_output --partial 'TOPLEVEL=/nix/store/'
+}
+
+@test "a machine's guest mounts each share by its position, never setuid, read-only as declared" {
+	run eval_module host "$MACHINE" '{
+	  ro = sys.config.nixcage.machines.m1.guest.config.fileSystems."/srv/ro";
+	  rw = sys.config.nixcage.machines.m1.guest.config.fileSystems."/srv/rw";
+	}'
+	assert_success
+	[ "$(jq -r .ro.device <<<"$output")" = nixcage-share0 ]
+	[ "$(jq -c .ro.options <<<"$output")" = '["nosuid","nodev","ro"]' ]
+	[ "$(jq -c .rw.options <<<"$output")" = '["nosuid","nodev"]' ]
+}
+
+@test "two machines whose slices overlap are refused at evaluation" {
+	run eval_module host '{ nixcage.machines.m1 = { diskSize = "2G"; uidSlice.base = 900000; }; nixcage.machines.m2 = { diskSize = "2G"; uidSlice.base = 950000; }; }' \
+		'sys.config.system.build.toplevel.drvPath'
+	assert_failure
+	assert_output --partial "uid slices overlap: nixcage.machines.m1.uidSlice and nixcage.machines.m2.uidSlice"
+}
+
+@test "a machine's slice inside the principal range is refused at evaluation" {
+	run eval_module host '{ nixcage.principalUidRange = { base = 700000; size = 64; }; nixcage.machines.m1 = { diskSize = "2G"; uidSlice.base = 700010; }; }' \
+		'sys.config.system.build.toplevel.drvPath'
+	assert_failure
+	assert_output --partial "nixcage.principalUidRange"
+}
+
+@test "a share path with a colon is refused at evaluation" {
+	run eval_module host '{ nixcage.machines.m1 = { diskSize = "2G"; uidSlice.base = 900000; shares = [ { path = "/srv/a:b"; } ]; }; }' \
+		'sys.config.environment.etc."nixcage/machines/m1".text'
+	assert_failure
+	assert_output --partial "is not an absolute path without colons or whitespace"
+}
