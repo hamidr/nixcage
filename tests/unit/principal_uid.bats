@@ -260,3 +260,28 @@ teardown() {
 	run nixcage_principal_passwd builder "builder"
 	assert_failure
 }
+
+# Found on a host (2026-09-25): a machine killed while a uid was being
+# allocated left the store's lock behind on its disk, and every allocation
+# after its next boot was refused as locked. A lock dies with its holder.
+
+@test "a lock whose holder was killed does not hold the store" {
+	(
+		nixcage_principal_lock "$STORE"
+		exec sleep 60
+	) &
+	local holder=$!
+	sleep 0.5
+	kill -9 "$holder"
+	wait "$holder" 2>/dev/null || true
+	run nixcage_principal_uid "$STORE" 700000 64 builder
+	assert_success
+	assert_output 700000
+}
+
+@test "the directory an older nixcage locked with holds nothing" {
+	mkdir "$STORE.lock"
+	run nixcage_principal_uid "$STORE" 700000 64 builder
+	assert_success
+	assert_output 700000
+}

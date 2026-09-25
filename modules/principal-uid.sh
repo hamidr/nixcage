@@ -24,22 +24,25 @@ nixcage_principal_name_ok() {
 	[[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]]
 }
 
-## mkdir is the portable atomic test-and-set; the guest has flock but the test
-## suite runs on the developer's machine, which may not.
+## A lock the kernel holds for the process that took it and lets go when
+## that process ends, however it ends. mkdir was used before and outlived
+## its holder: a machine killed while allocating kept its store locked
+## across every boot after (found on a host 2026-09-25). A separate file,
+## so the directory an older nixcage left is neither needed nor in the way.
+NIXCAGE_PRINCIPAL_LOCK_FD=""
 nixcage_principal_lock() {
-	local lock="$1.lock" waited=0
-	while ! mkdir "$lock" 2>/dev/null; do
-		waited=$((waited + 1))
-		if [ "$waited" -gt 500 ]; then
-			echo "nixcage: uid store is locked: $lock" >&2
-			return 1
-		fi
-		sleep 0.01
-	done
+	exec {NIXCAGE_PRINCIPAL_LOCK_FD}>>"$1.flock" || return 1
+	if ! flock -w 5 "$NIXCAGE_PRINCIPAL_LOCK_FD"; then
+		echo "nixcage: uid store is locked: $1.flock" >&2
+		exec {NIXCAGE_PRINCIPAL_LOCK_FD}>&-
+		return 1
+	fi
 }
 
 nixcage_principal_unlock() {
-	rmdir "$1.lock" 2>/dev/null || true
+	[ -n "$NIXCAGE_PRINCIPAL_LOCK_FD" ] || return 0
+	exec {NIXCAGE_PRINCIPAL_LOCK_FD}>&-
+	NIXCAGE_PRINCIPAL_LOCK_FD=""
 }
 
 ## The size of the block an entry holds. A line from before ADR-010 has two
