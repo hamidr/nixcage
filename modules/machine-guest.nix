@@ -24,6 +24,9 @@
   ## project, so it declares no workspace roots unless a dependant does.
   nixcage.workspaceRoots = lib.mkDefault [ ];
 
+  ## Declared, so storage ensure refuses a quota the disk would make a lie.
+  nixcage.machineGuest = true;
+
   ## A machine's console is read into its unit's journal on the host, so
   ## its kernel may speak there as any host's does.
   boot.kernel.sysctl."kernel.printk" = lib.mkForce "4 4 1 7";

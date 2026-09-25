@@ -441,3 +441,15 @@ MACHINE='{ nixcage.machines.m1 = { diskSize = "2G"; uidSlice.base = 900000; shar
 	assert_output --partial 'BRIDGE=nc0'
 	assert_output --partial 'ADDRESSES=10.66.0.2 10.66.0.11'
 }
+
+@test "a machine's guest declares itself a machine, and a host does not" {
+	run eval_module host "$MACHINE" '{
+	  guest = sys.config.nixcage.machines.m1.guest.config.environment.etc."nixcage/declaration".text;
+	  host = sys.config.environment.etc."nixcage/declaration".text;
+	}'
+	assert_success
+	local both="$output"
+	jq -r .guest <<<"$both" | grep -qx 'MACHINE_GUEST=1'
+	run jq -r .host <<<"$both"
+	refute_output --partial MACHINE_GUEST
+}

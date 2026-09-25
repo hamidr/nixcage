@@ -1011,6 +1011,7 @@ let
           ## answer to give. Undeclared there is no answer, not a default.
           [ -n "''${NIXCAGE_DECLARED:-}" ] ||
             die "$(nixcage_declaration_refusal 'storage ensure' nixcage.storage.dataset)"
+          nixcage_storage_quota_refusal "''${MACHINE_GUEST:-}" "$quota" || exit 1
           nixcage_storage_ensure "$STATE_DIR" "''${STORAGE_DATASET:-}" \
             "$path" "$uid" "$quota"
           ;;

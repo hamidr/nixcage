@@ -576,6 +576,11 @@
                     ).strip())
                     assert seen == want, (seen, want)
 
+                with subtest("a quota inside a machine is refused, and storage without one is given"):
+                    host.fail(container("storage --machine m1 ensure /var/lib/nixcage/q 1000 1G"))
+                    host.succeed(container("storage --machine m1 ensure /var/lib/nixcage/q 1000"))
+                    host.succeed(container("machine exec m1 stat -c %u /var/lib/nixcage/q") + " | grep -qx 1000")
+
                 with subtest("a cage on the host cannot take a machine's name"):
                     host.succeed("mkdir -p /srv/q")
                     host.fail(container("enter --no-agent m1 /srv/q true"))

@@ -208,3 +208,19 @@ EOF
 	assert_failure
 	assert_output --partial "symlink"
 }
+
+# Inside a machine (ADR-026 decision 3) the disk bounds every cage together,
+# and a quota for one of them is refused rather than ignored.
+
+@test "a quota asked inside a machine is refused, naming the machine's disk" {
+	run nixcage_storage_quota_refusal 1 10G
+	assert_failure
+	assert_output "nixcage: a quota cannot be given inside a machine; its disk bounds every cage in it together"
+}
+
+@test "no quota inside a machine, or any quota on a host, is not refused here" {
+	run nixcage_storage_quota_refusal 1 ""
+	assert_success
+	run nixcage_storage_quota_refusal "" 10G
+	assert_success
+}

@@ -143,3 +143,16 @@ nixcage_storage_ensure() {
 	chown -h "$uid:$uid" "$path" || return 1
 	echo "$path"
 }
+
+## nixcage_storage_quota_refusal <machine guest> <quota>
+## Inside a machine (ADR-026) there is no pool, and its disk is what bounds
+## every cage in it together: a quota for one cage could only be ignored,
+## so it is refused instead. Anywhere else this refuses nothing, and a host
+## without a pool keeps ignoring a quota as it always has.
+nixcage_storage_quota_refusal() {
+	local machine="$1" quota="$2"
+	if [ -n "$machine" ] && [ -n "$quota" ]; then
+		echo "nixcage: a quota cannot be given inside a machine; its disk bounds every cage in it together" >&2
+		return 1
+	fi
+}

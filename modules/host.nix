@@ -451,6 +451,13 @@ in
       '';
     };
 
+    machineGuest = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      internal = true;
+      description = "Set by a machine's guest (ADR-026): this host is a machine, and a quota is refused.";
+    };
+
     storeBase = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       readOnly = true;
@@ -556,6 +563,7 @@ in
       ''}${lib.optionalString (cfg.git.userEmail != null) ''
         GIT_USER_EMAIL="${cfg.git.userEmail}"
       ''}GIT_SIGNING=${if cfg.git.signing.enable then "1" else ""}
+      ${lib.optionalString cfg.machineGuest "MACHINE_GUEST=1"}
     '';
 
     nixcage.storeBase = container.storeBase;

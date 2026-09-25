@@ -31,6 +31,8 @@ nixcage_declaration_reset() {
 	GIT_USER_NAME=""
 	GIT_USER_EMAIL=""
 	GIT_SIGNING=""
+	## Set in a machine's guest (ADR-026), where a quota is refused.
+	MACHINE_GUEST=""
 }
 
 ## Read the declaration a host rendered, or give the undeclared answer to it.
