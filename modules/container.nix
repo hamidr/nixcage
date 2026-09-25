@@ -512,6 +512,13 @@ let
         ## name of a machine this host declared (ADR-026).
         ! nixcage_machine_declared "$name" ||
           die "$name is a machine this host declares; a cage cannot take its name"
+        ## A running cage is refused before anything of a new session is
+        ## made: its port would be taken for a killed session's and deleted,
+        ## and the running cage left without a network (found on a host
+        ## 2026-09-25, when an executor's restart raced its old sessions).
+        case "$(nixcage_scope_status "$name" 2>/dev/null)" in
+        running*) die "$name is running" ;;
+        esac
 
         local auth_sock="$NIXCAGE_ENTER_AUTH_SOCK"
         local user="$NIXCAGE_ENTER_USER"

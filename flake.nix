@@ -127,6 +127,25 @@
                         + " --network nc0:10.66.0.99/24 a-bridged-cage-named-99 /srv/p0"
                         + " bash -c 'grep -q 10.66.0.99 /proc/net/fib_trie'"
                     )
+
+                with subtest("a second enter of a running cage is refused, and the first keeps its port"):
+                    # Found on a host (2026-09-25): an enter under the name of
+                    # a cage still running took its veth for a killed
+                    # session's, deleted it, then failed on the scope, and
+                    # the running cage was left without a network.
+                    running = "a-bridged-cage-named-98"
+                    host.succeed(
+                        "nixcage exec -- nixcage-container enter --no-agent"
+                        + f" --network nc0:10.66.0.98/24 {running} /srv/p0 sleep 300 >/dev/null 2>&1 &"
+                    )
+                    host.wait_until_succeeds(f"nixcage exec -- nixcage-container status {running} | grep -q '^running'", timeout=30)
+                    out = host.fail(
+                        "nixcage exec -- nixcage-container enter --no-agent"
+                        + f" --network nc0:10.66.0.98/24 {running} /srv/p0 true 2>&1"
+                    )
+                    assert "is running" in out, out
+                    host.succeed(f"nixcage exec -- nixcage-container exec {running} -- cat /proc/net/dev | grep -q host0")
+                    host.succeed(f"nixcage exec -- nixcage-container stop {running}")
               '';
             };
 
