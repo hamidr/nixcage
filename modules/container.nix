@@ -1348,15 +1348,24 @@ let
       }
 
       ## The cage a supervised session entered, stopped in the machine, and
-      ## the ssh it ran over ended.
+      ## the ssh it ran over ended. Over a connection of its own rather than
+      ## the machine's master, whose client for this session is being ended
+      ## at the same moment, and asked again until the cage reads stopped
+      ## (seen on a host 2026-09-25: a stop that did not take left the cage
+      ## running under nobody).
       machine_session_end() {
-        local name="$1" cage="$2" ssh="$3" key address
+        local name="$1" cage="$2" ssh="$3" key address tries
         trap - TERM INT HUP
         if { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name" 2>/dev/null); then
           local -a words=()
-          mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "$(machine_control "$name")" "" "" -- \
-            nixcage-container stop "$cage")
-          timeout "$NIXCAGE_MACHINE_TIMEOUT" "''${words[@]}" </dev/null >/dev/null 2>&1 || true
+          ## Run by the guest's shell, so its expansions are the guest's.
+          # shellcheck disable=SC2016
+          mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" none "" "" -- \
+            bash -c 'nixcage-container stop "$1" >/dev/null 2>&1; nixcage-container status "$1"' _ "$cage")
+          for tries in 1 2 3 4 5; do
+            timeout 30 "''${words[@]}" </dev/null 2>/dev/null | grep -q '^running' || break
+            sleep 1
+          done
         fi
         kill "$ssh" 2>/dev/null || true
         wait "$ssh" 2>/dev/null || true
