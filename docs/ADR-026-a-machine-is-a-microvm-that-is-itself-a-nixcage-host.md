@@ -1,7 +1,7 @@
 ---
 id: ADR-026
 title: A machine is a long-lived microVM that is itself a nixcage host, and the verbs over a cage reach into it by name
-status: proposed
+status: implemented
 date: 2026-09-25
 status_date: 2026-09-25
 summary: nixcage.machines.<name> boots a NixOS guest running the host module; enter and every cage verb take --machine
@@ -237,6 +237,28 @@ Nested, and so only an indication of the plan's numbers: `machine up`
 15 to 19 s, `enter --machine` for one command 2.1 s, a cooperative `down`
 3.7 to 4.0 s.
 
-Not yet done: the measurement plan by hand on `pc`, which needs a machine
-declared in the host's configuration.
+The measurement plan ran on `pc` on 2026-09-25 against 5.2.0, with a
+machine `probe` (2 GiB, two cores, a 4 GiB disk, slice 2000000) declared
+in the host's configuration; `/tmp/nixcage-machine/measure.sh`, transcript
+`measure.txt` beside it:
+
+- boot to ready: `machine up` 6.2, 6.5 and 6.2 s; a cooperative `down`
+  1.46 and 1.44 s;
+- idle cost: qemu resident at 460 MB with the guest reporting 243 MiB in
+  use, and no more with an idle cage inside. qemu runs in machined's
+  `machine.slice/machine-probe.scope`, not in the unit's cgroup, so the
+  unit's `MemoryCurrent` (49 MB) is vmspawn's and not the machine's: a
+  caller reading a machine's cost reads the scope;
+- forward cost: `enter --machine` running `true` 0.77 s mean over ten,
+  against 0.21 s for the same enter without the daemon on the host;
+- the kernel: the machine's and the cage's uptime 25 s beside the host's
+  320655 s;
+- the closure: 175 paths computed by the host, 175 seen in the cage;
+- the disk: ext4 on `/dev/vda` in the guest, no loop device on the host,
+  the 4 GiB image 135 MB on disk;
+- a down the guest does not answer: `booting`, then `down` in 0.18 s,
+  `off`, no tap, no qemu and no virtiofsd of the machine left.
+
+The pin and the pair of machines were run in `hostChecks.machine` rather
+than here, since `pc`'s bridges are fabriek's.
 
