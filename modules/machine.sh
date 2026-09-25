@@ -121,19 +121,39 @@ nixcage_machine_state() {
 	esac
 }
 
-## nixcage_machine_forward_words <key> <address> <tty> <agent> -- <remote argv...>
-## ssh over vsock as the guest's root, then one remote line the guest's
-## shell re-splits, every word quoted for bash. <agent>, when set, is
-## "GUEST:HOST": a socket forward from the guest's path to the caller's
-## agent, made by this host's ssh. The guest's host key is made at its boot
-## and not kept: the transport is vsock, which only this host and that
-## guest are on.
-nixcage_machine_forward_words() {
-	local key="$1" address="$2" tty="$3" agent="$4"
-	shift 4
-	[ "${1:-}" != -- ] || shift
+## The words every ssh to a machine starts with: its key and address come
+## after. The guest's host key is made at its boot and not kept: the
+## transport is vsock, which only this host and that guest are on.
+nixcage_machine_ssh_words() {
 	printf '%s\n' ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
 	nixcage_microvm_ssh_config_words
+}
+
+## nixcage_machine_master_words <key> <address> <control>
+## The one connection a machine's forwards share (found on a host
+## 2026-09-25: a connection per forward is a per-connection sshd each, and
+## a busy factory kept the guest's kernel at half its CPU). It runs nothing
+## and stays in the foreground, since a master that forked away would leave
+## the unit up starts it as, bound to the machine's unit, so it lives
+## exactly as long as the machine and no caller's session takes it with it.
+nixcage_machine_master_words() {
+	local key="$1" address="$2" control="$3"
+	nixcage_machine_ssh_words
+	printf '%s\n' -M -N -o "ControlPath=$control" -o ControlPersist=no -i "$key" "root@$address"
+}
+
+## nixcage_machine_forward_words <key> <address> <control> <tty> <agent> -- <remote argv...>
+## ssh over vsock as the guest's root through the machine's control socket
+## when its master is there, and a connection of its own when it is not;
+## then one remote line the guest's shell re-splits, every word quoted for
+## bash. <agent>, when set, is "GUEST:HOST": a socket forward from the
+## guest's path to the caller's agent, made by this host's ssh.
+nixcage_machine_forward_words() {
+	local key="$1" address="$2" control="$3" tty="$4" agent="$5"
+	shift 5
+	[ "${1:-}" != -- ] || shift
+	nixcage_machine_ssh_words
+	printf '%s\n' -o "ControlPath=$control" -o ControlMaster=no
 	[ -z "$tty" ] || printf '%s\n' -t
 	[ -z "$agent" ] || printf '%s\n' -o StreamLocalBindUnlink=yes -R "$agent"
 	printf '%s\n' -i "$key" "root@$address" --
@@ -214,4 +234,21 @@ nixcage_machine_share_qemu_words() {
 nixcage_machine_share_mount_ok() {
 	local opts=",$1,"
 	[[ "$opts" == *,nosuid,* ]] && [[ "$opts" == *,nodev,* ]]
+}
+
+## nixcage_machine_enter_name <enter args...>
+## The cage an enter names: the first word past its options, read as
+## nixcage_machine_enter_words reads them.
+nixcage_machine_enter_name() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--no-nix-daemon | --no-agent | --print-argv) shift ;;
+		--*) shift 2 || return 1 ;;
+		*)
+			printf '%s\n' "$1"
+			return 0
+			;;
+		esac
+	done
+	return 1
 }

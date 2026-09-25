@@ -673,6 +673,30 @@
                     host.succeed(container("machine exec m1 test -e /var/lib/nixcage/kept"))
                     host.succeed(container("machine down m1"))
 
+                with subtest("a cage entered with --machine ends when its caller is stopped"):
+                    # Found on a host (2026-09-25): an executor's stop ended
+                    # its ssh clients and left every cage running in the
+                    # machine, since sshd signals nothing without a tty.
+                    host.succeed(container("machine up m1"))
+                    host.succeed(
+                        "systemd-run --unit=caller --property=KillMode=control-group "
+                        + "/run/current-system/sw/bin/nixcage-container enter --machine m1 --no-agent held /srv/p sleep 600"
+                    )
+                    host.wait_until_succeeds(container("status --machine m1 held") + " | grep -q '^running'", timeout=60)
+                    host.succeed("systemctl stop caller")
+                    host.wait_until_succeeds(container("status --machine m1 held") + " | grep -qx stopped", timeout=30)
+
+                with subtest("many forwards in a row share one connection and all answer"):
+                    accepted = container("machine exec m1 systemctl show sshd-vsock.socket -p NAccepted --value")
+                    before = int(host.succeed(accepted).strip())
+                    host.succeed(
+                        "for i in $(seq 30); do " + container("machine status m1") + " | grep -qx ready || exit 1; done"
+                    )
+                    after = int(host.succeed(accepted).strip())
+                    # Thirty statuses are thirty probes: without the master,
+                    # thirty connections; through it, none.
+                    assert after - before < 5, (before, after)
+
                 with subtest("down does not wait on a guest that stopped answering, and leaves nothing"):
                     host.succeed(container("machine up m1"))
                     # The guest's sshd over vsock is what every answer comes

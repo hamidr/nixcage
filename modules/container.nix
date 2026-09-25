@@ -1164,14 +1164,40 @@ let
           die "machine $name is busy: its lock was not free within ''${NIXCAGE_MACHINE_TIMEOUT}s"
       }
 
-      ## Whether the guest's nixcage-container answers, over the key and
-      ## address machined holds for it.
+      ## The socket a machine's forwards share one connection through.
+      machine_control() {
+        mkdir -p /run/nixcage/machines
+        printf '/run/nixcage/machines/%s.ssh\n' "$1"
+      }
+
+      ## Whether the guest's shell answers and has its nixcage-container,
+      ## over the key and address machined holds for it: asked before every
+      ## forward, so it runs nothing that costs.
       machine_probe() {
         local name="$1" key address
         { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name" 2>/dev/null) || return 1
         local -a words=()
-        mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "" "" -- nixcage-container list)
+        mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "$(machine_control "$name")" "" "" -- \
+          command -v nixcage-container)
         timeout 10 "''${words[@]}" </dev/null >/dev/null 2>&1
+      }
+
+      ## The connection every forward to the machine shares, as a unit bound
+      ## to the machine's, so it ends with the machine and with nothing else.
+      ## A forward without it makes a connection of its own.
+      machine_master() {
+        local name="$1" key address unit
+        unit="nixcage-machine-$name-ssh"
+        systemctl stop "$unit" 2>/dev/null || true
+        systemctl reset-failed "$unit" 2>/dev/null || true
+        { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name" 2>/dev/null) || return 0
+        local -a words=()
+        mapfile -t words < <(nixcage_machine_master_words "$key" "$address" "$(machine_control "$name")")
+        systemd-run --quiet --collect --unit="$unit" \
+          --property=BindsTo="$(nixcage_machine_unit "$name")" \
+          --property=After="$(nixcage_machine_unit "$name")" \
+          "''${words[@]}" >/dev/null 2>&1 ||
+          echo "nixcage-container: machine $name's forwards will each make a connection of their own" >&2
       }
 
       machine_state() {
@@ -1186,7 +1212,10 @@ let
         unit="$(nixcage_machine_unit "$name")"
         machine_lock "$name" -x
         case "$(machine_state "$name")" in
-        ready) return 0 ;;
+        ready)
+          systemctl is-active --quiet "nixcage-machine-$name-ssh" || machine_master "$name"
+          return 0
+          ;;
         off | failed)
           systemctl reset-failed "$unit" 2>/dev/null || true
           systemctl start "$unit" || die "machine $name did not start: journalctl -u $unit"
@@ -1196,6 +1225,7 @@ let
           systemctl stop "$unit" || true
           die "machine $name did not answer within ''${NIXCAGE_MACHINE_TIMEOUT}s and was stopped"
         fi
+        machine_master "$name"
       }
 
       ## The guest is asked to stop its cages within the bound, and the unit
@@ -1210,7 +1240,7 @@ let
           local -a words=()
           ## Run by the guest's shell, so its expansions are the guest's.
           # shellcheck disable=SC2016
-          mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "" "" -- \
+          mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "$(machine_control "$name")" "" "" -- \
             bash -c 'for c in $(nixcage-container list); do nixcage-container stop "$c"; done')
           timeout "$NIXCAGE_MACHINE_TIMEOUT" "''${words[@]}" </dev/null >/dev/null 2>&1 || true
         fi
@@ -1277,6 +1307,7 @@ let
 
       ## argv into the guest, as its root, once the machine is ready, with
       ## the shared lock held until ssh ends.
+      MACHINE_SESSION_CAGE=""
       machine_forward() {
         local name="$1" agent="$2"
         shift 2
@@ -1287,8 +1318,42 @@ let
         { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name") || exit 1
         if [ -t 0 ] && [ -t 1 ]; then tty=1; fi
         local -a words=()
-        mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "$tty" "$agent" -- "$@")
+        mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "$(machine_control "$name")" \
+          "$tty" "$agent" -- "$@")
+        ## A session nobody's terminal holds: sshd signals nothing to the
+        ## guest when this side goes, so its cage is stopped from here when
+        ## this process is (found on a host 2026-09-25: an executor's stop
+        ## left every cage it had running). A terminal's hangup reaches the
+        ## guest by itself, and stdin stays the session's either way.
+        if [ -z "$tty" ] && [ -n "$MACHINE_SESSION_CAGE" ]; then
+          "''${words[@]}" <&0 &
+          local ssh=$!
+          ## The shared lock ends with delivery, as ssh ends its own copy
+          ## when it starts; held for the session, it would keep down out.
+          exec 9>&-
+          # shellcheck disable=SC2064
+          trap "machine_session_end '$name' '$MACHINE_SESSION_CAGE' $ssh" TERM INT HUP
+          local status=0
+          wait "$ssh" || status=$?
+          exit "$status"
+        fi
         exec "''${words[@]}"
+      }
+
+      ## The cage a supervised session entered, stopped in the machine, and
+      ## the ssh it ran over ended.
+      machine_session_end() {
+        local name="$1" cage="$2" ssh="$3" key address
+        trap - TERM INT HUP
+        if { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name" 2>/dev/null); then
+          local -a words=()
+          mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "$(machine_control "$name")" "" "" -- \
+            nixcage-container stop "$cage")
+          timeout "$NIXCAGE_MACHINE_TIMEOUT" "''${words[@]}" </dev/null >/dev/null 2>&1 || true
+        fi
+        kill "$ssh" 2>/dev/null || true
+        wait "$ssh" 2>/dev/null || true
+        exit 143
       }
 
       ## A verb over a cage with --machine: the same verb, run by the
@@ -1326,6 +1391,7 @@ let
         fi
         local -a words=()
         mapfile -t words < <(nixcage_machine_enter_words "$closure" "$guest_agent" "$@")
+        MACHINE_SESSION_CAGE="$(nixcage_machine_enter_name "$@" || true)"
         machine_forward "$name" "$agent" nixcage-container "''${words[@]}"
       }
 

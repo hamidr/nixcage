@@ -123,10 +123,10 @@ teardown() {
 	assert_output off
 }
 
-# nixcage_machine_forward_words <key> <address> <tty> <agent> -- <remote argv...>
+# nixcage_machine_forward_words <key> <address> <control> <tty> <agent> -- <remote argv...>
 
 @test "a forward is ssh over vsock as the guest's root, each word quoted for its shell" {
-	run nixcage_machine_forward_words /run/key vsock/7 "" "" -- nixcage-container list --json
+	run nixcage_machine_forward_words /run/key vsock/7 /run/nixcage/m1.ssh "" "" -- nixcage-container list --json
 	assert_success
 	assert_line ssh
 	assert_line -i
@@ -137,17 +137,17 @@ teardown() {
 }
 
 @test "a word with a space or a quote reaches the guest as one word" {
-	run nixcage_machine_forward_words /run/key vsock/7 "" "" -- echo "a b" "it's"
+	run nixcage_machine_forward_words /run/key vsock/7 /run/nixcage/m1.ssh "" "" -- echo "a b" "it's"
 	assert_line "echo a\\ b it\\'s"
 }
 
 @test "a forward from a terminal asks ssh for one" {
-	run nixcage_machine_forward_words /run/key vsock/7 1 "" -- bash
+	run nixcage_machine_forward_words /run/key vsock/7 /run/nixcage/m1.ssh 1 "" -- bash
 	assert_line -t
 }
 
 @test "an agent is carried as a remote socket forward to the path the guest is told" {
-	run nixcage_machine_forward_words /run/key vsock/7 "" "/run/nixcage/agent-1.sock:/tmp/agent.sock" -- true
+	run nixcage_machine_forward_words /run/key vsock/7 /run/nixcage/m1.ssh "" "/run/nixcage/agent-1.sock:/tmp/agent.sock" -- true
 	assert_line -R
 	assert_line /run/nixcage/agent-1.sock:/tmp/agent.sock
 }
@@ -251,4 +251,36 @@ teardown() {
 	run nixcage_machine_read m1
 	assert_failure
 	assert_output "nixcage: machine m1 is placed on nc0 with no address to speak as"
+}
+
+# One connection per machine (found on a host 2026-09-25: a connection per
+# forward, each a per-connection sshd over virtiofs, left the guest at half
+# its CPU in the kernel and some connections waiting past ten seconds).
+
+@test "a forward goes through the machine's control socket, and never becomes its master" {
+	run nixcage_machine_forward_words /run/key vsock/7 /run/nixcage/m1.ssh "" "" -- true
+	assert_line ControlPath=/run/nixcage/m1.ssh
+	assert_line ControlMaster=no
+}
+
+@test "the master is one connection that runs nothing and stays in the foreground of its unit" {
+	run nixcage_machine_master_words /run/key vsock/7 /run/nixcage/m1.ssh
+	assert_success
+	assert_line -M
+	assert_line -N
+	assert_line ControlPath=/run/nixcage/m1.ssh
+	assert_line ControlPersist=no
+	assert_line root@vsock/7
+}
+
+# nixcage_machine_enter_name <enter args...>: the cage an enter names
+
+@test "the cage an enter names is the first word past its options" {
+	run nixcage_machine_enter_name --memory 1G --no-agent --auth-sock /tmp/a c1 /srv/p sleep 1
+	assert_output c1
+}
+
+@test "an enter naming no cage names nothing" {
+	run nixcage_machine_enter_name --no-agent
+	assert_failure
 }

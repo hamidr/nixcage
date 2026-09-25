@@ -262,3 +262,27 @@ in the host's configuration; `/tmp/nixcage-machine/measure.sh`, transcript
 The pin and the pair of machines were run in `hostChecks.machine` rather
 than here, since `pc`'s bridges are fabriek's.
 
+A fabriek factory run in a machine on `pc` found three things the check had not,
+fixed in 5.2.1 and each now a subtest of `hostChecks.machine`:
+
+- Every forward made a vsock connection of its own, and `up`'s readiness
+  probe another, each a per-connection sshd started over virtiofs. With an
+  executor polling git a connection a second, the guest spent half its CPU
+  in its kernel and some connections waited past ten seconds for a
+  banner, so a machine that was ready read as not ready. `up` now starts
+  one master connection, `ssh -M` in the foreground of a transient unit
+  bound to the machine's, and every forward goes through its control
+  socket, making a connection of its own only when there is none; the
+  probe asks the guest's shell for `nixcage-container` and runs nothing.
+  Thirty statuses in a row now take fewer than five connections.
+- A forwarded `enter` outlived its caller: without a terminal sshd signals
+  nothing to the guest when the client goes, so an executor's stop left
+  every cage it had started running. An `enter --machine` without a
+  terminal now keeps its ssh as a child and, on TERM, INT or HUP, stops
+  its cage in the machine before it ends. The shared lock is let go once
+  the ssh is started, as ssh lets its own copy go, so a session holds
+  `down` out only for as long as its delivery takes.
+- A quota asked inside a machine was ignored where decision 3 said it is
+  refused; the guest now declares itself a machine and `storage ensure`
+  there refuses one.
+
