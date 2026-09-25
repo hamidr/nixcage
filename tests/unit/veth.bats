@@ -223,6 +223,23 @@ EOF
 	assert_line --index 2 --partial "ip link set $host up"
 }
 
+@test "a machine's tap is pinned to every address in its list, all before it is up" {
+	run nixcage_tap_make m1 fabriek-acme 10.77.0.2 10.77.0.10/24 10.77.0.11
+	assert_success
+	local host
+	host="$(nixcage_veth_host_name m1)"
+	run grep -n "nft add element\|ip link set $host up" "$CALLS"
+	assert_line --index 0 --partial "{ \"$host\" . 10.77.0.2 }"
+	assert_line --index 1 --partial "{ \"$host\" . 10.77.0.10 }"
+	assert_line --index 2 --partial "{ \"$host\" . 10.77.0.11 }"
+	assert_line --index 3 --partial "ip link set $host up"
+}
+
+@test "an empty address anywhere in the list refuses the tap" {
+	run nixcage_tap_make m1 fabriek-acme 10.77.0.2 ""
+	assert_failure
+}
+
 @test "a tap make without an address is refused as the pair's is" {
 	run nixcage_tap_make builder fabriek-acme ""
 	assert_failure

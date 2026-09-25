@@ -476,10 +476,60 @@
                   ];
                 };
                 systemd.tmpfiles.rules = [ "d /srv/ro 0755 root root -" ];
+                ## The host bridge both machines are placed on, and a
+                ## service on its address that a cage inside one reaches.
+                nixcage.bridges.nc0 = {
+                  address = "10.66.0.1";
+                  prefix = 24;
+                };
+                nixcage.machines.m1.placement = {
+                  bridge = "nc0";
+                  addresses = [
+                    "10.66.0.2"
+                    "10.66.0.11"
+                  ];
+                };
+                nixcage.machines.m1.modules = [
+                  {
+                    nixcage.bridges.mb = {
+                      address = "10.66.0.2";
+                      prefix = 24;
+                      uplink = "eth0";
+                    };
+                  }
+                ];
+                nixcage.machines.m2 = {
+                  memory = "1024M";
+                  diskSize = "1G";
+                  uidSlice.base = 1000000;
+                  placement = {
+                    bridge = "nc0";
+                    addresses = [
+                      "10.66.0.3"
+                      "10.66.0.21"
+                    ];
+                  };
+                  modules = [
+                    {
+                      nixcage.bridges.mb = {
+                        address = "10.66.0.3";
+                        prefix = 24;
+                        uplink = "eth0";
+                      };
+                    }
+                  ];
+                };
+                systemd.services.echo = {
+                  wantedBy = [ "multi-user.target" ];
+                  after = [ "network-online.target" ];
+                  wants = [ "network-online.target" ];
+                  serviceConfig.ExecStart = "${pkgs.socat}/bin/socat TCP-LISTEN:7000,bind=10.66.0.1,fork,reuseaddr SYSTEM:'echo ok'";
+                };
+                networking.firewall.interfaces.nc0.allowedTCPPorts = [ 7000 ];
                 ## A person whose agent a cage in the machine is handed.
                 users.users.alice.isNormalUser = true;
                 environment.systemPackages = [ self'.packages.default ];
-                virtualisation.memorySize = 4096;
+                virtualisation.memorySize = 5120;
                 virtualisation.cores = 2;
               };
 
@@ -514,6 +564,7 @@
                     assert abs(m1_up - cage_up) < 10, (cage_up, m1_up)
                     assert host_up - cage_up > 10, (cage_up, host_up)
                     host.succeed(container("list --machine m1") + " | grep -qx c1")
+                    host.succeed(container("list --machine m1 --json") + " | ${pkgs.jq}/bin/jq -e 'select(.name == \"c1\")'")
                     host.fail("test -d /var/lib/nixcage/containers/c1")
 
                 with subtest("a cage in a machine sees the closure the host computed, and no more"):
@@ -558,6 +609,52 @@
                         + " sh -c 'ssh-add -l; test $? = 1'"
                     ))
                     assert host.succeed("stat -c %u /tmp/alice-agent.sock").strip() == before
+
+                reach = "timeout 5 bash -c 'cat </dev/tcp/10.66.0.1/7000'"
+
+                with subtest("a cage in a machine reaches the host bridge as its own address"):
+                    out = host.succeed(container(
+                        "enter --machine m1 --no-agent --network mb:10.66.0.11/24 net1 /srv/p " + reach
+                    ))
+                    assert out.strip() == "ok", out
+                    host.succeed(
+                        "${pkgs.nftables}/bin/nft list set bridge nixcage placements | grep -q '10.66.0.11'"
+                    )
+
+                with subtest("an address the machine was not given is dropped at the host's tap"):
+                    host.fail(container(
+                        "enter --machine m1 --no-agent --network mb:10.66.0.12/24 net2 /srv/p " + reach
+                    ))
+
+                with subtest("a cage in one machine does not reach a cage in another"):
+                    host.succeed(container("machine up m2"))
+                    host.succeed(container("machine exec m2 mkdir -p /srv/p"))
+                    host.succeed(
+                        container("enter --machine m2 --no-agent --network mb:10.66.0.21/24 lsn /srv/p sleep 300")
+                        + " >/dev/null 2>&1 &"
+                    )
+                    host.wait_until_succeeds(
+                        container("status --machine m2 lsn") + " | grep -q '^running'", timeout=60
+                    )
+                    # A refused connection is an answer: the peer is reachable
+                    # and has nothing on the port. Its own machine gets one.
+                    probe = "bash -c 'timeout 5 bash -c \"echo >/dev/tcp/10.66.0.21/22\" 2>&1; true'"
+                    out = host.succeed(container("machine exec m2 " + probe))
+                    assert "Connection refused" in out, out
+                    out = host.succeed(container(
+                        "enter --machine m1 --no-agent --network mb:10.66.0.11/24 net1 /srv/p " + probe
+                    ))
+                    assert "Connection refused" not in out, out
+                    host.succeed(container("machine down m2"))
+                    m2_tap = host.succeed("printf %s m2 | sha256sum | cut -c1-12").strip()
+                    host.fail("ip link show nc-" + m2_tap)
+                    host.fail("${pkgs.nftables}/bin/nft list set bridge nixcage placements | grep -q 10.66.0.21")
+
+                with subtest("a machine with no cages answers list --json with nothing, which is valid"):
+                    host.succeed(container("machine up m2"))
+                    host.succeed(container("rm --machine m2 lsn"))
+                    assert host.succeed(container("list --machine m2 --json")).strip() == ""
+                    host.succeed(container("machine down m2"))
 
                 with subtest("down stops the machine, and up finds its disk as it was"):
                     fs = host.succeed(container("machine exec m1 findmnt -no FSTYPE,SOURCE /var/lib/nixcage")).split()

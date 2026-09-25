@@ -49,6 +49,17 @@ in
             example = 24;
             description = "The prefix length of that address.";
           };
+          uplink = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "eth0";
+            description = ''
+              An interface enslaved to the bridge, for a machine's guest
+              (ADR-026): its NIC, so a cage placed here reaches the host's
+              bridge with its own address. Null on a host, whose bridge
+              has only cages for ports.
+            '';
+          };
         };
       }
     );
@@ -70,7 +81,9 @@ in
   };
 
   config = {
-    networking.bridges = lib.mapAttrs (_: _: { interfaces = [ ]; }) bridges;
+    networking.bridges = lib.mapAttrs (_: bridge: {
+      interfaces = lib.optional (bridge.uplink != null) bridge.uplink;
+    }) bridges;
     networking.interfaces = lib.mapAttrs (_: bridge: {
       ipv4.addresses = [
         {

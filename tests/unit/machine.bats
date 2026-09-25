@@ -234,3 +234,21 @@ teardown() {
 	run nixcage_machine_share_mount_ok rw,nosuidx,nodevy
 	assert_failure
 }
+
+# Placement (ADR-026 decision 9): the machine's tap on a host bridge, pinned
+# to the addresses its cages may speak as.
+
+@test "a placed machine's bridge and addresses are read in order" {
+	printf '%s\n' BRIDGE=nc0 "ADDRESSES=10.66.0.2 10.66.0.11" >>"$NIXCAGE_MACHINES_DIR/m1"
+	nixcage_machine_read m1
+	[ "$MACHINE_BRIDGE" = nc0 ]
+	[ "${#MACHINE_ADDRESSES[@]}" = 2 ]
+	[ "${MACHINE_ADDRESSES[1]}" = 10.66.0.11 ]
+}
+
+@test "a machine placed on a bridge with no address is refused" {
+	echo BRIDGE=nc0 >>"$NIXCAGE_MACHINES_DIR/m1"
+	run nixcage_machine_read m1
+	assert_failure
+	assert_output "nixcage: machine m1 is placed on nc0 with no address to speak as"
+}

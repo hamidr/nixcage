@@ -118,10 +118,17 @@ nixcage_veth_nspawn_arg() {
 ## its own, and a host running networkd would give a vt-* tap a masquerade
 ## it ships a network file for; a tap nixcage makes has nixcage's name and
 ## nixcage's rules before the guest boots, and qemu is handed it by name.
+##
+## A machine's tap (ADR-026) carries the frames of every cage inside it, so
+## it is pinned to each address in the list it is given; a session's is
+## given one.
 nixcage_tap_make() {
-	local name="$1" bridge="$2" addr="${3:-}" host
-	[ -n "$addr" ] || return 1
-	addr="${addr%%/*}"
+	local name="$1" bridge="$2" host addr
+	shift 2
+	[ $# -gt 0 ] || return 1
+	for addr in "$@"; do
+		[ -n "$addr" ] || return 1
+	done
 	host="$(nixcage_veth_host_name "$name")" || return 1
 	nixcage_veth_table_ensure || return 1
 	if ip link show "$host" >/dev/null 2>&1; then
@@ -129,9 +136,11 @@ nixcage_tap_make() {
 	fi
 	ip tuntap add dev "$host" mode tap &&
 		ip link set "$host" master "$bridge" &&
-		nixcage_veth_unpin "$host" &&
-		nft add element bridge nixcage placements "{ \"$host\" . $addr }" &&
-		bridge link set dev "$host" isolated on &&
+		nixcage_veth_unpin "$host" || return 1
+	for addr in "$@"; do
+		nft add element bridge nixcage placements "{ \"$host\" . ${addr%%/*} }" || return 1
+	done
+	bridge link set dev "$host" isolated on &&
 		ip link set "$host" up
 }
 

@@ -426,3 +426,18 @@ MACHINE='{ nixcage.machines.m1 = { diskSize = "2G"; uidSlice.base = 900000; shar
 	assert_failure
 	assert_output --partial "is not an absolute path without colons or whitespace"
 }
+
+@test "a bridge with an uplink has that interface as its one static port" {
+	run eval_module host '{ nixcage.bridges.mb = { address = "10.66.0.2"; prefix = 24; uplink = "eth0"; }; }' \
+		'sys.config.networking.bridges.mb.interfaces'
+	assert_success
+	[ "$(jq -c . <<<"$output")" = '["eth0"]' ]
+}
+
+@test "a machine's placement is rendered as its bridge and every address" {
+	run eval_module host '{ nixcage.machines.m1 = { diskSize = "2G"; uidSlice.base = 900000; placement = { bridge = "nc0"; addresses = [ "10.66.0.2" "10.66.0.11" ]; }; }; }' \
+		'sys.config.environment.etc."nixcage/machines/m1".text'
+	assert_success
+	assert_output --partial 'BRIDGE=nc0'
+	assert_output --partial 'ADDRESSES=10.66.0.2 10.66.0.11'
+}

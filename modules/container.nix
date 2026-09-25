@@ -103,6 +103,9 @@ let
       ## The closure a session without the daemon is bound is queried here,
       ## on the host, where the store's db is (ADR-014).
       nix
+      ## What a machine answers as JSON is checked before a caller parses
+      ## it (ADR-026).
+      jq
     ]);
     text = ''
       ## Sourced by store path: the file is a real shell file so shellcheck
@@ -1245,6 +1248,13 @@ let
           extra+="''${extra:+ }$(nixcage_machine_share_qemu_words "$i" "$sock")"
           i=$((i + 1))
         done
+        ## The tap, pinned to the machine's addresses and isolated before
+        ## qemu has it (decision 9); the unit's stop deletes it.
+        if [ -n "$MACHINE_BRIDGE" ]; then
+          nixcage_tap_make "$name" "$MACHINE_BRIDGE" "''${MACHINE_ADDRESSES[@]}" ||
+            die "could not make machine $name's tap on $MACHINE_BRIDGE"
+          extra+="''${extra:+ }$(nixcage_tap_qemu_words "$name" | paste -sd' ')"
+        fi
         local tries
         for ((i = i - 1; i >= 0; i--)); do
           for ((tries = 0; tries < 50; tries++)); do
@@ -1287,6 +1297,16 @@ let
         local verb="$1" name="$3"
         shift 3
         nixcage_machine_read "$name" || exit 1
+        ## What a machine answers is data from outside the boundary
+        ## (decision 8): JSON a caller will parse is checked to be JSON.
+        if [ "$verb" = list ] && [[ " $* " == *" --json "* ]]; then
+          local out
+          out="$(machine_forward "$name" "" nixcage-container list "$@")" || exit 1
+          jq empty <<<"$out" >/dev/null 2>&1 ||
+            die "machine $name answered list --json with something that is not JSON"
+          printf '%s\n' "$out"
+          exit 0
+        fi
         if [ "$verb" != enter ]; then
           machine_forward "$name" "" nixcage-container "$verb" "$@"
         fi

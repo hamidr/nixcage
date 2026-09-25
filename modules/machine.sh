@@ -45,7 +45,7 @@ nixcage_machine_read() {
 	fi
 	MACHINE_TOPLEVEL="" MACHINE_MEMORY="" MACHINE_CPUS="" MACHINE_DISK_SIZE=""
 	MACHINE_UID_BASE="" MACHINE_UID_SIZE="" MACHINE_STORE_BASE=""
-	MACHINE_SHARES=()
+	MACHINE_SHARES=() MACHINE_BRIDGE="" MACHINE_ADDRESSES=()
 	while IFS='=' read -r key value; do
 		case "$key" in
 		TOPLEVEL) MACHINE_TOPLEVEL="$value" ;;
@@ -56,6 +56,8 @@ nixcage_machine_read() {
 		UID_SIZE) MACHINE_UID_SIZE="$value" ;;
 		STORE_BASE) MACHINE_STORE_BASE="$value" ;;
 		SHARES) read -ra MACHINE_SHARES <<<"$value" ;;
+		BRIDGE) MACHINE_BRIDGE="$value" ;;
+		ADDRESSES) read -ra MACHINE_ADDRESSES <<<"$value" ;;
 		esac
 	done <"$NIXCAGE_MACHINES_DIR/$name"
 	local field
@@ -66,6 +68,10 @@ nixcage_machine_read() {
 			return 1
 		fi
 	done
+	if [ -n "$MACHINE_BRIDGE" ] && [ "${#MACHINE_ADDRESSES[@]}" -eq 0 ]; then
+		echo "nixcage: machine $name is placed on $MACHINE_BRIDGE with no address to speak as" >&2
+		return 1
+	fi
 }
 
 ## nixcage_machine_unit <name>

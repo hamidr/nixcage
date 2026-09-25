@@ -268,6 +268,33 @@ in
                   evaluation asserts.
                 '';
               };
+              placement = lib.mkOption {
+                type = lib.types.nullOr (
+                  lib.types.submodule {
+                    options = {
+                      bridge = lib.mkOption {
+                        type = lib.types.str;
+                        example = "fb-0";
+                        description = "The host bridge the machine's tap is a port of.";
+                      };
+                      addresses = lib.mkOption {
+                        type = lib.types.nonEmptyListOf lib.types.str;
+                        example = [
+                          "10.77.0.2"
+                          "10.77.0.10"
+                        ];
+                        description = ''
+                          Every address the machine and its cages may speak
+                          as on the bridge. The tap is pinned to these and to
+                          nothing else, whatever the guest does.
+                        '';
+                      };
+                    };
+                  }
+                );
+                default = null;
+                description = "The host bridge the machine is placed on (ADR-026 decision 9).";
+              };
               shares = lib.mkOption {
                 type = lib.types.listOf (
                   lib.types.submodule {
@@ -576,6 +603,8 @@ in
           UID_BASE=${toString m.uidSlice.base}
           UID_SIZE=${toString m.uidSlice.size}
           STORE_BASE=${lib.concatStringsSep " " m.guest.config.nixcage.storeBase}
+          BRIDGE=${lib.optionalString (m.placement != null) m.placement.bridge}
+          ADDRESSES=${lib.optionalString (m.placement != null) (lib.concatStringsSep " " m.placement.addresses)}
           SHARES=${
             lib.concatMapStringsSep " " (
               share:
