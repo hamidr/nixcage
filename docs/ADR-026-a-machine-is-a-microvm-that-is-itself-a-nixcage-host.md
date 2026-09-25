@@ -67,7 +67,11 @@ returns once the guest's `nixcage-container` answers over vsock, bounded by
 the timeout `nixcage_microvm_await` already takes. `down` asks the guest to
 stop its cages, waits that same bound, then stops the unit whatever the
 guest said; the tap, its pins and the share daemons are removed by the host
-in the unit's stop, never by the guest. The disk is kept.
+in the unit's stop, never by the guest. The disk is kept. `up` and `down`
+take the machine's lock under the state directory exclusively, and a
+forward (point 7) holds it shared from reading the machine ready to the
+end of its delivery, so a forward that saw one boot ready is never
+delivered to the next boot while it is still coming up.
 
 **5. What crosses a share is mapped, and nothing the guest names is
 privileged on the host.** vmspawn's `--bind` translates no ids, so the
@@ -152,12 +156,18 @@ Their cost is measured, not claimed.
 
 A machine's lifecycle interleaves with `enter --machine`, `down`, a host
 stop of the unit, and a guest that crashes, hangs or lies, across the vsock
-boundary: the Formal Modeling Gate. `models/machine.qnt` models absent,
-booting, ready, stopping and failed, with a guest that may stop answering
-at any step, and invariants: no forward reaches a machine that is not
-ready; after `down`, whatever the guest did, no tap, pin or share daemon of
-the machine remains; `up` twice is `up` once. It runs before
-implementation.
+boundary: the Formal Modeling Gate. `models/machine.qnt` models the
+host's view (off, booting, ready, stopping, failed), a guest that may stop
+answering or die at any step, a stop of the unit from outside, and two
+callers forwarding concurrently. Run 2026-09-25 with
+`quint run models/machine.qnt --invariant=all_invariants --max-steps=60
+--max-samples=100000`: no violation in 100000 traces of 60 steps, and each
+witness (ready, a cage running, stopping, failed) reached. Its first run
+found that a forward holding a check across a crash was delivered to the
+next boot while it booted, which is why `up` takes the lock as `down` does;
+with `up` not waiting, `noCheckAcrossBoot` is violated within 100000 traces,
+and each guard turned off violates its invariant: without the lock,
+`noDeliveryUnlessReady`; with cleanup left to the guest, `offMeansClean`.
 
 macOS is not a host for machines: its cages already share one VM, and it
 cannot nest another.
