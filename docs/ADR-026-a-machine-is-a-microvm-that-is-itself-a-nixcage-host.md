@@ -262,8 +262,9 @@ in the host's configuration; `/tmp/nixcage-machine/measure.sh`, transcript
 The pin and the pair of machines were run in `hostChecks.machine` rather
 than here, since `pc`'s bridges are fabriek's.
 
-A fabriek factory run in a machine on `pc` found three things the check had not,
-fixed in 5.2.1 and each now a subtest of `hostChecks.machine`:
+A fabriek factory run in a machine on `pc` found what the check had not,
+each fixed in 5.2.1 and each now a subtest of `hostChecks.machine` or
+`checks.bridged`:
 
 - Every forward made a vsock connection of its own, and `up`'s readiness
   probe another, each a per-connection sshd started over virtiofs. With an
@@ -285,4 +286,19 @@ fixed in 5.2.1 and each now a subtest of `hostChecks.machine`:
 - A quota asked inside a machine was ignored where decision 3 said it is
   refused; the guest now declares itself a machine and `storage ensure`
   there refuses one.
+- A switch restarted a machine whose unit had changed and ended every cage
+  in it under its dependant; the unit is now neither restarted nor stopped
+  by a switch, and a changed machine takes effect at its next up.
+- The uid store's `mkdir` lock outlived a machine killed while allocating,
+  on its disk, and refused every allocation after; it is a `flock` now,
+  which the kernel lets go with its holder.
+- An enter under the name of a running cage took its port for a killed
+  session's and deleted it, leaving the running cage without a network; it
+  is refused now, before anything of the new session is made.
+- A supervised session's stop could be cut short: its end reset its traps
+  and a caller's own TERM, landing after systemd's, killed it before the
+  stop was sent, and a stop sent through the master while that session's
+  client was ending did not always take. Further signals are ignored while
+  a session ends, and its stop goes over a connection of its own until the
+  cage reads stopped.
 
