@@ -104,6 +104,12 @@ socket is forwarded as `exec` forwards it, which a caller is told gives the
 guest the use of that agent while the session runs. Without `--machine`
 nothing changes.
 
+`nixcage exec --machine <name> argv`, the fourth primitive of ADR-009,
+reaches the machine as `nixcage exec` reaches the host the cages are on:
+argv as the guest's root, over the same vsock. It is how a dependant runs
+its own program inside the machine, one it installed there through
+`modules`, without nixcage knowing what the program does.
+
 **8. What a machine answers is data from outside the boundary.** Output of
 a forwarded verb is passed to the caller byte for byte and is never
 evaluated or used by nixcage on the host; `list --json` with `--machine` is
@@ -122,8 +128,9 @@ does. A cage's address is what a peer on the host bridge sees.
 
 ## Consequences
 
-The exported interface (ADR-009) grows by one flag and one verb. A
-dependant that never says `--machine` sees nothing new. nixcage still
+The exported interface (ADR-009) grows by one flag, on `nixcage exec` and
+on the verbs over a cage, and one verb. A dependant that never says
+`--machine` sees nothing new. nixcage still
 knows nothing of what a machine is for.
 
 The host's attack surface toward a machine is KVM and qemu's devices, the
