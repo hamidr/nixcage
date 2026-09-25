@@ -364,6 +364,35 @@ teardown() {
 	assert_output --partial "not a store path: /etc/nixcage/profile"
 }
 
+# The closure a machine's host computed (ADR-026 decision 6): the guest has
+# the store without its database, so it is handed the paths rather than
+# querying for them.
+
+@test "given --store-closure, a session records each path of the closure" {
+	nixcage_enter_parse --store-closure /nix/store/abc-p:/nix/store/def-q n /srv/w
+	[ "${#NIXCAGE_ENTER_STORE_CLOSURE[@]}" = 2 ]
+	[ "${NIXCAGE_ENTER_STORE_CLOSURE[1]}" = /nix/store/def-q ]
+}
+
+@test "given no --store-closure, a session queries for its own" {
+	nixcage_enter_parse n /srv/w
+	[ "${#NIXCAGE_ENTER_STORE_CLOSURE[@]}" = 0 ]
+}
+
+@test "a closure naming anything outside the store stops the parse" {
+	run nixcage_enter_parse --store-closure /nix/store/abc-p:/etc n /srv/w
+	assert_failure
+	assert_output --partial "not a store path: /etc"
+}
+
+@test "a closure and a devShell are refused together: realising the shell needs the daemon" {
+	run nixcage_enter_parse --store-closure /nix/store/abc-p n /srv/w
+	assert_success
+	run nixcage_enter_parse --shell dev --store-closure /nix/store/abc-p n /srv/w
+	assert_failure
+	assert_output --partial "--shell and --store-closure are mutually exclusive"
+}
+
 # What a private-network cage resolves with (ADR-016). The rootfs used to
 # carry the host's file, which names a resolver a cage on a bridge cannot
 # reach, so every lookup waited out the resolver's timeout and then failed.

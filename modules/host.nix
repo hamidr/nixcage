@@ -15,7 +15,7 @@ let
     extraPackages = cfg.containerPackages;
     ## qemu and virtiofsd for vmspawn to find, ssh for exec to reach the
     ## guest with; the host's ssh_config carries systemd-ssh-proxy.
-    microvmPackages = lib.optionals cfg.microvm.enable [
+    microvmPackages = lib.optionals (cfg.microvm.enable || cfg.machines != { }) [
       pkgs.qemu_kvm
       pkgs.virtiofsd
       pkgs.openssh
@@ -80,6 +80,41 @@ let
         "${path} ${cage.substrate}"
     ) (lib.filterAttrs (_: cage: cage.substrate != null) cages)
   );
+  ## A machine's slice, as the half-open interval the checks compare.
+  slices =
+    lib.mapAttrsToList (name: m: {
+      what = "nixcage.machines.${name}.uidSlice";
+      lo = m.uidSlice.base;
+      hi = m.uidSlice.base + m.uidSlice.size;
+    }) cfg.machines
+    ++ lib.optional (cfg.principalUidRange != null) {
+      what = "nixcage.principalUidRange";
+      lo = cfg.principalUidRange.base;
+      hi = cfg.principalUidRange.base + cfg.principalUidRange.size;
+    };
+  overlapping = lib.concatLists (
+    lib.imap0 (
+      i: a:
+      map (b: "${a.what} and ${b.what}") (
+        lib.filter (b: a.lo < b.hi && b.lo < a.hi) (lib.drop (i + 1) slices)
+      )
+    ) slices
+  );
+
+  ## One guest per machine, from this host's pkgs, as a microVM session's
+  ## is (ADR-026 decision 2): the session guest's boot, with no session in
+  ## it, and this module in it, so the guest is a nixcage host.
+  machineGuest =
+    name: m:
+    pkgs.nixos (
+      [
+        ./guest.nix
+        ./machine-guest.nix
+        ./host.nix
+        { networking.hostName = lib.mkForce name; }
+      ]
+      ++ m.modules
+    );
 in
 {
   ## The bridges a cage may be placed on (ADR-018), shared with the VM module.
@@ -164,6 +199,82 @@ in
       };
       default = { };
       description = "The microVM substrate a cage may run on (ADR-019).";
+    };
+
+    machines = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule (
+          { name, config, ... }:
+          {
+            options = {
+              memory = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                example = "4G";
+                description = "The machine's memory, reserved while it runs. Null is vmspawn's default.";
+              };
+              cpus = lib.mkOption {
+                type = lib.types.nullOr lib.types.ints.positive;
+                default = null;
+                description = "The machine's cores. Null is vmspawn's default.";
+              };
+              diskSize = lib.mkOption {
+                type = lib.types.str;
+                example = "20G";
+                description = ''
+                  The size of the machine's disk, a raw image under the
+                  state directory that only qemu opens. It bounds every cage
+                  in the machine together; a cage inside has no quota of
+                  its own. Fixed when the image is first made.
+                '';
+              };
+              uidSlice = lib.mkOption {
+                type = lib.types.submodule {
+                  options = {
+                    base = lib.mkOption {
+                      type = lib.types.ints.positive;
+                      example = 900000;
+                      description = "The first host uid the machine's ids are shifted onto.";
+                    };
+                    size = lib.mkOption {
+                      type = lib.types.ints.positive;
+                      default = 65536;
+                      description = "How many ids the slice covers.";
+                    };
+                  };
+                };
+                description = ''
+                  The host uids what the guest writes through a share is
+                  owned by: guest uid 0 is the base. Disjoint from every
+                  other machine's and from principalUidRange, which
+                  evaluation asserts.
+                '';
+              };
+              modules = lib.mkOption {
+                type = lib.types.listOf lib.types.deferredModule;
+                default = [ ];
+                description = ''
+                  NixOS modules the machine's guest also imports: what a
+                  dependant runs in the machine besides nixcage. nixcage has
+                  no opinion about what belongs here.
+                '';
+              };
+              guest = lib.mkOption {
+                type = lib.types.raw;
+                readOnly = true;
+                default = machineGuest name config;
+                description = "The machine's guest as evaluated.";
+              };
+            };
+          }
+        )
+      );
+      default = { };
+      description = ''
+        Long-lived microVMs that are nixcage hosts themselves (ADR-026),
+        started with `nixcage-container machine up <name>` and reached by the
+        verbs over a cage with `--machine <name>`.
+      '';
     };
 
     cages = lib.mkOption {
@@ -269,6 +380,16 @@ in
       '';
     };
 
+    storeBase = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      readOnly = true;
+      description = ''
+        What every session without the daemon closes over besides its own
+        roots: the profile and the session's own files. Read by the host a
+        machine runs on, which computes the machine's closures.
+      '';
+    };
+
     containerPackages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
@@ -366,6 +487,8 @@ in
       ''}GIT_SIGNING=${if cfg.git.signing.enable then "1" else ""}
     '';
 
+    nixcage.storeBase = container.storeBase;
+
     ## One guest per host, from this host's pkgs (ADR-019 decision 3).
     nixcage.microvm.guest = pkgs.nixos ([ ./guest.nix ] ++ cfg.microvm.guestModules);
 
@@ -385,6 +508,52 @@ in
     systemd.tmpfiles.rules = [
       "d /var/lib/nixcage 0755 root root -"
     ];
+    }
+    {
+    assertions = [
+      {
+        assertion = overlapping == [ ];
+        message = "nixcage: uid slices overlap: ${lib.concatStringsSep "; " overlapping}";
+      }
+    ]
+    ++ lib.mapAttrsToList (name: _: {
+      assertion = builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null && lib.stringLength name <= 64;
+      message = "nixcage.machines.${name}: a machine is named as a cage is";
+    }) cfg.machines;
+
+    environment.etc = lib.mapAttrs' (
+      name: m:
+      lib.nameValuePair "nixcage/machines/${name}" {
+        text = ''
+          TOPLEVEL=${m.guest.config.system.build.toplevel}
+          MEMORY=${lib.optionalString (m.memory != null) m.memory}
+          CPUS=${lib.optionalString (m.cpus != null) (toString m.cpus)}
+          DISK_SIZE=${m.diskSize}
+          UID_BASE=${toString m.uidSlice.base}
+          UID_SIZE=${toString m.uidSlice.size}
+          STORE_BASE=${lib.concatStringsSep " " m.guest.config.nixcage.storeBase}
+        '';
+      }
+    ) cfg.machines;
+
+    ## Started by `machine up`, never at boot: a dependant decides when a
+    ## machine runs. Its stop is the host's cleanup, whatever ended qemu.
+    systemd.services = lib.mapAttrs' (
+      name: _:
+      lib.nameValuePair "nixcage-machine-${name}" {
+        description = "nixcage machine ${name}";
+        after = [ "network.target" ];
+        serviceConfig = {
+          Type = "notify";
+          NotifyAccess = "all";
+          ExecStart = "${container.script}/bin/nixcage-container machine run ${name}";
+          ExecStopPost = "${container.script}/bin/nixcage-container machine reap ${name}";
+          KillMode = "mixed";
+          TimeoutStopSec = 30;
+        };
+      }
+    ) cfg.machines;
+
     }
   ];
 }

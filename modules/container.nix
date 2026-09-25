@@ -64,12 +64,13 @@ let
   ## (ADR-014). The environment selection is sourced by path; direnv reads
   ## its rc by path; a session on a private network sets its address and
   ## becomes its subject by path.
-  sessionRoots = pkgs.lib.escapeShellArgs [
+  sessionRootList = [
     "${./dev-shell.sh}"
     "${pkgs.nix-direnv}"
     "${pkgs.iproute2}"
     "${pkgs.util-linux}"
   ];
+  sessionRoots = pkgs.lib.escapeShellArgs sessionRootList;
 
   nixcageContainer = pkgs.writeShellApplication {
     name = "nixcage-container";
@@ -122,6 +123,7 @@ let
       . ${./exec-cage.sh}
       . ${./vmspawn-args.sh}
       . ${./microvm-session.sh}
+      . ${./machine.sh}
 
       ## scope.sh names the same directory for the records it reads; one
       ## spelling, taken from there.
@@ -153,7 +155,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--memory <size>] [--cpus <n>] [--substrate nspawn|microvm] [--disk <size>] [--profile <path>] [--guest <path>] [--microvm-path <path>] [--git-name <name>] [--git-email <address>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name>"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--store-closure <path:path...>] [--memory <size>] [--cpus <n>] [--substrate nspawn|microvm] [--disk <size>] [--profile <path>] [--guest <path>] [--microvm-path <path>] [--git-name <name>] [--git-email <address>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name> | machine up|down|status|run|reap <machine> | machine exec <machine> cmd... ; a verb over a cage takes --machine <machine> as its first option"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -503,6 +505,10 @@ let
         shift 2
         check_name "$name"
         [ -d "$project" ] || die "project directory not found: $project"
+        ## machined holds one namespace for both, so a cage may not take the
+        ## name of a machine this host declared (ADR-026).
+        ! nixcage_machine_declared "$name" ||
+          die "$name is a machine this host declares; a cage cannot take its name"
 
         local auth_sock="$NIXCAGE_ENTER_AUTH_SOCK"
         local user="$NIXCAGE_ENTER_USER"
@@ -514,6 +520,7 @@ let
         local network_addr="$NIXCAGE_ENTER_NETWORK_ADDR"
         local network_ns="$NIXCAGE_ENTER_NETWORK_NS"
         local no_nix_daemon="$NIXCAGE_ENTER_NO_NIX_DAEMON"
+        [ "''${#NIXCAGE_ENTER_STORE_CLOSURE[@]}" -eq 0 ] || no_nix_daemon=1
         ## What a session is built from is the host's answer where it gave
         ## one, so a declared host refuses the flags that would replace it
         ## rather than letting a caller choose what root runs here.
@@ -819,7 +826,13 @@ let
           --bind-ro=/nix/store
           --bind-ro=/nix/var/nix/db
         )
-        if [ -n "$no_nix_daemon" ]; then
+        ## A closure handed over is a machine's guest (ADR-026), which has
+        ## the store without its database: the host queried it.
+        if [ "''${#NIXCAGE_ENTER_STORE_CLOSURE[@]}" -gt 0 ]; then
+          local store_binds
+          store_binds="$(nixcage_store_bind_given "''${NIXCAGE_ENTER_STORE_CLOSURE[@]}")" || exit 1
+          mapfile -t store_args <<<"$store_binds"
+        elif [ -n "$no_nix_daemon" ]; then
           local store_binds
           store_binds="$(nixcage_store_bind_args "$PROFILE" ${sessionRoots} \
             ''${store_roots[@]+"''${store_roots[@]}"})" ||
@@ -1135,6 +1148,164 @@ let
         rm -rf "$STATE_DIR/containers/''${name:?}" "$STATE_DIR/homes/''${name:?}" "$STATE_DIR/disks/''${name:?}"
       }
 
+      ## A machine's lock (ADR-026 decision 4, models/machine.qnt): up and
+      ## down take it exclusively and a forward holds it shared from reading
+      ## the machine ready to the end of its delivery, on fd 9, which an
+      ## exec'd ssh keeps.
+      machine_lock() {
+        local name="$1" mode="$2"
+        mkdir -p "$STATE_DIR/machines"
+        exec 9>>"$STATE_DIR/machines/$name.lock"
+        flock "$mode" -w "$NIXCAGE_MACHINE_TIMEOUT" 9 ||
+          die "machine $name is busy: its lock was not free within ''${NIXCAGE_MACHINE_TIMEOUT}s"
+      }
+
+      ## Whether the guest's nixcage-container answers, over the key and
+      ## address machined holds for it.
+      machine_probe() {
+        local name="$1" key address
+        { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name" 2>/dev/null) || return 1
+        local -a words=()
+        mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "" "" -- nixcage-container list)
+        timeout 10 "''${words[@]}" </dev/null >/dev/null 2>&1
+      }
+
+      machine_state() {
+        local name="$1" active answered=1
+        active="$(systemctl show -p ActiveState --value "$(nixcage_machine_unit "$name")" 2>/dev/null || true)"
+        if [ "$active" = active ] && machine_probe "$name"; then answered=0; fi
+        nixcage_machine_state "$active" "$answered"
+      }
+
+      machine_up() {
+        local name="$1" unit
+        unit="$(nixcage_machine_unit "$name")"
+        machine_lock "$name" -x
+        case "$(machine_state "$name")" in
+        ready) return 0 ;;
+        off | failed)
+          systemctl reset-failed "$unit" 2>/dev/null || true
+          systemctl start "$unit" || die "machine $name did not start: journalctl -u $unit"
+          ;;
+        esac
+        if ! nixcage_microvm_await "$NIXCAGE_MACHINE_TIMEOUT" machine_probe "$name"; then
+          systemctl stop "$unit" || true
+          die "machine $name did not answer within ''${NIXCAGE_MACHINE_TIMEOUT}s and was stopped"
+        fi
+      }
+
+      ## The guest is asked to stop its cages within the bound, and the unit
+      ## is stopped whatever it answered: the host's cleanup is the unit's
+      ## stop, never the guest's.
+      machine_down() {
+        local name="$1" unit key address
+        unit="$(nixcage_machine_unit "$name")"
+        machine_lock "$name" -x
+        if [ "$(machine_state "$name")" = ready ] &&
+          { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name" 2>/dev/null); then
+          local -a words=()
+          ## Run by the guest's shell, so its expansions are the guest's.
+          # shellcheck disable=SC2016
+          mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "" "" -- \
+            bash -c 'for c in $(nixcage-container list); do nixcage-container stop "$c"; done')
+          timeout "$NIXCAGE_MACHINE_TIMEOUT" "''${words[@]}" </dev/null >/dev/null 2>&1 || true
+        fi
+        systemctl stop "$unit" || true
+      }
+
+      ## The unit's ExecStart: the skeleton the root share is, owned by the
+      ## slice's first uid, the disk made once at its size, and vmspawn in
+      ## this process so its readiness reaches systemd.
+      machine_run() {
+        local name="$1" dir="$STATE_DIR/machines/$1"
+        read_container_config
+        dir="$(nixcage_storage_ensure "$STATE_DIR" "''${STORAGE_DATASET:-}" "$dir" 0)" ||
+          die "could not give machine $name a place under $STATE_DIR"
+        mkdir -p "$dir/root"
+        chown "$MACHINE_UID_BASE:$MACHINE_UID_BASE" "$dir/root"
+        if [ ! -f "$dir/disk.img" ]; then
+          (umask 077 && truncate -s "$MACHINE_DISK_SIZE" "$dir/disk.img") ||
+            die "could not make machine $name's disk"
+        fi
+        local -a words=()
+        mapfile -t words < <(nixcage_machine_vmspawn_args "$name" "$dir/root" "$MACHINE_TOPLEVEL" \
+          "$MACHINE_UID_BASE" "$MACHINE_UID_SIZE" "$MACHINE_MEMORY" "$MACHINE_CPUS" "$dir/disk.img" "")
+        exec "''${words[@]}"
+      }
+
+      ## The unit's ExecStopPost, whatever ended qemu: what the host made
+      ## for the machine goes here and nowhere else.
+      machine_reap() {
+        nixcage_tap_delete "$1" 2>/dev/null || true
+      }
+
+      ## argv into the guest, as its root, once the machine is ready, with
+      ## the shared lock held until ssh ends.
+      machine_forward() {
+        local name="$1" agent="$2"
+        shift 2
+        machine_lock "$name" -s
+        [ "$(machine_state "$name")" = ready ] ||
+          die "machine $name is not ready: nixcage-container machine up $name"
+        local key address tty=""
+        { read -r key && read -r address; } < <(nixcage_microvm_ssh_target "$name") || exit 1
+        if [ -t 0 ] && [ -t 1 ]; then tty=1; fi
+        local -a words=()
+        mapfile -t words < <(nixcage_machine_forward_words "$key" "$address" "$tty" "$agent" -- "$@")
+        exec "''${words[@]}"
+      }
+
+      ## A verb over a cage with --machine: the same verb, run by the
+      ## guest's nixcage-container. enter is handed the closure this host
+      ## computes (decision 6) and its agent as a forward.
+      machine_verb() {
+        local verb="$1" name="$3"
+        shift 3
+        nixcage_machine_read "$name" || exit 1
+        if [ "$verb" != enter ]; then
+          machine_forward "$name" "" nixcage-container "$verb" "$@"
+        fi
+        nixcage_enter_parse "$@" || exit 1
+        local -a roots=()
+        read -ra roots <<<"$MACHINE_STORE_BASE"
+        roots+=(''${NIXCAGE_ENTER_STORE_ROOTS[@]+"''${NIXCAGE_ENTER_STORE_ROOTS[@]}"})
+        [ -z "$NIXCAGE_ENTER_PROFILE" ] || roots+=("$NIXCAGE_ENTER_PROFILE")
+        local closure
+        closure="$(nixcage_store_closure "''${roots[@]}" | paste -sd:)" ||
+          die "could not close over the session's store roots"
+        local agent="" guest_agent=""
+        if [ -n "$NIXCAGE_ENTER_AUTH_SOCK" ] && [ -S "$NIXCAGE_ENTER_AUTH_SOCK" ]; then
+          guest_agent="/run/nixcage-agent-$$.sock"
+          agent="$guest_agent:$NIXCAGE_ENTER_AUTH_SOCK"
+        fi
+        local -a words=()
+        mapfile -t words < <(nixcage_machine_enter_words "$closure" "$guest_agent" "$@")
+        machine_forward "$name" "$agent" nixcage-container "''${words[@]}"
+      }
+
+      cmd_machine() {
+        local verb="''${1:-}" name="''${2:-}"
+        [ -n "$verb" ] && [ -n "$name" ] || die "$(usage)"
+        shift 2
+        nixcage_machine_read "$name" || exit 1
+        case "$verb" in
+        up) machine_up "$name" ;;
+        down) machine_down "$name" ;;
+        status) machine_state "$name" ;;
+        run) machine_run "$name" ;;
+        reap) machine_reap "$name" ;;
+        exec) machine_forward "$name" "" "$@" ;;
+        *) die "$(usage)" ;;
+        esac
+      }
+
+      if [ "''${2:-}" = --machine ]; then
+        case "''${1:-}" in
+        enter | uid | storage | status | stop | exec | list | rm) machine_verb "$@" ;;
+        netns) die "netns with --machine names a namespace inside the guest, which is nothing on this host" ;;
+        esac
+      fi
+
       cmd="''${1:-}"
       shift || true
       case "$cmd" in
@@ -1147,6 +1318,7 @@ let
       exec) cmd_exec "$@" ;;
       list) cmd_list "$@" ;;
       rm) cmd_rm "$@" ;;
+      machine) cmd_machine "$@" ;;
       *) die "$(usage)" ;;
       esac
     '';
@@ -1155,4 +1327,7 @@ in
 {
   profile = containerProfile;
   script = nixcageContainer;
+  ## What every session without the daemon closes over besides its own
+  ## roots, for a host that computes a machine's closure for it (ADR-026).
+  storeBase = [ "${containerProfile}" ] ++ sessionRootList;
 }

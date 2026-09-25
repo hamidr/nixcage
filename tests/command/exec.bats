@@ -132,3 +132,25 @@ ssh_calls() {
 	assert_output --partial "some-tool --tty"
 	refute_output --partial " -t "
 }
+
+# A machine (ADR-026): exec --machine runs argv as the machine's root, by
+# way of the host's nixcage-container, which holds the machine's key.
+
+@test "on Linux, exec --machine asks the host's nixcage-container to forward argv" {
+	NIXCAGE_OS=linux NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declared" run_nixcage exec --machine m1 -- uname -r
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/sudo-calls"
+	assert_output --partial "nixcage-container machine exec m1 uname -r"
+}
+
+@test "exec --machine names a machine or is refused" {
+	NIXCAGE_OS=linux run_nixcage exec --machine
+	assert_failure
+	assert_output --partial "usage: nixcage exec"
+}
+
+@test "exec --machine on macOS is refused: the shared VM cannot nest a machine" {
+	run_nixcage exec --machine m1 -- true
+	assert_failure
+	assert_output --partial "--machine is not available on macOS"
+}

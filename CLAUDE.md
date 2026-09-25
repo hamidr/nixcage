@@ -99,6 +99,15 @@ factory of roles over one repository, is built entirely on those. Architecture:
   `modules/guest-session.sh`, its one unit: reads the credential, runs
   argv as the host uid on the console, leaves the status in the home,
   powers off.
+- `modules/machine.sh` -- a machine (ADR-026): a long-lived microVM that is
+  itself a nixcage host. Its declaration as the host module renders it, the
+  vmspawn line its unit runs, the state the host reports, and the ssh words
+  a verb is forwarded into it with. `nixcage-container machine
+  up|down|status|exec` and `--machine` on the verbs over a cage use it.
+- `modules/machine-guest.nix` -- the guest a machine boots: the session
+  guest's boot with no session, nixcage's host module beside it, and its
+  state on the raw disk only qemu opens. Lifecycle modelled in
+  `models/machine.qnt`.
 - `modules/nixcage.nix` -- the VM module (macOS path): nixcage options
   (`workspaceRoots`, `authorizedKeys`, `sshPort`, `shareProto`, `secretEnv`,
   `git.*`, `vm.*`, `principalUidRange`) and the VM base config.
@@ -127,6 +136,7 @@ nix develop --command shellcheck nixcage modules/*.sh
 nix develop --command bats --recursive tests/
 nix flake check -L                   # + the NixOS checks; CI runs all of these
 nix build -L .#hostChecks.microvm    # a microVM session; needs nested KVM, not in CI
+nix build -L .#hostChecks.machine    # a machine and a cage inside it; the same
 ```
 
 There is no build step -- the script runs directly (`bash nixcage help`).

@@ -86,3 +86,23 @@ teardown() {
 	assert_failure
 	refute_output --partial "--bind-ro="
 }
+
+# A closure handed over rather than queried (ADR-026 decision 6).
+
+@test "a given closure is bound path by path, each once, and nix is not asked" {
+	export NIXCAGE_STORE_PREFIX="$TEST_TEMP_DIR"
+	mkdir -p "$TEST_TEMP_DIR/nix/store/abc-p" "$TEST_TEMP_DIR/nix/store/zzz-glibc"
+	run nixcage_store_bind_given /nix/store/abc-p /nix/store/zzz-glibc /nix/store/abc-p
+	assert_success
+	assert_output "--bind-ro=/nix/store/abc-p
+--bind-ro=/nix/store/zzz-glibc"
+	[ ! -s "$CALLS" ]
+}
+
+@test "a given path the guest's store does not have is refused, not bound as nothing" {
+	export NIXCAGE_STORE_PREFIX="$TEST_TEMP_DIR"
+	mkdir -p "$TEST_TEMP_DIR/nix/store/abc-p"
+	run nixcage_store_bind_given /nix/store/abc-p /nix/store/nothing-here
+	assert_failure
+	assert_output "nixcage: the closure names a path this store does not have: /nix/store/nothing-here"
+}

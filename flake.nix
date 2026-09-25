@@ -443,6 +443,90 @@
                     host.succeed(container("status vm") + " | grep -qx stopped")
               '';
             };
+
+            ## A machine (ADR-026): a microVM that is a nixcage host, with
+            ## an nspawn cage inside it reached by --machine. Nested KVM,
+            ## as the session check above; `nix build .#hostChecks.machine`.
+            machine = pkgs.testers.runNixOSTest {
+              name = "nixcage-machine";
+
+              nodes.host = {
+                imports = [ inputs.self.nixosModules.host ];
+                nixcage.workspaceRoots = [ "/srv" ];
+                nixcage.machines.m1 = {
+                  memory = "1536M";
+                  cpus = 2;
+                  diskSize = "2G";
+                  uidSlice.base = 900000;
+                };
+                environment.systemPackages = [ self'.packages.default ];
+                virtualisation.memorySize = 4096;
+                virtualisation.cores = 2;
+              };
+
+              testScript = ''
+                start_all()
+                host.wait_for_unit("multi-user.target")
+                boot = "cat /proc/sys/kernel/random/boot_id"
+                host_boot = host.succeed(boot).strip()
+
+                def container(words):
+                    return "nixcage exec -- nixcage-container " + words
+
+                with subtest("a machine comes up and says so"):
+                    host.succeed(container("machine up m1"))
+                    host.succeed(container("machine status m1") + " | grep -qx ready")
+
+                with subtest("a machine is a kernel of its own"):
+                    m1_boot = host.succeed(container("machine exec m1 " + boot)).strip()
+                    assert m1_boot != host_boot, (m1_boot, host_boot)
+
+                with subtest("a cage entered with --machine runs in the machine's kernel"):
+                    # nspawn gives a container a boot id of its own, so the
+                    # kernel is told apart by its uptime: the machine's
+                    # kernel started well after the host's.
+                    uptime = "cut -d' ' -f1 /proc/uptime"
+                    host.succeed(container("machine exec m1 mkdir -p /srv/p"))
+                    cage_up = float(host.succeed(
+                        container("enter --machine m1 --no-agent c1 /srv/p " + uptime)
+                    ).strip())
+                    m1_up = float(host.succeed(container("machine exec m1 " + uptime)).strip())
+                    host_up = float(host.succeed(uptime).strip())
+                    assert abs(m1_up - cage_up) < 10, (cage_up, m1_up)
+                    assert host_up - cage_up > 10, (cage_up, host_up)
+                    host.succeed(container("list --machine m1") + " | grep -qx c1")
+                    host.fail("test -d /var/lib/nixcage/containers/c1")
+
+                with subtest("a cage in a machine sees the closure the host computed, and no more"):
+                    base = host.succeed("sed -n 's/^STORE_BASE=//p' /etc/nixcage/machines/m1").strip()
+                    want = int(host.succeed("nix-store -qR " + base + " | wc -l").strip())
+                    seen = int(host.succeed(
+                        container("enter --machine m1 --no-agent c1 /srv/p sh -c 'ls /nix/store | wc -l'")
+                    ).strip())
+                    assert seen == want, (seen, want)
+
+                with subtest("a cage on the host cannot take a machine's name"):
+                    host.succeed("mkdir -p /srv/q")
+                    host.fail(container("enter --no-agent m1 /srv/q true"))
+
+                with subtest("netns with --machine is refused"):
+                    host.fail(container("netns --machine m1 c1"))
+
+                with subtest("down stops the machine, and up finds its disk as it was"):
+                    fs = host.succeed(container("machine exec m1 findmnt -no FSTYPE,SOURCE /var/lib/nixcage")).split()
+                    assert fs == ["ext4", "/dev/vda"], fs
+                    host.succeed(container("machine exec m1 touch /var/lib/nixcage/kept"))
+                    host.succeed(container("machine down m1"))
+                    host.succeed(container("machine status m1") + " | grep -qx off")
+                    host.fail(container("list --machine m1"))
+                    host.succeed(container("machine up m1"))
+                    host.succeed(container("machine exec m1 test -e /var/lib/nixcage/kept"))
+                    host.succeed(container("machine down m1"))
+
+                with subtest("the host holds no block device for the disk"):
+                    host.fail("lsblk -rno NAME | grep -q '^loop'")
+              '';
+            };
           };
 
           devShells.default = pkgs.mkShell {

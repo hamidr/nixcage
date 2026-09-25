@@ -43,6 +43,7 @@ nixcage_enter_reset() {
 	NIXCAGE_ENTER_BINDS=()
 	NIXCAGE_ENTER_ENV=()
 	NIXCAGE_ENTER_STORE_ROOTS=()
+	NIXCAGE_ENTER_STORE_CLOSURE=()
 	NIXCAGE_ENTER_MICROVM_PATHS=()
 	NIXCAGE_ENTER_ARGV=()
 }
@@ -194,6 +195,27 @@ nixcage_enter_parse() {
 			NIXCAGE_ENTER_STORE_ROOTS+=("$2")
 			shift 2 || return 1
 			;;
+		--store-closure)
+			## The closure itself, colon-separated, where the caller computed
+			## it: a machine's guest has the store without its database, so
+			## the host that has the database hands it over (ADR-026). Every
+			## path is held to the store's spelling as a root is.
+			local path
+			local -a paths=()
+			IFS=: read -ra paths <<<"${2:-}"
+			[ "${#paths[@]}" -gt 0 ] || {
+				echo "nixcage: --store-closure names no path" >&2
+				return 1
+			}
+			for path in "${paths[@]}"; do
+				if ! nixcage_store_root_ok "$path"; then
+					echo "nixcage: not a store path: $path" >&2
+					return 1
+				fi
+			done
+			NIXCAGE_ENTER_STORE_CLOSURE+=("${paths[@]}")
+			shift 2 || return 1
+			;;
 		## A flag and its value are two words here (ADR-009). A joined
 		## spelling would otherwise break out of the parse and land in the
 		## name position, and the caller would be told its name is invalid
@@ -221,6 +243,10 @@ nixcage_enter_parse() {
 	## its first command with an error about a socket nobody mentioned.
 	if [ -n "$NIXCAGE_ENTER_SHELL" ] && [ -n "$NIXCAGE_ENTER_NO_NIX_DAEMON" ]; then
 		echo "nixcage: --shell and --no-nix-daemon are mutually exclusive" >&2
+		return 1
+	fi
+	if [ -n "$NIXCAGE_ENTER_SHELL" ] && [ "${#NIXCAGE_ENTER_STORE_CLOSURE[@]}" -gt 0 ]; then
+		echo "nixcage: --shell and --store-closure are mutually exclusive" >&2
 		return 1
 	fi
 	## A microVM never has the daemon (ADR-019), so the same refusal; the

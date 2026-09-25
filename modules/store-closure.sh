@@ -53,3 +53,27 @@ nixcage_store_bind_args() {
 		printf -- '--bind-ro=%s\n' "$path"
 	done <<<"$closure"
 }
+
+## nixcage_store_bind_given <path...>
+## The binds for a closure computed elsewhere: a machine's guest has the
+## store without its database, and the host that has it hands the closure
+## over (ADR-026). Each path once, and each one there: a path the share
+## does not show is refused, since binding it would fail inside nspawn
+## with a message about a mount. NIXCAGE_STORE_PREFIX is for the suite.
+nixcage_store_bind_given() {
+	local path
+	local -A seen=()
+	for path in "$@"; do
+		[ -z "${seen[$path]:-}" ] || continue
+		seen[$path]=1
+		if [ ! -e "${NIXCAGE_STORE_PREFIX:-}$path" ]; then
+			echo "nixcage: the closure names a path this store does not have: $path" >&2
+			return 1
+		fi
+	done
+	for path in "$@"; do
+		[ -n "${seen[$path]:-}" ] || continue
+		unset "seen[$path]"
+		printf -- '--bind-ro=%s\n' "$path"
+	done
+}

@@ -880,19 +880,35 @@ container_records() {
 ## word is quoted for the remote shell, which re-splits the whole line rather
 ## than only the trailing arguments.
 cmd_exec() {
-  local tty="" agent=""
+  local tty="" agent="" machine=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --tty) tty=1; shift ;;
     --agent) agent=1; shift ;;
+    --machine)
+      [[ -n "${2:-}" ]] || { log_err "usage: nixcage exec [--tty] [--agent] [--machine <name>] -- <command> [args...]"; exit 1; }
+      machine="$2"; shift 2 ;;
     --) shift; break ;;
     *) break ;;
     esac
   done
 
   if [[ $# -eq 0 ]]; then
-    log_err "usage: nixcage exec [--tty] [--agent] -- <command> [args...]"
+    log_err "usage: nixcage exec [--tty] [--agent] [--machine <name>] -- <command> [args...]"
     exit 1
+  fi
+
+  # A machine's root is reached through the host's nixcage-container, which
+  # holds the key and the lock a forward needs (ADR-026).
+  if [[ -n "$machine" ]]; then
+    if [[ "$OS" != "linux" ]]; then
+      log_err "--machine is not available on macOS: the shared VM cannot nest a machine"
+      exit 1
+    fi
+    local container=nixcage-container
+    host_declared || { container="$(container_words)" || exit 1; }
+    sudo "$container" machine exec "$machine" "$@"
+    return
   fi
 
   # sudo clears the environment, so the forwarded socket has to be carried
