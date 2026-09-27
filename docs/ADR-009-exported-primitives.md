@@ -1,10 +1,10 @@
 ---
 id: ADR-009
-title: nixcage exports four primitives and nothing else
+title: nixcage exports five primitives and nothing else
 status: implemented
 date: 2026-09-05
-status_date: 2026-09-08
-summary: a session, a principal's uid, owned storage and a way to reach the cage host are the whole interface a dependant sees
+status_date: 2026-09-27
+summary: a session, a principal's uid, owned storage, a validated guest-proposed plan and a way to reach the cage host are the whole interface a dependant sees
 depends_on: [ADR-002, ADR-003, ADR-004]
 supersedes: []
 superseded_by: []
@@ -30,7 +30,7 @@ test can stand in for it.
 
 ## Decision
 
-**1. Four primitives, each argv on a program.** Argv is what `flake.lock` can
+**1. Five primitives, each argv on a program.** Argv is what `flake.lock` can
 pin and what a test can stub. A sourceable shell library was the alternative and
 is rejected: it would bind a dependant to nixcage's internal function names,
 give the boundary no version to break at, and let a renamed helper break a
@@ -57,6 +57,13 @@ dependant silently.
   on the guest script because it is what carries a caller to the guest script.
   Without it the other three are reachable only on Linux, and a dependant would
   have to read nixcage's SSH key, port and state layout to reach a macOS VM.
+- *A validated guest-proposed plan.* `nixcage-container plan --machine <name>`
+  (ADR-027) reads a NUL-separated `enter` or `exec` line from stdin, refuses
+  one naming any other verb or naming `--auth-sock` or `--machine` itself, and
+  only then runs it. It exists because a machine's guest, not the host, holds
+  the facts a session's line is composed from (ADR-026), and a dependant that
+  proposed from where those facts live would otherwise write its own copy of
+  this grammar.
 
 **2. A caller names paths and principals; nixcage names datasets and numbers.**
 The line falls in the same place three times. A caller says which directory it

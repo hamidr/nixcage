@@ -1,7 +1,7 @@
 ---
 id: ADR-027
 title: A machine verb that runs a guest-proposed plan, validated on the host
-status: proposed
+status: implemented
 date: 2026-09-27
 status_date: 2026-09-27
 summary: nixcage-container plan --machine <name> lets a guest propose an enter or exec line and the host validate and run it
@@ -103,3 +103,23 @@ it.
 ADR-009's "four primitives and nothing else" is amended by this ADR once
 implemented: five primitives, `plan` added to the table beside `enter`,
 `uid`, `storage ensure` and `exec`.
+
+## Verification
+
+```bash
+nix develop --command shellcheck nixcage modules/*.sh
+nix develop --command bats tests/unit/plan.bats tests/unit/exports.bats
+nix develop --command bats --recursive tests/
+```
+
+`tests/unit/plan.bats` drives `nixcage_plan_words` and
+`nixcage_plan_machine_guest_refusal` directly: an enter and an exec plan
+prefixed with the machine `plan` was given, a verb outside `enter`/`exec`
+refused, `--auth-sock` or `--machine` refused wherever they appear in the
+guest's own words, the caller's `--auth-sock` landing after `--machine` and
+before the guest's words, an embedded newline in a guest word surviving
+whole, and the machine-guest refusal firing only when `MACHINE_GUEST` is
+set. `tests/unit/exports.bats` covers that `plan` is dispatched, sources
+`plan.sh`, is in the usage line, and refuses itself inside a machine through
+the named refusal. All 12 plan.bats and 24 exports.bats assertions pass; the
+full suite (633 assertions) passes with no failures.

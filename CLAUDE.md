@@ -17,10 +17,12 @@ projects.
 The primary use case is running AI coding agents in isolation.
 
 nixcage runs cages; it has no opinion about what is built on them. What a
-dependant may use is four exported primitives and nothing else (ADR-009):
+dependant may use is five exported primitives and nothing else (ADR-009):
 `nixcage-container enter` with the flags that parameterise a session,
-`nixcage-container uid <principal>`, `nixcage-container storage ensure`, and
-`nixcage exec` to reach the machine the cages are on; and the verbs over a
+`nixcage-container uid <principal>`, `nixcage-container storage ensure`,
+`nixcage-container plan --machine <name>` to validate and run a guest-proposed
+enter or exec line (ADR-027), and `nixcage exec` to reach the machine the
+cages are on; and the verbs over a
 cage those create, `status`, `netns`, `stop`, `exec` (ADR-012), `list`
 (ADR-017) and `rm`, which fabriek uses as it does the four. cageworks, which runs a
 factory of roles over one repository, is built entirely on those. Architecture:
