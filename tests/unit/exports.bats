@@ -38,6 +38,26 @@ teardown() {
 	done
 }
 
+# ADR-027: plan is the fifth exported primitive, and its grammar lives in a
+# file the suite can drive, the same reason enter's own parser does.
+@test "plan is dispatched, sources its own grammar file, and is in its usage line" {
+	run grep -qE "^      plan\)" "$(CONTAINER_NIX)"
+	assert_success
+	run grep -q '\. ${./plan.sh}' "$(CONTAINER_NIX)"
+	assert_success
+	local usage
+	usage="$(grep -o 'usage: nixcage-container enter[^"]*' "$(CONTAINER_NIX)" | head -1)"
+	[[ "$usage" == *"plan --machine"* ]]
+}
+
+# Which machine runs is plan's own argument, never a word the guest wrote
+# (ADR-027): the refusal is a named function a test drives, not inline glue
+# a change here could quietly drop.
+@test "plan refuses itself inside a machine through the named refusal" {
+	run grep -q 'nixcage_plan_machine_guest_refusal.*MACHINE_GUEST' "$(CONTAINER_NIX)"
+	assert_success
+}
+
 @test "enter accepts every flag a caller parameterises a session with" {
 	for flag in --uid --user --subject --home --shell --bind --bind-ro --setenv --no-agent --auth-sock; do
 		run grep -qE "^$(printf '\t\t')$flag\)" "$(ENTER_ARGS)"

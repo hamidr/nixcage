@@ -52,3 +52,15 @@ nixcage_plan_words() {
 		printf '%s\0' "$@"
 	fi
 }
+
+## nixcage_plan_machine_guest_refusal <machine-guest>
+##
+## plan never runs inside a machine (ADR-026's MACHINE_GUEST flag): a plan
+## proposing itself to itself defeats the boundary it exists to hold.
+nixcage_plan_machine_guest_refusal() {
+	local machine_guest="$1"
+	if [ -n "$machine_guest" ]; then
+		echo "nixcage: plan is refused inside a machine; a plan proposing itself to itself defeats the boundary it exists to hold" >&2
+		return 1
+	fi
+}

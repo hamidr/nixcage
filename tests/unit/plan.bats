@@ -103,3 +103,14 @@ plan_words() {
 	assert_equal "${words[7]}" "echo one
 echo two"
 }
+
+@test "plan is refused inside a machine" {
+	run nixcage_plan_machine_guest_refusal 1
+	assert_failure
+	assert_output --partial "refused inside a machine"
+}
+
+@test "plan is not refused where MACHINE_GUEST is unset" {
+	run nixcage_plan_machine_guest_refusal ""
+	assert_success
+}

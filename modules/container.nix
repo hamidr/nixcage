@@ -127,6 +127,7 @@ let
       . ${./vmspawn-args.sh}
       . ${./microvm-session.sh}
       . ${./machine.sh}
+      . ${./plan.sh}
 
       ## scope.sh names the same directory for the records it reads; one
       ## spelling, taken from there.
@@ -158,7 +159,7 @@ let
       ## One description of the interface, used by every path that has to
       ## print it. Two would drift, and this is the only thing a caller sees
       ## at run time telling it what nixcage exports.
-      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--store-closure <path:path...>] [--memory <size>] [--cpus <n>] [--substrate nspawn|microvm] [--disk <size>] [--profile <path>] [--guest <path>] [--microvm-path <path>] [--git-name <name>] [--git-email <address>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name> | machine up|down|status|run|reap <machine> | machine exec <machine> cmd... ; a verb over a cage takes --machine <machine> as its first option"; }
+      usage() { echo "usage: nixcage-container enter [--uid <n>] [--user <name>] [--subject <name>] [--home <path>] [--shell <name>] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--auth-sock <path>|--no-agent] [--network <bridge>:<addr>/<prefix>|ns:<path>] [--dns none|<addr>] [--no-nix-daemon] [--store-root <path>] [--store-closure <path:path...>] [--memory <size>] [--cpus <n>] [--substrate nspawn|microvm] [--disk <size>] [--profile <path>] [--guest <path>] [--microvm-path <path>] [--git-name <name>] [--git-email <address>] [--print-argv] <name> <project> [cmd...] | uid <principal> [<subject>] | storage ensure <path> <uid> [quota] | status <name> | netns <name> | stop <name> | exec [--subject <name>] <name> [-- cmd...] | list [--json] | rm <name> | machine up|down|status|run|reap <machine> | machine exec <machine> cmd... | plan --machine <machine> [--auth-sock <path>] (reads a NUL-separated enter or exec line from stdin) ; a verb over a cage takes --machine <machine> as its first option"; }
 
       [ "$(id -u)" = 0 ] || die "must run as root (use sudo)"
 
@@ -1427,6 +1428,38 @@ let
         esac
       }
 
+      ## A guest-proposed enter or exec line, validated and run (ADR-027).
+      ## Refused inside a machine: a plan proposing itself to itself defeats
+      ## the boundary it exists to hold. The line itself is read from stdin,
+      ## NUL-separated, since a guest's argument may carry a newline
+      ## (ADR-027, the same wire format exec-cage.sh's words use).
+      cmd_plan() {
+        local machine="" auth_sock=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+          --machine)
+            machine="''${2:-}"
+            shift 2 || die "usage: nixcage-container plan --machine <name> [--auth-sock <path>]"
+            ;;
+          --auth-sock)
+            auth_sock="''${2:-}"
+            shift 2 || die "usage: nixcage-container plan --machine <name> [--auth-sock <path>]"
+            ;;
+          *) die "usage: nixcage-container plan --machine <name> [--auth-sock <path>]" ;;
+          esac
+        done
+        [ -n "$machine" ] || die "usage: nixcage-container plan --machine <name> [--auth-sock <path>]"
+        read_container_config
+        nixcage_plan_machine_guest_refusal "''${MACHINE_GUEST:-}" || exit 1
+        local -a guest_words=()
+        mapfile -d "" -t guest_words
+        local -a words=()
+        mapfile -d "" -t words < <(nixcage_plan_words "$machine" "$auth_sock" -- \
+          ''${guest_words[@]+"''${guest_words[@]}"})
+        [ "''${#words[@]}" -gt 0 ] || exit 1
+        machine_verb "''${words[@]}"
+      }
+
       if [ "''${2:-}" = --machine ]; then
         case "''${1:-}" in
         enter | uid | storage | status | stop | exec | list | rm) machine_verb "$@" ;;
@@ -1447,6 +1480,7 @@ let
       list) cmd_list "$@" ;;
       rm) cmd_rm "$@" ;;
       machine) cmd_machine "$@" ;;
+      plan) cmd_plan "$@" ;;
       *) die "$(usage)" ;;
       esac
     '';
