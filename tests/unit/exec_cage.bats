@@ -24,17 +24,36 @@ teardown() {
 	teardown_temp_dir
 }
 
+# The words are NUL-terminated records, not newline-terminated: a command
+# argument or an environment value may itself contain a newline, and a
+# newline-per-word wire format would split it into spurious extra words.
+# mapfile -d '' is the same pattern the microvm exec path already uses.
+exec_words() {
+	mapfile -d "" -t words < <(nixcage_exec_words "$@")
+}
+
 # A session's environment is the cage's: where pi reads its directory,
 # which bus to speak on, who the role is. A hand that got HOME and PATH
 # alone read an empty PI_CODING_AGENT_DIR and answered for nobody.
 @test "the leader's whole environment is what the command gets, and nothing of the caller's" {
-	run nixcage_exec_env 4001
-	assert_success
-	assert_line "HOME=/home/builder"
-	assert_line "PATH=$PROFILE"
-	assert_line "NIX_CONFIG=experimental-features = nix-command flakes"
-	assert_line "TERM=xterm"
-	refute_line --partial "TEST_TEMP_DIR="
+	local -a env_words=()
+	mapfile -d "" -t env_words < <(nixcage_exec_env 4001)
+	assert_equal "${#env_words[@]}" 4
+	printf '%s\n' "${env_words[@]}" | grep -qx "HOME=/home/builder"
+	printf '%s\n' "${env_words[@]}" | grep -qx "PATH=$PROFILE"
+	printf '%s\n' "${env_words[@]}" | grep -qx "NIX_CONFIG=experimental-features = nix-command flakes"
+	printf '%s\n' "${env_words[@]}" | grep -qx "TERM=xterm"
+}
+
+# An environment value with an embedded newline is one record, not two: the
+# NUL delimiter is the only thing read -d '' looks for.
+@test "an environment value with an embedded newline survives as one record" {
+	printf 'HOME=/home/builder\0MULTILINE=first\nsecond\0' >"$NIXCAGE_PROC/4001/environ"
+	local -a env_words=()
+	mapfile -d "" -t env_words < <(nixcage_exec_env 4001)
+	assert_equal "${#env_words[@]}" 2
+	assert_equal "${env_words[1]}" "MULTILINE=first
+second"
 }
 
 # nsenter looks the command up with the caller's PATH inside the cage's
@@ -42,58 +61,62 @@ teardown() {
 # cage's profile has no setpriv; both are named by store path, the same
 # file inside as out.
 @test "env and setpriv are named by store path, since the caller's PATH means nothing inside" {
-	run nixcage_exec_words 4001 "" -- true
-	assert_success
-	assert_line "/nix/store/xyz-coreutils/bin/env"
-	run nixcage_exec_words 4001 700004 -- true
-	assert_success
-	assert_line "/nix/store/xyz-util-linux/bin/setpriv"
+	exec_words 4001 "" -- true
+	printf '%s\n' "${words[@]}" | grep -qx "/nix/store/xyz-coreutils/bin/env"
+	exec_words 4001 700004 -- true
+	printf '%s\n' "${words[@]}" | grep -qx "/nix/store/xyz-util-linux/bin/setpriv"
 }
 
 @test "the words enter every namespace of the leader, the user one included, in the workspace, as cage root" {
-	run nixcage_exec_words 4001 "" -- git status
-	assert_success
-	assert_line --index 0 "nsenter"
-	assert_line --index 1 "--target=4001"
-	assert_line --index 2 "--mount"
-	assert_line --index 3 "--uts"
-	assert_line --index 4 "--ipc"
-	assert_line --index 5 "--net"
-	assert_line --index 6 "--pid"
-	assert_line --index 7 "--user"
-	assert_line --index 8 "--wdns=/workspace"
-	assert_line --index 9 -- "--"
-	assert_line --index 10 "/nix/store/xyz-coreutils/bin/env"
-	assert_line --index 11 "-i"
-	assert_line --index 12 "HOME=/home/builder"
-	assert_line --index 13 "PATH=$PROFILE"
-	assert_line --index 16 "git"
-	assert_line --index 17 "status"
+	exec_words 4001 "" -- git status
+	assert_equal "${words[0]}" "nsenter"
+	assert_equal "${words[1]}" "--target=4001"
+	assert_equal "${words[2]}" "--mount"
+	assert_equal "${words[3]}" "--uts"
+	assert_equal "${words[4]}" "--ipc"
+	assert_equal "${words[5]}" "--net"
+	assert_equal "${words[6]}" "--pid"
+	assert_equal "${words[7]}" "--user"
+	assert_equal "${words[8]}" "--wdns=/workspace"
+	assert_equal "${words[9]}" "--"
+	assert_equal "${words[10]}" "/nix/store/xyz-coreutils/bin/env"
+	assert_equal "${words[11]}" "-i"
+	assert_equal "${words[16]}" "git"
+	assert_equal "${words[17]}" "status"
 }
 
 @test "given a subject's offset, the command becomes that subject after entering" {
-	run nixcage_exec_words 4001 7 -- id
-	assert_success
-	assert_line --index 10 "/nix/store/xyz-util-linux/bin/setpriv"
-	assert_line --index 11 "--reuid=7"
-	assert_line --index 12 "--regid=7"
-	assert_line --index 13 "--clear-groups"
-	assert_line --index 14 -- "--"
-	assert_line --index 15 "/nix/store/xyz-coreutils/bin/env"
+	exec_words 4001 7 -- id
+	assert_equal "${words[10]}" "/nix/store/xyz-util-linux/bin/setpriv"
+	assert_equal "${words[11]}" "--reuid=7"
+	assert_equal "${words[12]}" "--regid=7"
+	assert_equal "${words[13]}" "--clear-groups"
+	assert_equal "${words[14]}" "--"
+	assert_equal "${words[15]}" "/nix/store/xyz-coreutils/bin/env"
 }
 
 # The verb's caller writes "exec <name> -- cmd", and the verb hands the
 # rest on with a separator of its own; the second reached env as its
 # command: "env: '--': No such file or directory".
 @test "a separator the caller wrote is taken off as well as the verb's own" {
-	run nixcage_exec_words 4001 "" -- -- git status
-	assert_success
-	assert_line --index 16 "git"
-	assert_line --index 17 "status"
+	exec_words 4001 "" -- -- git status
+	assert_equal "${words[16]}" "git"
+	assert_equal "${words[17]}" "status"
 }
 
 @test "no command means the cage's shell" {
-	run nixcage_exec_words 4001 "" --
-	assert_success
-	assert_line --index 16 "bash"
+	exec_words 4001 "" --
+	assert_equal "${words[16]}" "bash"
+}
+
+# The bug this guards: a script argument with an embedded newline used to
+# be split into several spurious words by a newline-per-word wire format,
+# so only the argument's first line survived as the command.
+@test "a command argument with an embedded newline arrives as one word" {
+	exec_words 4001 "" -- bash -c "$(printf 'echo one\necho two')"
+	assert_equal "${#words[@]}" 19
+	assert_equal "${words[16]}" "bash"
+	assert_equal "${words[17]}" "-c"
+	assert_equal "${words[18]}" "echo one
+echo two"
 }

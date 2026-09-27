@@ -1071,10 +1071,7 @@ let
           exec_microvm "$name" "$subject" "$offset" "$@"
         fi
         local -a words=()
-        local word
-        while IFS= read -r word; do
-          words+=("$word")
-        done < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \
+        mapfile -d "" -t words < <(NIXCAGE_EXEC_ENV=${pkgs.coreutils}/bin/env NIXCAGE_EXEC_SETPRIV=${pkgs.util-linux}/bin/setpriv \
           nixcage_exec_words "$leader" "$offset" -- "$@")
         exec "''${words[@]}"
       }

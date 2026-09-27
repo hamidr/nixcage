@@ -15,10 +15,15 @@
 ## Sourced by store path into nixcage-container beside scope.sh, whose
 ## leader it takes; the suite drives it on a fixture proc tree.
 
-## The leader's environment as it has it, one assignment per line.
+## The leader's environment as it has it, one assignment per NUL-terminated
+## record: /proc/PID/environ is NUL-separated because a value may itself
+## contain a newline, and converting to newline-per-line as before would
+## split such a value across two records.
 nixcage_exec_env() {
-	local leader="$1"
-	tr '\0' '\n' <"$NIXCAGE_PROC/$leader/environ" 2>/dev/null | grep -E '^[A-Za-z_][A-Za-z0-9_]*='
+	local leader="$1" entry
+	while IFS= read -r -d '' entry; do
+		[[ "$entry" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && printf '%s\0' "$entry"
+	done <"$NIXCAGE_PROC/$leader/environ" 2>/dev/null
 }
 
 ## Where env and setpriv are, by store path: nsenter looks the command up
@@ -29,11 +34,14 @@ nixcage_exec_env() {
 NIXCAGE_EXEC_ENV="${NIXCAGE_EXEC_ENV:-env}"
 NIXCAGE_EXEC_SETPRIV="${NIXCAGE_EXEC_SETPRIV:-setpriv}"
 
-## The words, one per line: nsenter into the leader, then setpriv to the
-## subject when an offset is given, then env -i with the leader's
-## environment, then the command or the cage's shell. The working directory is
-## --wdns, resolved inside the cage's mount namespace: util-linux 2.42's
-## --wd opens the path on the host first, where /workspace is nothing.
+## The words, one per NUL-terminated record: nsenter into the leader, then
+## setpriv to the subject when an offset is given, then env -i with the
+## leader's environment, then the command or the cage's shell. NUL, not
+## newline, because a command argument (a script handed to exec) may itself
+## contain a newline; a newline-per-word wire format would split it into
+## spurious extra words. The working directory is --wdns, resolved inside
+## the cage's mount namespace: util-linux 2.42's --wd opens the path on the
+## host first, where /workspace is nothing.
 ##
 ## nixcage_exec_words <leader> <subject-offset-or-empty> -- [cmd...]
 nixcage_exec_words() {
@@ -41,15 +49,15 @@ nixcage_exec_words() {
 	shift 2
 	## The verb's own separator, and the caller's when they wrote one too.
 	while [ "${1:-}" = "--" ]; do shift; done
-	printf '%s\n' nsenter "--target=$leader" --mount --uts --ipc --net --pid --user --wdns=/workspace --
+	printf '%s\0' nsenter "--target=$leader" --mount --uts --ipc --net --pid --user --wdns=/workspace --
 	if [ -n "$offset" ]; then
-		printf '%s\n' "$NIXCAGE_EXEC_SETPRIV" "--reuid=$offset" "--regid=$offset" --clear-groups --
+		printf '%s\0' "$NIXCAGE_EXEC_SETPRIV" "--reuid=$offset" "--regid=$offset" --clear-groups --
 	fi
-	printf '%s\n' "$NIXCAGE_EXEC_ENV" -i
+	printf '%s\0' "$NIXCAGE_EXEC_ENV" -i
 	nixcage_exec_env "$leader"
 	if [ $# -gt 0 ]; then
-		printf '%s\n' "$@"
+		printf '%s\0' "$@"
 	else
-		printf '%s\n' bash
+		printf '%s\0' bash
 	fi
 }
