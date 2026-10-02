@@ -776,12 +776,19 @@ cmd_enter() {
     remote+=("$(printf '%q' "$arg")")
   done
 
+  # A command run from a terminal is a person's, often an interactive
+  # program such as an agent's TUI, and ssh gives the remote side no terminal
+  # unless asked. From a pipe it is a script's, whose bytes a pty would
+  # rewrite, so it gets none. The Linux path needs no such rule: nspawn
+  # follows its own stdio.
+  local -a ssh_tty=()
   if [[ $# -eq 0 ]]; then
     log_info "Entering container $name..."
-    vm_ssh "${ssh_fwd[@]}" -t -- "${remote[@]}"
-  else
-    vm_ssh "${ssh_fwd[@]}" -- "${remote[@]}"
+    ssh_tty=(-t)
+  elif [[ -t 0 && -t 1 ]]; then
+    ssh_tty=(-t)
   fi
+  vm_ssh "${ssh_fwd[@]}" ${ssh_tty[@]+"${ssh_tty[@]}"} -- "${remote[@]}"
 }
 
 ## What cages this machine has, with what each was given (ADR-017). The

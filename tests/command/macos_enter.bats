@@ -73,3 +73,37 @@ EOF
 	[[ "$output" != *" -A "* ]]
 	[[ "$output" != *--auth-sock* ]]
 }
+
+# Run the CLI with a pseudo-terminal on stdin and stdout, as a person at a
+# shell has. util-linux and BSD spell script(1) differently.
+run_nixcage_on_tty() {
+	local cmd
+	cmd="$(printf '%q ' bash "$NIXCAGE_BIN" "$@")"
+	if script --version >/dev/null 2>&1; then
+		run script -qec "$cmd" /dev/null
+	else
+		run script -q /dev/null bash -c "$cmd"
+	fi
+}
+
+@test "a command entered from a terminal gets a terminal in the cage" {
+	root="$TEST_TEMP_DIR/src"
+	mkdir -p "$root/proj"
+	write_cache 22022 "$root"
+	cd "$root/proj"
+	run_nixcage_on_tty enter -- claude
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/ssh-calls"
+	[[ "$output" == *" -t "* ]]
+}
+
+@test "a command entered from a pipe gets no terminal, so its output stays byte-exact" {
+	root="$TEST_TEMP_DIR/src"
+	mkdir -p "$root/proj"
+	write_cache 22022 "$root"
+	cd "$root/proj"
+	run_nixcage enter -- true </dev/null
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/ssh-calls"
+	[[ "$output" != *" -t "* ]]
+}
