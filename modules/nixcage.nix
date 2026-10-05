@@ -339,6 +339,10 @@ in
     ## shutdown, and it cannot bound what any one of them writes.
     boot = {
       supportedFilesystems.zfs = true;
+      ## The option forces the import of root pools in early boot, and this
+      ## VM's root is tmpfs: its one pool is imported by nixcage-storage.
+      ## Left unset, nixpkgs warns that its default flips to false in 26.11.
+      zfs.forceImportRoot = lib.mkDefault false;
       ## ZFS tracks kernel releases behind the newest one, and a VM that fails
       ## to build is worse than a VM one release back. mkDefault, so a config
       ## flake that knows better can say so.
