@@ -227,6 +227,28 @@ port_in_use() {
   exec 3>&- 3<&-
 }
 
+# Who listens on a port, as "<pid> <command>", or nothing where lsof cannot
+# say.
+port_holder() {
+  command -v lsof >/dev/null || return 0
+  lsof -nP -iTCP:"$1" -sTCP:LISTEN -Fpc 2>/dev/null |
+    awk '/^p/ { pid = substr($0, 2) } /^c/ { print pid, substr($0, 2); exit }' || true
+}
+
+# The refusal for a port someone already holds. The usual holder is a VM of
+# ours whose pid file was lost, which the port alone does not say.
+vm_port_refusal() {
+  local port="$1" holder pid
+  holder="$(port_holder "$port")"
+  pid="${holder%% *}"
+  log_err "Port $port is already in use on 127.0.0.1${holder:+, by $holder}."
+  if [[ "$holder" == *qemu* ]]; then
+    log_err "That is most likely a nixcage VM whose pid file was lost: kill $pid, then try again."
+  else
+    log_err "Free it, or change nixcage.sshPort and run 'nixcage rebuild'."
+  fi
+}
+
 # Container names are passed to root-level rm -rf and into SSH command
 # strings; reject anything beyond the derived-name alphabet.
 validate_container_name() {
@@ -286,9 +308,16 @@ vm_wait_for_ssh() {
   local key="$STATE_DIR/id_ed25519"
   local timeout=120
   [[ "$OS" == "macos" ]] && timeout=300
-  local deadline=$((SECONDS + timeout))
+  timeout="${NIXCAGE_SSH_TIMEOUT:-$timeout}"
+  # A first boot can take minutes, and a silent one reads as a hang.
+  local progress="${NIXCAGE_SSH_PROGRESS:-30}"
+  local started=$SECONDS deadline=$((SECONDS + timeout)) next=$((SECONDS + progress))
   log_info "Waiting for VM SSH..."
   while [[ $SECONDS -lt $deadline ]]; do
+    if [[ $SECONDS -ge $next ]]; then
+      log_info "Still waiting for VM SSH ($((SECONDS - started))s of ${timeout}s)..."
+      next=$((SECONDS + progress))
+    fi
     if ssh -p "$VM_SSH_PORT" -i "$key" \
          -o "UserKnownHostsFile=$known_hosts" \
          -o "StrictHostKeyChecking=accept-new" \
@@ -304,7 +333,8 @@ vm_wait_for_ssh() {
     fi
     sleep 2
   done
-  log_err "Timed out waiting for VM SSH (${timeout}s)."
+  log_err "Timed out waiting for VM SSH (${timeout}s). The end of $STATE_DIR/vm.log:"
+  tail -n 20 "$STATE_DIR/vm.log" >&2 2>/dev/null || true
   exit 1
 }
 
@@ -415,8 +445,7 @@ vm_start() {
   # worse, get trusted by the accept-new handshake meant for the VM.
   vm_read_cache
   if port_in_use "$VM_SSH_PORT"; then
-    log_err "Port $VM_SSH_PORT is already in use on 127.0.0.1."
-    log_err "Free it, or change nixcage.sshPort and run 'nixcage rebuild'."
+    vm_port_refusal "$VM_SSH_PORT"
     exit 1
   fi
 
