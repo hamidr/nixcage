@@ -43,12 +43,11 @@ in
   options.nixcage = {
     workspaceRoots = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      example = [ "/home/me/Src" ];
+      example = [ "/Users/me/Src" ];
       description = ''
         Absolute host directories shared into the VM. Each root is mounted
         at the same absolute path inside the VM, so a project's path is
-        identical on both sides. Only flake directories under a root can be
-        entered.
+        identical on both sides. Any directory under a root can be entered.
       '';
     };
 

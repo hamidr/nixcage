@@ -146,7 +146,7 @@ in
       type = lib.types.listOf lib.types.str;
       example = [ "/home/me/Src" ];
       description = ''
-        Absolute directories whose flake subdirectories can be entered.
+        Absolute directories any subdirectory of which can be entered.
         Containers bind only their own project subdirectory.
       '';
     };
