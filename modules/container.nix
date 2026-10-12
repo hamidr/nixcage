@@ -339,6 +339,14 @@ let
         done < <(secret_pairs)
       }
 
+      ## Called from cmd_enter alone, once the cage's uid, home and record
+      ## exist, and reads cmd_enter's own resolution through bash's dynamic
+      ## scope rather than seventeen arguments, three of them arrays: name,
+      ## project, home, cdir, session_home, session_uid, session_gid,
+      ## owner_uid, owner_gid, user, block, asked_binds, asked_env,
+      ## git_binds, auth_sock, network_bridge, network_addr. A rename there
+      ## is a rename here; nounset makes a missed one fail at the first
+      ## microVM session rather than pass unnoticed.
       enter_microvm() {
         local skeleton="$cdir/session-$$" credential="$cdir/session-$$.cred" stage="$cdir/session-$$.bind"
         mkdir -p "$skeleton"
