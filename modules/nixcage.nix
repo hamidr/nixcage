@@ -238,8 +238,8 @@ in
         assertion = cfg.authorizedKeys != [ ];
         message = ''
           nixcage.authorizedKeys is empty: nobody could SSH into the VM and
-          'nixcage enter' would hang until timeout. Paste the public key the
-          CLI prints on first run (~/.local/state/nixcage/id_ed25519.pub).
+          'nixcage enter' would hang until timeout. Paste the public key
+          'nixcage status' prints (~/.local/state/nixcage/id_ed25519.pub).
         '';
       }
     ];

@@ -227,8 +227,29 @@ ensure_ssh_key() {
   mkdir -p "$STATE_DIR"
   ssh-keygen -t ed25519 -f "$key" -N "" -C "nixcage@$(hostname)" -q
   log_ok "Generated SSH keypair at $key"
-  log_warn "Add this public key to nixcage.authorizedKeys in your config flake:"
-  { echo; cat "$key.pub"; echo; } >&2
+  SSH_KEY_NEW=1
+}
+
+vm_print_key_guidance() {
+  log_warn "Add this public key to nixcage.authorizedKeys in $NIXCAGE_FLAKE, then run 'nixcage rebuild':"
+  { echo; cat "$STATE_DIR/id_ed25519.pub"; echo; } >&2
+}
+
+# The module refuses an empty authorizedKeys at evaluation, but a list
+# without this machine's key builds, boots, and leaves enter waiting out the
+# SSH timeout. A key's comment is whatever the machine that pasted it chose,
+# so the type and the key are what is compared.
+vm_check_authorized() {
+  local attr="$1" mine keys
+  mine="$(cut -d' ' -f1-2 "$STATE_DIR/id_ed25519.pub")"
+  keys="$(nix eval --json "$NIXCAGE_FLAKE#$attr.nixcage.authorizedKeys")"
+  if jq -e --arg mine "$mine" \
+       'any(.[]; ([splits(" +")][0:2] | join(" ")) == $mine)' <<<"$keys" >/dev/null; then
+    return 0
+  fi
+  log_err "nixcage.authorizedKeys does not hold this machine's key, so the VM would not let it in."
+  vm_print_key_guidance
+  exit 1
 }
 
 vm_ssh() {
@@ -341,6 +362,8 @@ vm_build() {
 
   local attr
   attr="$(resolve_vm_attr)"
+  ensure_ssh_key
+  vm_check_authorized "$attr"
   log_info "Building VM from $NIXCAGE_FLAKE#${attr%.config} (first build takes a while)..."
   nix build "$NIXCAGE_FLAKE#$attr.microvm.declaredRunner" \
     --out-link "$STATE_DIR/result" -L
@@ -368,6 +391,9 @@ vm_start() {
   local result="$STATE_DIR/result"
   if [[ ! -e "$result" ]]; then
     vm_build
+  elif [[ -n "${SSH_KEY_NEW:-}" ]]; then
+    # A VM built before this key existed cannot list it.
+    vm_print_key_guidance
   fi
 
   # A foreign listener on the SSH port would break qemu's forward -- or
@@ -1079,6 +1105,10 @@ cmd_status() {
   fi
 
   echo "  Config flake: $NIXCAGE_FLAKE"
+  # The template sends a new user here for the key authorizedKeys needs,
+  # before anything has been built that would have made it.
+  ensure_ssh_key
+  echo "  SSH key:      $(cat "$STATE_DIR/id_ed25519.pub")"
 
   local built="no"
   [[ -e "$STATE_DIR/result" ]] && built="yes"
