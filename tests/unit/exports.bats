@@ -108,13 +108,6 @@ teardown() {
 	assert_output "0"
 }
 
-@test "the uid store carries its allocations across the rename" {
-	# Renaming it without moving it would reallocate every number, and a
-	# reissued uid hands something new the files of something dead.
-	run grep -q 'mv "$STATE_DIR/role-uids" "$store"' "$(CONTAINER_NIX)"
-	assert_success
-}
-
 @test "the cage maps the block a principal was allocated, not a fixed one" {
 	# A mapping of one where the block is wider leaves the subjects unmapped;
 	# a fixed wider one would map whatever was allocated next door (ADR-010).
@@ -175,8 +168,8 @@ teardown() {
 	# dependant with a different word finds a cage that talks about roles.
 	#
 	# The word is allowed only where it names the dependant that has it
-	# (cageworks) or the store renamed away from it (role-uids), so every
-	# surviving occurrence says on its own line why it is there.
+	# (cageworks), so every surviving occurrence says on its own line why it
+	# is there.
 	local shipped=(
 		"$NIXCAGE_ROOT/nixcage"
 		"$NIXCAGE_ROOT"/modules/*.sh
@@ -187,7 +180,7 @@ teardown() {
 	local line
 	while IFS= read -r line; do
 		[ -n "$line" ] || continue
-		[[ "$line" == *role-uids* || "$line" == *cageworks* ]] ||
+		[[ "$line" == *cageworks* ]] ||
 			fail "names a caller's concept: $line"
 	done <<<"$output"
 }
@@ -269,10 +262,10 @@ teardown() {
 	run grep -qE 'nixcage_declaration_read "\$DECLARATION"' "$(CONTAINER_NIX)"
 	assert_success
 	# Every setting comes from that read, so no other file under /etc/nixcage
-	# is opened here except the two an older nixcage rendered and the profile
-	# symlink, which is a store path rather than text.
+	# is opened here except the profile symlink, which is a store path rather
+	# than text.
 	run bash -c "grep -oE '/etc/nixcage/[a-z-]+' '$(CONTAINER_NIX)' | sort -u | tr '\n' ' '"
-	assert_output "/etc/nixcage/config /etc/nixcage/container /etc/nixcage/declaration /etc/nixcage/gitconfig /etc/nixcage/profile /etc/nixcage/secret-env "
+	assert_output "/etc/nixcage/declaration /etc/nixcage/profile "
 }
 
 # ADR-022 left the number to the host and ADR-023 has no host, so undeclared

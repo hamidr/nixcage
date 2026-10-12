@@ -14,7 +14,6 @@ NIXCAGE_DECLARATION_VERSION=1
 # shellcheck disable=SC2034
 nixcage_declaration_reset() {
 	NIXCAGE_DECLARED=""
-	NIXCAGE_DECLARATION_LEGACY=""
 	DECLARATION_VERSION=""
 	WORKSPACE_ROOTS=""
 	PRINCIPAL_UID_BASE=""
@@ -62,32 +61,6 @@ nixcage_declaration_read() {
 		return 2
 	fi
 	NIXCAGE_DECLARED=1
-}
-
-## The files a nixcage before ADR-024 rendered, translated into the keys this
-## one reads. One function rather than a second set of call sites, and deleted
-## one release after the declaration lands: a CLI installed on its own can
-## stand on a module older than itself, and reading nothing there would make a
-## host with workspace roots answer as a host with none.
-## nixcage_declaration_read_legacy <config> <container>
-# shellcheck disable=SC2034
-nixcage_declaration_read_legacy() {
-	local config="$1" container="$2" key value
-	nixcage_declaration_reset
-	[ -f "$config" ] || [ -f "$container" ] || return 0
-	if [ -f "$container" ]; then
-		# shellcheck disable=SC1090
-		. "$container"
-	fi
-	if [ -f "$config" ]; then
-		while IFS='=' read -r key value || [ -n "$key" ]; do
-			case "$key" in
-			WORKSPACE_ROOTS) WORKSPACE_ROOTS="$value" ;;
-			esac
-		done <"$config"
-	fi
-	NIXCAGE_DECLARED=1
-	NIXCAGE_DECLARATION_LEGACY=1
 }
 
 ## The variable and secret pairs a declaration names, one per line. A word

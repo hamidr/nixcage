@@ -9,8 +9,6 @@ setup() {
 	setup_temp_dir
 	export NIXCAGE_OS=linux
 	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declaration"
-	export NIXCAGE_LEGACY_HOST_CONFIG="$TEST_TEMP_DIR/legacy-config"
-	export NIXCAGE_LEGACY_CONTAINER_CONFIG="$TEST_TEMP_DIR/legacy-container"
 	printf 'DECLARATION_VERSION=1\nWORKSPACE_ROOTS=%s\n' "$TEST_TEMP_DIR" \
 		>"$NIXCAGE_HOST_CONFIG"
 	mkdir -p "$TEST_TEMP_DIR/bin"

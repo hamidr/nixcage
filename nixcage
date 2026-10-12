@@ -84,11 +84,6 @@ NIXCAGE_DECLARATION_SH="${NIXCAGE_DECLARATION_SH:-$(dirname "${BASH_SOURCE[0]}")
 source "$NIXCAGE_DECLARATION_SH"
 
 HOST_CONFIG="${NIXCAGE_HOST_CONFIG:-/etc/nixcage/declaration}"
-# The two files a nixcage before this one rendered, read when the declaration
-# is absent so a CLI newer than the module it stands on does not take a host
-# with workspace roots for a host with none.
-LEGACY_HOST_CONFIG="${NIXCAGE_LEGACY_HOST_CONFIG:-/etc/nixcage/config}"
-LEGACY_CONTAINER_CONFIG="${NIXCAGE_LEGACY_CONTAINER_CONFIG:-/etc/nixcage/container}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nixcage"
 
 # All values the CLI needs from the config flake, cached at build time so
@@ -144,13 +139,6 @@ declaration_read_once() {
   nixcage_declaration_read "$HOST_CONFIG" || status=$?
   if [[ "$status" == 2 ]]; then
     exit 1
-  fi
-  if [[ -z "${NIXCAGE_DECLARED:-}" ]]; then
-    nixcage_declaration_read_legacy "$LEGACY_HOST_CONFIG" "$LEGACY_CONTAINER_CONFIG"
-    if [[ -n "${NIXCAGE_DECLARATION_LEGACY:-}" ]]; then
-      log_warn "Reading a declaration an older nixcage rendered."
-      log_warn "Apply the matching nixcage with nixos-rebuild switch for the current one."
-    fi
   fi
   NIXCAGE_DECLARATION_READ=1
 }

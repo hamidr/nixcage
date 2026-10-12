@@ -121,8 +121,7 @@ factory of roles over one repository, is built entirely on those. Architecture:
   `substrate.default` and `cages.<path>.substrate`; installs the container
   layer on the host. Everything it declares goes into one rendered file,
   `/etc/nixcage/declaration`, carrying a version, which the CLI and
-  `nixcage-container` both read (ADR-024). `/etc/nixcage/config` is still
-  rendered for one release, for a CLI older than the module.
+  `nixcage-container` both read (ADR-024).
 - `templates/config/` -- the flake template users instantiate at
   `~/.config/nixcage` (their VM configuration; sops-nix wired in).
 - `examples/project/` -- an ordinary project flake showing the devShell
@@ -192,9 +191,8 @@ machine's SSH key, port or state layout. Every word is quoted for the remote
 shell, which re-splits the whole line rather than only the trailing arguments.
 
 **The exported verbs** -- `uid` allocates from `nixcage.principalUidRange`,
-monotonically, into `$STATE/principal-uids`; it was `role-uids` while the
-factory lived here and is renamed in place, because a reissued number hands
-something new the files of something dead. `storage ensure <path> <uid>
+monotonically, into `$STATE/principal-uids`, and never reissues a number,
+because a reissued number hands something new the files of something dead. `storage ensure <path> <uid>
 [quota]` derives the dataset name from the path relative to `/var/lib/nixcage`,
 which is the only place the pool is mounted, and refuses a path outside it
 rather than inventing a name.
@@ -216,7 +214,7 @@ project bind, but a linked worktree keeps its git directory inside the primary
 repository: `nixcage_git_binds` (`modules/git-worktree.sh`) resolves the
 administrative and common directories and they are bound at the exact path git
 recorded (ADR-007). Identity comes from `nixcage.git.{userName,userEmail}`
-rendered to `/etc/nixcage/gitconfig`, and signing goes through the user's
+in the declaration, rendered into the session's `/etc/gitconfig`, and signing goes through the user's
 ssh-agent: `enter` forwards `SSH_AUTH_SOCK` (`ssh -A` on macOS, an explicit
 `--auth-sock` past sudo on Linux) and the guest binds it at
 `/run/ssh-agent.sock`. No key material enters a container (ADR-008).

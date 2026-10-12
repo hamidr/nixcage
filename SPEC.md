@@ -63,24 +63,21 @@ guest script read through `modules/declaration.sh` (ADR-024). It carries
 `MICROVM_GUEST`, `PRINCIPAL_UID_BASE`, `PRINCIPAL_UID_SIZE`,
 `PRINCIPAL_SUBJECTS`, `STORAGE_DATASET`, `SECRET_ENV` and the `GIT_*` fields.
 A declaration whose version this nixcage does not read stops the session
-rather than reading as absent; where it is missing entirely, the files a
-nixcage before ADR-024 rendered (`/etc/nixcage/config`,
-`/etc/nixcage/container`, `/etc/nixcage/secret-env`,
-`/etc/nixcage/gitconfig`) are read instead and the session says so, until one
-release from now. With `nixcage.microvm.enable` the module also builds the
+rather than reading as absent; where it is missing entirely, the host
+declared nothing (section 3.0.1). With `nixcage.microvm.enable` the module also builds the
 guest a microVM cage boots, from the host's own pkgs, and names it in the
 declaration; the substrate options are `nixcage.substrate.default` (`nspawn`)
 and `nixcage.cages.<path>.substrate`, and they are the host module's alone.
 Containers bind
 the host store read-only and build through the host nix-daemon; `secretEnv`
 resolves against the host's own sops-nix `/run/secrets`. The CLI commands on
-Linux are `enter`, `rm`, and `status`, executing `sudo nixcage-container`
+Linux are `enter`, `exec`, `list`, `rm` and `status`, executing `sudo nixcage-container`
 locally; `rebuild` and `down` fail pointing at `nixos-rebuild`. `NIXCAGE_OS`
 overrides OS detection for tests only.
 
 ### 3.0.1 Linux: a host that declared nothing
 
-With no `/etc/nixcage/config`, every reader gives the undeclared answer rather
+With no `/etc/nixcage/declaration`, every reader gives the undeclared answer rather
 than refusing (ADR-023). The cage is `$PWD`; `/`, `/nix`, `/nix/store`, the
 invoking user's home itself and any directory that user does not own are
 refused, since there is no declared root to catch a mistyped `cd`. The session
@@ -131,7 +128,7 @@ machines (the nixos-rebuild hostname convention). A starter is scaffolded with
 | `nixcage.cages.<path>.binds` | list of str | `[ ]` | Host module only: paths this cage always has, `SRC:DST` or `SRC:DST:ro`, added to whatever the session asks for; two binds on one destination are refused (ADR-025) |
 | `nixcage.bounds` | `{ memory; cpus; }` | `null` | What a cage may use: `MemoryMax=`/`CPUQuota=` on nspawn, where memory bounds RAM and swap stays unbounded (ADR-012), the guest's own RAM and vCPUs on a microVM (ADR-022) |
 | `nixcage.cages.<path>.bounds` | `{ memory; cpus; }` | `null` | The same for one cage, over the default and under the session's `--memory`/`--cpus` |
-| `nixcage.git.userName`, `.userEmail`, `.signing.enable` | str, str, bool | `""`, `""`, `true` | The identity a session commits as, rendered to `/etc/nixcage/gitconfig`; signing goes through the forwarded agent (ADR-008) |
+| `nixcage.git.userName`, `.userEmail`, `.signing.enable` | str, str, bool | `""`, `""`, `true` | The identity a session commits as, rendered into the session's `/etc/gitconfig`; signing goes through the forwarded agent (ADR-008) |
 | `nixcage.principalUidRange` | `{ base; size; }` | `{ 700000; 64; }` | The block `nixcage-container uid` allocates from, monotonically, never reissuing (ADR-004, ADR-010) |
 | `nixcage.principalSubjects` | list of str | `[ ]` | The subjects every cage has besides its root (ADR-010) |
 | `nixcage.containerPackages` | list of package | `[ ]` | What every session's userland carries on top of the minimal one; `enter` takes binds and environment, never packages |
@@ -178,7 +175,7 @@ nixcage [--flake <ref>] <command> [args...]
 | `version`, `help`  | Metadata.                                                          |
 
 `enter` validation order: the path is under a workspace root (from
-`/etc/nixcage/config` on Linux, the cache on macOS, where errors point at
+`/etc/nixcage/declaration` on Linux, the cache on macOS, where errors point at
 `rebuild` when it is absent), or, where nothing was declared, is a directory
 the caller may cage (section 3.0.1); then VM liveness. A project needs no
 `flake.nix` to be entered (ADR-021). Both `enter cmd...` and

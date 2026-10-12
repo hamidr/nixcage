@@ -1,7 +1,7 @@
 ## nixcage host module for Linux: project containers run directly on this
-## machine, so there is no VM. Renders /etc/nixcage/config for the CLI and
-## installs the same container layer the VM uses. Secrets come from the
-## host's own sops-nix setup under /run/secrets.
+## machine, so there is no VM. Renders /etc/nixcage/declaration for the CLI
+## and the guest script, and installs the same container layer the VM uses.
+## Secrets come from the host's own sops-nix setup under /run/secrets.
 {
   config,
   pkgs,
@@ -558,15 +558,6 @@ in
 
     ## One guest per host, from this host's pkgs (ADR-019 decision 3).
     nixcage.microvm.guest = pkgs.nixos ([ ./guest.nix ] ++ cfg.microvm.guestModules);
-
-    ## The one key a CLI older than this module reads, kept where it looks
-    ## for one release. A machine rebuilds with this module while the nixcage
-    ## someone installed separately is still the one before it, and without
-    ## this that CLI tells a person who has just imported the module to go
-    ## and import it.
-    environment.etc."nixcage/config".text = ''
-      WORKSPACE_ROOTS=${lib.concatStringsSep ":" workspaceRoots}
-    '';
 
     environment.etc."nixcage/profile".source = container.profile;
 

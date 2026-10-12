@@ -10,8 +10,6 @@ setup() {
 	setup_temp_dir
 	export NIXCAGE_OS=linux
 	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declaration"
-	export NIXCAGE_LEGACY_HOST_CONFIG="$TEST_TEMP_DIR/legacy-config"
-	export NIXCAGE_LEGACY_CONTAINER_CONFIG="$TEST_TEMP_DIR/legacy-container"
 	export HOME="$TEST_TEMP_DIR/home"
 	export NIXCAGE_CONTAINER=/nix/store/aaa-nixcage-container/bin/nixcage-container
 	export NIXCAGE_PROFILE=/nix/store/bbb-nixcage-container-profile

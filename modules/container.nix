@@ -2,7 +2,8 @@
 ## nixcage-container script that owns all nspawn mechanics. Used by the
 ## VM module (macOS path) and the host module (Linux path) unchanged --
 ## the script only assumes a Linux system with /var/lib/nixcage,
-## /etc/nixcage/{profile,secret-env}, and a nix daemon socket.
+## /etc/nixcage/{declaration,profile} where a host declared them, and a nix
+## daemon socket.
 {
   pkgs,
   ## What the host adds to every session's userland. A dependant that needs one
@@ -134,17 +135,13 @@ let
       STATE_DIR="$NIXCAGE_STATE_DIR"
       ## What the platform module rendered: one file, versioned, holding
       ## every setting a session or the CLI reads. Absent on a host that
-      ## declared nothing, and on one whose nixcage is older than this script,
-      ## which is what the two names beneath it are for.
+      ## declared nothing.
       DECLARATION=/etc/nixcage/declaration
-      LEGACY_CONFIG=/etc/nixcage/config
-      LEGACY_CONTAINER=/etc/nixcage/container
       ## Resolve the /etc symlink to its store path: the container has its
       ## own /etc, but the store bind makes store paths valid inside. Absent
       ## where nothing rendered /etc/nixcage (ADR-023), and then the session
       ## names the layer it was built from with --profile.
       PROFILE_LINK=/etc/nixcage/profile
-      LEGACY_SECRET_ENV=/etc/nixcage/secret-env
       ## What a vsock address resolves through (ADR-019 decision 6). systemd
       ## ships the snippet and NixOS includes it in ssh_config; naming it here
       ## makes exec and the agent forward work on a host that includes nothing
@@ -178,42 +175,12 @@ let
         local status=0
         nixcage_declaration_read "$DECLARATION" || status=$?
         [ "$status" = 2 ] && die "this host's declaration is not one this nixcage reads"
-        [ -n "''${NIXCAGE_DECLARED:-}" ] && return 0
-        ## A module older than this script rendered the files this one
-        ## replaced. Read rather than ignored: a host with workspace roots
-        ## must not answer as a host with none (ADR-024 decision 7).
-        nixcage_declaration_read_legacy "$LEGACY_CONFIG" "$LEGACY_CONTAINER"
-        if [ -n "''${NIXCAGE_DECLARATION_LEGACY:-}" ]; then
-          echo "nixcage-container: reading a declaration an older nixcage rendered; nixos-rebuild switch renders the current one" >&2
-        fi
         return 0
       }
 
-      ## The variable and secret pairs this host declared, from the field it
-      ## declares them in or, on a host whose nixcage is older, the file they
-      ## used to have of their own.
-      secret_pairs() {
-        if [ -n "''${NIXCAGE_DECLARATION_LEGACY:-}" ] && [ -f "$LEGACY_SECRET_ENV" ]; then
-          local var secret
-          while IFS='=' read -r var secret; do
-            [ -n "$var" ] || continue
-            printf '%s=%s\n' "$var" "$secret"
-          done <"$LEGACY_SECRET_ENV"
-          return 0
-        fi
-        nixcage_declaration_secret_pairs
-      }
-
-      ## Where allocations are recorded. The file was called role-uids while the
-      ## factory lived here; renaming it in place keeps every number already
-      ## handed out, which is the one property the store exists to have.
+      ## Where allocations are recorded.
       uid_store() {
-        local store="$STATE_DIR/principal-uids"
-        if [ ! -f "$store" ] && [ -f "$STATE_DIR/role-uids" ]; then
-          mv "$STATE_DIR/role-uids" "$store"
-          echo "nixcage-container: moved the uid store to $store" >&2
-        fi
-        echo "$store"
+        echo "$STATE_DIR/principal-uids"
       }
 
       ## Render nixcage.secretEnv (VAR=secretname lines) into an export
@@ -233,7 +200,7 @@ let
           else
             echo "nixcage-container: secret '$secret' for $var not found; skipping" >&2
           fi
-        done < <(secret_pairs)
+        done < <(nixcage_declaration_secret_pairs)
       }
 
       ## The subjects a cage has, declared by the host. Cage root is not one of
@@ -336,7 +303,7 @@ let
           else
             echo "nixcage-container: secret '$secret' for $var not found; skipping" >&2
           fi
-        done < <(secret_pairs)
+        done < <(nixcage_declaration_secret_pairs)
       }
 
       ## Called from cmd_enter alone, once the cage's uid, home and record
@@ -869,10 +836,6 @@ let
         local git_email="''${NIXCAGE_ENTER_GIT_EMAIL:-''${GIT_USER_EMAIL:-}}"
         nixcage_gitconfig_text "$git_name" "$git_email" "''${GIT_SIGNING:-}" \
           ${pkgs.openssh}/bin/ssh-keygen >"$rootfs/etc/gitconfig"
-        if [ -f /etc/nixcage/gitconfig ] && [ ! -s "$rootfs/etc/gitconfig" ]; then
-          ## A module older than this script rendered the file itself.
-          cp /etc/nixcage/gitconfig "$rootfs/etc/gitconfig"
-        fi
 
         ## Commits are signed through the invoking user's agent: the socket
         ## is forwarded in, no key material is. The session's uid is often

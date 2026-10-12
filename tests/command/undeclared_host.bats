@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# A Linux host with no /etc/nixcage/config still runs a cage, and the cage is
+# A Linux host with no /etc/nixcage/declaration still runs a cage, and the cage is
 # the directory the caller is standing in (ADR-023). What the missing
 # declaration costs is the roots gate, so the directories nobody means are
 # refused here instead.
@@ -11,8 +11,6 @@ setup() {
 	export NIXCAGE_OS=linux
 	# The path the declaration would be at, deliberately never written.
 	export NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declaration"
-	export NIXCAGE_LEGACY_HOST_CONFIG="$TEST_TEMP_DIR/legacy-config"
-	export NIXCAGE_LEGACY_CONTAINER_CONFIG="$TEST_TEMP_DIR/legacy-container"
 	export HOME="$TEST_TEMP_DIR/home"
 	# What the package baked in: a nixcage the store built carries the layer
 	# a session is given, since undeclared nothing else provides one.

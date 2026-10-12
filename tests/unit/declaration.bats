@@ -163,27 +163,6 @@ write_declaration() {
 	[ "$status" -eq 2 ]
 }
 
-# What a partial upgrade leaves: a CLI newer than the module it stands on
-# (ADR-024 decision 7). Removed one release after it lands.
-@test "the files an older nixcage rendered are read, and say they are old" {
-	echo "WORKSPACE_ROOTS=/srv" >"$TEST_TEMP_DIR/old-config"
-	cat >"$TEST_TEMP_DIR/old-container" <<-EOF
-		PRINCIPAL_UID_BASE=700000
-		STORAGE_DATASET=tank/nixcage
-	EOF
-	nixcage_declaration_read_legacy "$TEST_TEMP_DIR/old-config" "$TEST_TEMP_DIR/old-container"
-	[ -n "$NIXCAGE_DECLARED" ]
-	[ -n "$NIXCAGE_DECLARATION_LEGACY" ]
-	[ "$WORKSPACE_ROOTS" = /srv ]
-	[ "$PRINCIPAL_UID_BASE" = 700000 ]
-}
-
-@test "a host with neither file declared nothing" {
-	nixcage_declaration_read_legacy "$TEST_TEMP_DIR/gone" "$TEST_TEMP_DIR/also-gone"
-	[ -z "$NIXCAGE_DECLARED" ]
-	[ -z "$NIXCAGE_DECLARATION_LEGACY" ]
-}
-
 # Secrets are a word list now rather than a file of their own: a secret's
 # name and a variable's name are both checked elsewhere and neither can hold
 # a space.
