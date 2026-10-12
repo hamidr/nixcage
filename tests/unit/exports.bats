@@ -296,3 +296,12 @@ teardown() {
 	run grep -q 'is for a host that declared none' "$(CONTAINER_NIX)"
 	assert_success
 }
+
+@test "the package's version is the one the script prints" {
+	local script package
+	script="$(sed -n 's/^NIXCAGE_VERSION="\(.*\)"$/\1/p' "$NIXCAGE_BIN")"
+	# path: so the working tree's own package.nix is read, committed or not.
+	package="$(nix eval --raw "path:$NIXCAGE_ROOT#default.version")"
+	[ -n "$script" ]
+	[ "$package" = "$script" ]
+}

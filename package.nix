@@ -32,7 +32,15 @@ let
 in
 pkgs.stdenv.mkDerivation {
   pname = "nixcage";
-  version = "5.2.2";
+  ## The script is the version's one home: it runs from a working tree
+  ## with no build, and a second copy here is one a release forgets.
+  version =
+    let
+      line = lib.findFirst (lib.hasPrefix "NIXCAGE_VERSION=") (throw "nixcage sets no NIXCAGE_VERSION") (
+        lib.splitString "\n" (builtins.readFile ./nixcage)
+      );
+    in
+    lib.removeSuffix "\"" (lib.removePrefix "NIXCAGE_VERSION=\"" line);
 
   src = ./.;
 
