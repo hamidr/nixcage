@@ -149,3 +149,17 @@ request from the first cage's namespace forged as the second's address
 moves no count at the proxy, while an honest request moves the sender's
 and nobody else's. The dependant records the same run beside its bridge
 decision.
+
+## Amendment, 2026-10-12: a drop says so
+
+The four drops were silent, and a cage claiming an address it was not
+given is the one thing at the bridge a caller would want to hear of. Each
+rule now has a rule before it that logs what it is about to drop, at most
+ten a minute with a burst of five, as `nixcage-drop <reason> ` with
+`<reason>` one of `ip6`, `arp`, `ip` and `forward`. The limit is on that
+rule only, so a drop past the rate is still a drop. The level is `err`,
+the one level a machine's console (printk `4 4 1 7`) carries into its
+unit's journal on the host; on a host itself it is the kernel's log. The
+kernel's `IN=` on the line is the port, which the cage's record names
+(ADR-017 amendment). The prefix and the reasons are part of the interface:
+a dependant matches on them.

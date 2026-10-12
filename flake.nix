@@ -128,6 +128,20 @@
                     out = host.succeed("cat /tmp/rc-0 /tmp/rc-1 /tmp/rc-2 /tmp/rc-3 /tmp/rc-4 /tmp/rc-5 /tmp/rc-6 /tmp/rc-7")
                     assert out.split() == ["0"] * 8, out
 
+                with subtest("a drop at the bridge is logged, naming the port it came in on"):
+                    # A cage's link coming up sends IPv6 neighbour discovery,
+                    # which the bridge drops (ADR-015) and now says it did.
+                    host.succeed(
+                        "nft list chain bridge nixcage prerouting | grep -q 'nixcage-drop ip6'"
+                    )
+                    host.succeed(
+                        "nixcage exec -- nixcage-container enter --no-agent"
+                        + " --network nc0:10.66.0.97/24 a-bridged-cage-named-97 /srv/p0 sleep 5"
+                    )
+                    host.wait_until_succeeds(
+                        "dmesg | grep 'nixcage-drop ip6 ' | grep -q 'IN=nc-'", timeout=15
+                    )
+
                 with subtest("a placed cage holds the address it was given"):
                     host.succeed(
                         "nixcage exec -- nixcage-container enter --no-agent"

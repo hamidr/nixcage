@@ -50,11 +50,25 @@ nixcage_veth_table_ensure() {
 		nft add chain bridge nixcage prerouting '{ type filter hook prerouting priority -300 ; policy accept ; }' &&
 		nft add chain bridge nixcage forward '{ type filter hook forward priority 0 ; policy accept ; }' &&
 		nft flush chain bridge nixcage prerouting &&
-		nft add rule bridge nixcage prerouting iifname '"nc-*"' ether type ip6 drop &&
-		nft add rule bridge nixcage prerouting iifname '"nc-*"' ether type arp iifname . arp saddr ip != @placements drop &&
-		nft add rule bridge nixcage prerouting iifname '"nc-*"' ether type ip iifname . ip saddr != @placements drop &&
+		nixcage_veth_drop prerouting ip6 iifname '"nc-*"' ether type ip6 &&
+		nixcage_veth_drop prerouting arp iifname '"nc-*"' ether type arp iifname . arp saddr ip != @placements &&
+		nixcage_veth_drop prerouting ip iifname '"nc-*"' ether type ip iifname . ip saddr != @placements &&
 		nft flush chain bridge nixcage forward &&
-		nft add rule bridge nixcage forward iifname '"nc-*"' oifname '"nc-*"' drop
+		nixcage_veth_drop forward forward iifname '"nc-*"' oifname '"nc-*"'
+}
+
+## A drop, logged first. The limit sits on a rule of its own, since a limit
+## in the dropping rule would stop the drop once the rate is spent. err is the
+## one level a machine's console (printk 4) carries into the host's journal,
+## where a dependant reads it; the line's IN= is the port, which the cage's
+## record names (ADR-015 and ADR-017 amendments).
+## nixcage_veth_drop <chain> <reason> <match word>...
+nixcage_veth_drop() {
+	local chain="$1" reason="$2"
+	shift 2
+	nft add rule bridge nixcage "$chain" "$@" limit rate 10/minute burst 5 packets \
+		log prefix "\"nixcage-drop $reason \"" level err &&
+		nft add rule bridge nixcage "$chain" "$@" drop
 }
 
 ## Whatever the set holds under this host end goes: a pin from a session

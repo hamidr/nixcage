@@ -97,11 +97,25 @@ teardown() {
 	assert_line --index 2 "nft add chain bridge nixcage prerouting { type filter hook prerouting priority -300 ; policy accept ; }"
 	assert_line --index 3 "nft add chain bridge nixcage forward { type filter hook forward priority 0 ; policy accept ; }"
 	assert_line --index 4 "nft flush chain bridge nixcage prerouting"
-	assert_line --index 5 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type ip6 drop'
-	assert_line --index 6 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type arp iifname . arp saddr ip != @placements drop'
-	assert_line --index 7 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type ip iifname . ip saddr != @placements drop'
-	assert_line --index 8 "nft flush chain bridge nixcage forward"
-	assert_line --index 9 'nft add rule bridge nixcage forward iifname "nc-*" oifname "nc-*" drop'
+	assert_line --index 5 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type ip6 limit rate 10/minute burst 5 packets log prefix "nixcage-drop ip6 " level err'
+	assert_line --index 6 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type ip6 drop'
+	assert_line --index 7 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type arp iifname . arp saddr ip != @placements limit rate 10/minute burst 5 packets log prefix "nixcage-drop arp " level err'
+	assert_line --index 8 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type arp iifname . arp saddr ip != @placements drop'
+	assert_line --index 9 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type ip iifname . ip saddr != @placements limit rate 10/minute burst 5 packets log prefix "nixcage-drop ip " level err'
+	assert_line --index 10 'nft add rule bridge nixcage prerouting iifname "nc-*" ether type ip iifname . ip saddr != @placements drop'
+	assert_line --index 11 "nft flush chain bridge nixcage forward"
+	assert_line --index 12 'nft add rule bridge nixcage forward iifname "nc-*" oifname "nc-*" limit rate 10/minute burst 5 packets log prefix "nixcage-drop forward " level err'
+	assert_line --index 13 'nft add rule bridge nixcage forward iifname "nc-*" oifname "nc-*" drop'
+}
+
+# A drop is the one thing a cage does at the bridge that its caller would
+# want to hear of, and it was silent (audit N1). Each is logged before it is
+# dropped, rate-limited so a flooding cage cannot flood the journal, and at
+# err, the one level a machine's console carries to the host's journal.
+@test "a logged drop still drops past the rate: the limit is on the log rule only" {
+	run nixcage_veth_make builder fabriek-acme 10.77.0.10/24
+	run grep -c ' limit rate .* drop$' "$CALLS"
+	[ "$output" = 0 ]
 }
 
 @test "the table is made before the pair, so no port exists without the rules on it" {
