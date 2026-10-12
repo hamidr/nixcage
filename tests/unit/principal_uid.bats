@@ -41,16 +41,22 @@ teardown() {
 	[ "$first" = "$again" ]
 }
 
+# Nothing here forgets a principal any more, but a store from when something
+# did still holds its "-" lines, and their numbers stay claimed.
+forget_in_store() {
+	sed -i.bak "s/^$1 /- /" "$STORE" && rm -f "$STORE.bak"
+}
+
 @test "a uid is never reissued after its principal is forgotten" {
 	a="$(nixcage_principal_uid "$STORE" 700000 64 builder)"
-	nixcage_principal_forget "$STORE" builder
+	forget_in_store builder
 	b="$(nixcage_principal_uid "$STORE" 700000 64 newcomer)"
 	[ "$a" != "$b" ]
 }
 
 @test "a forgotten principal that returns does not get its old uid back" {
 	a="$(nixcage_principal_uid "$STORE" 700000 64 builder)"
-	nixcage_principal_forget "$STORE" builder
+	forget_in_store builder
 	b="$(nixcage_principal_uid "$STORE" 700000 64 builder)"
 	[ "$a" != "$b" ]
 }

@@ -9,7 +9,7 @@
 ## is why it is a file rather than an inline string.
 ##
 ## The store is one line per allocation, "<principal> <uid> <size>", where a
-## principal that has been forgotten keeps its line under the name "-".
+## principal an older nixcage forgot keeps its line under the name "-".
 ## Nothing is ever removed, because a reissued uid would hand a new principal
 ## the files of a dead one.
 ##
@@ -171,24 +171,6 @@ nixcage_principal_subject_offset() {
 
 	echo "nixcage: no such subject: $subject" >&2
 	return 1
-}
-
-## Forget a principal without freeing its number: the line stays so the uid
-## stays claimed, and the files it owns can still be traced to something.
-nixcage_principal_forget() {
-	local store="$1" principal="$2"
-
-	nixcage_principal_name_ok "$principal" || return 1
-	[ -f "$store" ] || return 0
-
-	nixcage_principal_lock "$store" || return 1
-	trap 'nixcage_principal_unlock "$store"' RETURN
-
-	local tmp="$store.tmp.$$"
-	awk -v r="$principal" '
-		{ if ($1 == r) print "-", $2, ($3 == "" ? 1 : $3); else print }
-	' "$store" >"$tmp"
-	mv "$tmp" "$store"
 }
 
 ## The login uid 0 carries inside a cage. An ordinary project session stays
