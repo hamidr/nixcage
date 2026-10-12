@@ -132,7 +132,7 @@
                     # A cage's link coming up sends IPv6 neighbour discovery,
                     # which the bridge drops (ADR-015) and now says it did.
                     host.succeed(
-                        "nft list chain bridge nixcage prerouting | grep -q 'nixcage-drop ip6'"
+                        "${pkgs.nftables}/bin/nft list chain bridge nixcage prerouting | grep -q 'nixcage-drop ip6'"
                     )
                     host.succeed(
                         "nixcage exec -- nixcage-container enter --no-agent"
