@@ -21,7 +21,7 @@ jobs:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
       - run: nix develop --command shellcheck nixcage modules/*.sh
-      - run: nix develop --command bats --recursive tests/
+      - run: nix develop --command bats --jobs "$(nproc)" --recursive tests/
 
   # The CLI as a user gets it, not as a working tree runs it: the working
   # tree has modules/ beside the script and the package does not.

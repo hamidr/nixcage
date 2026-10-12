@@ -135,7 +135,7 @@ factory of roles over one repository, is built entirely on those. Architecture:
 ```bash
 nix develop                          # bash, jq, shellcheck, bats, git, openssh
 nix develop --command shellcheck nixcage modules/*.sh
-nix develop --command bats --recursive tests/
+nix develop --command bats --jobs 8 --recursive tests/  # GNU parallel; ~1 min
 nix flake check -L                   # + the NixOS checks; CI runs all of these
 nix build -L .#hostChecks.microvm    # a microVM session; needs nested KVM, not in CI
 nix build -L .#hostChecks.machine    # a machine and a cage inside it; the same

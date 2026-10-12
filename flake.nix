@@ -756,6 +756,9 @@
               bats
               bats.libraries.bats-support
               bats.libraries.bats-assert
+              ## What `bats --jobs` runs tests through; serially the suite
+              ## takes minutes.
+              parallel
               openssh
               ## The worktree tests build real repositories rather than
               ## stubbing git, so it belongs in the shell.
