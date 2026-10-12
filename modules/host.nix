@@ -541,30 +541,18 @@ in
     ## newer than itself. Every key a session or the CLI reads is here; what
     ## is not here is the profile, which is a symlink to a store path rather
     ## than something a line of text says better.
-    environment.etc."nixcage/declaration".text = ''
-      DECLARATION_VERSION=1
-      HOST_PLATFORM=linux
-      WORKSPACE_ROOTS=${lib.concatStringsSep ":" workspaceRoots}
-      SUBSTRATE_DEFAULT=${substrateDefault}
-      CAGE_SUBSTRATES="${cageSubstrates}"
-      CAGE_BINDS="${cageBinds}"
-      ${cfg.boundsConfigText}${lib.optionalString cfg.microvm.enable ''
-        MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}
-      ''}${lib.optionalString (cfg.principalUidRange != null) ''
-        PRINCIPAL_UID_BASE=${toString cfg.principalUidRange.base}
-        PRINCIPAL_UID_SIZE=${toString cfg.principalUidRange.size}
-      ''}PRINCIPAL_SUBJECTS="${lib.concatStringsSep " " cfg.principalSubjects}"
-      STORAGE_DATASET=${lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset}
-      SECRET_ENV="${
-        lib.concatStringsSep " " (lib.mapAttrsToList (var: secret: "${var}=${secret}") cfg.secretEnv)
-      }"
-      ${lib.optionalString (cfg.git.userName != null) ''
-        GIT_USER_NAME="${cfg.git.userName}"
-      ''}${lib.optionalString (cfg.git.userEmail != null) ''
-        GIT_USER_EMAIL="${cfg.git.userEmail}"
-      ''}GIT_SIGNING=${if cfg.git.signing.enable then "1" else ""}
-      ${lib.optionalString cfg.machineGuest "MACHINE_GUEST=1"}
-    '';
+    environment.etc."nixcage/declaration".text = import ./declaration.nix { inherit lib; } {
+      inherit cfg workspaceRoots;
+      platform = "linux";
+      storageDataset = lib.optionalString (cfg.storage.dataset != null) cfg.storage.dataset;
+      extra = ''
+        SUBSTRATE_DEFAULT=${substrateDefault}
+        CAGE_SUBSTRATES="${cageSubstrates}"
+        CAGE_BINDS="${cageBinds}"
+        ${lib.optionalString cfg.microvm.enable "MICROVM_GUEST=${cfg.microvm.guest.config.system.build.toplevel}"}
+        ${lib.optionalString cfg.machineGuest "MACHINE_GUEST=1"}
+      '';
+    };
 
     nixcage.storeBase = container.storeBase;
 

@@ -62,6 +62,9 @@ factory of roles over one repository, is built entirely on those. Architecture:
   the CLI and by `nixcage-container` so one format has one parser. Every
   setting's undeclared value is stated in `nixcage_declaration_reset`, which
   is where a new option says what it means on a host that declared nothing.
+- `modules/declaration.nix` -- the declaration's one renderer, imported by
+  the host module and the VM module, each adding only the keys its platform
+  has. Its reader is `declaration.sh`.
 - `modules/gitconfig.sh` -- the identity a session commits as, rendered where
   the session is, from the fields a host declared or a caller named.
 - `modules/bridges.nix` -- `nixcage.bridges.<name>` (ADR-018), imported by
