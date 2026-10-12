@@ -137,6 +137,10 @@ ssh_calls() {
 # way of the host's nixcage-container, which holds the machine's key.
 
 @test "on Linux, exec --machine asks the host's nixcage-container to forward argv" {
+	# Declared, so the container is the one on the host's PATH rather than a
+	# layer this nixcage would have to carry.
+	printf '%s\n' DECLARATION_VERSION=1 HOST_PLATFORM=linux \
+		"WORKSPACE_ROOTS=$TEST_TEMP_DIR/src" >"$TEST_TEMP_DIR/declared"
 	NIXCAGE_OS=linux NIXCAGE_HOST_CONFIG="$TEST_TEMP_DIR/declared" run_nixcage exec --machine m1 -- uname -r
 	[ "$status" -eq 0 ]
 	run cat "$TEST_TEMP_DIR/sudo-calls"
