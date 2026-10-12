@@ -797,8 +797,11 @@ cmd_enter() {
   # the socket is forwarded rather than any key material being copied in.
   # Without a reachable agent the session still enters and only signing
   # fails, which is the same outcome as running git with no key.
+  # --no-agent is the caller declining it, and nixcage-container refuses a
+  # socket named beside it.
   local -a agent_fwd=()
-  if [[ -n "${SSH_AUTH_SOCK:-}" && -e "${SSH_AUTH_SOCK}" ]]; then
+  if [[ " ${session[*]-} " != *" --no-agent "* &&
+        -n "${SSH_AUTH_SOCK:-}" && -e "${SSH_AUTH_SOCK}" ]]; then
     agent_fwd=(--auth-sock "$SSH_AUTH_SOCK")
   fi
 

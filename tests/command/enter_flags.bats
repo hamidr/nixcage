@@ -66,6 +66,14 @@ asked() {
 	asked --print-argv
 }
 
+@test "--no-agent on Linux names no socket, though an agent is running" {
+	touch "$TEST_TEMP_DIR/agent.sock"
+	SSH_AUTH_SOCK="$TEST_TEMP_DIR/agent.sock" run_nixcage enter --no-agent -- true
+	[ "$status" -eq 0 ]
+	asked --no-agent
+	[[ "$(called)" != *--auth-sock* ]]
+}
+
 @test "a named devShell reaches the session" {
 	run_nixcage enter --shell ci
 	[ "$status" -eq 0 ]

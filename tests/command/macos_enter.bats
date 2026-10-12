@@ -61,6 +61,23 @@ EOF
 	[[ "$output" == *'--auth-sock "$SSH_AUTH_SOCK"'* ]]
 }
 
+# --no-agent is the caller declining the forward, so a live agent beside it
+# is not forwarded: both reaching nixcage-container is a refusal there.
+@test "remote enter --no-agent forwards no agent, though one is running" {
+	root="$TEST_TEMP_DIR/src"
+	mkdir -p "$root/proj"
+	write_cache 22022 "$root"
+	touch "$TEST_TEMP_DIR/agent.sock"
+	export SSH_AUTH_SOCK="$TEST_TEMP_DIR/agent.sock"
+	cd "$root/proj"
+	run_nixcage enter --no-agent -- true
+	[ "$status" -eq 0 ]
+	run cat "$TEST_TEMP_DIR/ssh-calls"
+	[[ "$output" == *--no-agent* ]]
+	[[ "$output" != *" -A "* ]]
+	[[ "$output" != *--auth-sock* ]]
+}
+
 @test "remote enter does not forward an agent that does not exist" {
 	root="$TEST_TEMP_DIR/src"
 	mkdir -p "$root/proj"
