@@ -69,6 +69,19 @@ A dependant wanting enforcement writes its own probe program against this
 same producer/socket shape; nixcage's contribution stops at carrying
 whatever text a probe program emits.
 
+**6. A probe program is declared per machine, not passed to the verb.**
+`nixcage.machines.<name>.trace.program` is a path, defaulting to the program
+nixcage ships, and `machine trace start <machine>` takes no program. One
+producer serves every consumer of a machine (point 3), so a program handed
+to `start` would let one consumer replace the stream another is reading;
+declared, there is one program per machine, chosen by whoever configures
+the host, and changing it is a rebuild and a restart of the producer. What
+a declared program does is its declarer's: the no-enforcement rule of point
+5 binds the program nixcage ships, not one a host names. A dependant whose
+detector needs fields the default does not emit (an exec's `filename`, a
+`tcp_connect`'s destination) declares a program that emits them; until
+this is built, it runs its own bpftrace unit in the guest, as it does now.
+
 ## Consequences
 
 nixcage takes on a background process and a socket per machine that did
