@@ -680,12 +680,6 @@ container_profile_args() {
 
 cmd_enter() {
   local project_dir="$PWD"
-
-  # A project is any directory under a workspace root (ADR-021). The flake is
-  # an environment the session offers to use, not the ticket that admits it,
-  # so the root is the only thing validated here.
-  check_workspace_root "$project_dir"
-
   local name
   name="$(container_name_for "$project_dir")"
 
@@ -719,6 +713,7 @@ cmd_enter() {
         continue
         ;;
       --substrate|--disk|--memory|--cpus|--bind|--bind-ro|--setenv|--shell) ;;
+      --flake) flake_misplaced ;;
       --uid|--user|--subject|--home|--network|--dns|--no-nix-daemon|--store-root|\
       --profile|--guest|--microvm-path|--git-name|--git-email)
         log_err "$flag parameterises a session on behalf of a dependant, not from here."
@@ -754,6 +749,12 @@ cmd_enter() {
 
   # Accept both 'enter -- cmd...' and 'enter cmd...'.
   [[ "${1:-}" == "--" ]] && shift
+
+  # A project is any directory under a workspace root (ADR-021). The flake is
+  # an environment the session offers to use, not the ticket that admits it,
+  # so the root is the only thing validated here. After the flags, so a
+  # mistyped one is named before anything about this machine is.
+  check_workspace_root "$project_dir"
 
   # A session signs its commits through the invoking user's ssh-agent, so
   # the socket is forwarded rather than any key material being copied in.
@@ -932,6 +933,7 @@ cmd_exec() {
     --machine)
       [[ -n "${2:-}" ]] || { log_err "usage: nixcage exec [--tty] [--agent] [--machine <name>] -- <command> [args...]"; exit 1; }
       machine="$2"; shift 2 ;;
+    --flake|--flake=*) flake_misplaced ;;
     --) shift; break ;;
     *) break ;;
     esac
@@ -1196,6 +1198,14 @@ ${BOLD}Configuration:${NC}
 HELP
 }
 
+# --flake chooses the configuration every verb reads, so it is read once,
+# before the verb. After it, it would be ignored, or for exec taken for the
+# command, so it is refused by name instead.
+flake_misplaced() {
+  log_err "--flake goes before the command: nixcage --flake <ref> <command>"
+  exit 1
+}
+
 main() {
   if [[ "${1:-}" == "--flake" ]]; then
     if [[ -z "${2:-}" ]]; then
@@ -1205,6 +1215,12 @@ main() {
     NIXCAGE_FLAKE="$2"
     shift 2
   fi
+
+  # The word after the verb, asked about before the verb reads anything.
+  case "${2:-}" in
+  -h | --help) cmd_help; return 0 ;;
+  --flake | --flake=*) flake_misplaced ;;
+  esac
 
   local command="${1:-help}"
   shift || true

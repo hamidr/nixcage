@@ -158,3 +158,10 @@ ssh_calls() {
 	assert_failure
 	assert_output --partial "--machine is not available on macOS"
 }
+
+@test "a --flake after -- belongs to the command, not to nixcage" {
+	run_nixcage exec -- nix build --flake x
+	[ "$status" -eq 0 ]
+	run ssh_calls
+	assert_output --partial "nix build --flake x"
+}
