@@ -139,7 +139,10 @@
                         + " --network nc0:10.66.0.97/24 a-bridged-cage-named-97 /srv/p0 sleep 5"
                     )
                     host.wait_until_succeeds(
-                        "dmesg | grep 'nixcage-drop ip6 ' | grep -q 'IN=nc-'", timeout=15
+                        # One grep, not -q: an early exit would SIGPIPE dmesg,
+                        # and the driver's pipefail would read the match as a
+                        # failure.
+                        "dmesg | grep 'nixcage-drop ip6 IN=nc-' >/dev/null", timeout=15
                     )
 
                 with subtest("a placed cage holds the address it was given"):
