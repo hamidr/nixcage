@@ -42,3 +42,26 @@ teardown() {
 	[ "$status" -eq 0 ]
 	[[ "$output" == *Aborted* ]]
 }
+
+# A script has no one to answer the prompt: --yes is the answer given ahead,
+# and a closed stdin is refused by name rather than ending the run silently.
+
+@test "rm --yes deletes without asking" {
+	echo "$$" >"$XDG_STATE_HOME/nixcage/vm.pid"
+	write_cache
+	mkdir -p "$TEST_TEMP_DIR/bin"
+	printf '#!/usr/bin/env bash\necho "$@" >>"%s/ssh-calls"\n' "$TEST_TEMP_DIR" >"$TEST_TEMP_DIR/bin/ssh"
+	printf '#!/usr/bin/env bash\necho microvm-run\n' >"$TEST_TEMP_DIR/bin/ps"
+	chmod +x "$TEST_TEMP_DIR/bin/ssh" "$TEST_TEMP_DIR/bin/ps"
+	PATH="$TEST_TEMP_DIR/bin:$PATH" run bash "$NIXCAGE_BIN" rm --yes somename </dev/null
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/ssh-calls")" == *"nixcage-container rm somename"* ]]
+}
+
+@test "rm with nothing on stdin to answer refuses, naming --yes" {
+	echo "$$" >"$XDG_STATE_HOME/nixcage/vm.pid"
+	write_cache
+	run bash "$NIXCAGE_BIN" rm somename </dev/null
+	[ "$status" -ne 0 ]
+	[[ "$output" == *--yes* ]]
+}

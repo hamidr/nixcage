@@ -197,3 +197,17 @@ EOF
 	[[ "$(cat "$TEST_TEMP_DIR/nix-calls")" == *openssh* ]]
 	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == *"--microvm-path $FAKE_STORE/o-openssh"* ]]
 }
+
+@test "enter --yes realises without asking" {
+	run bash "$NIXCAGE_BIN" enter --yes --substrate microvm </dev/null
+	[ "$status" -eq 0 ]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" == *"--microvm-path $FAKE_STORE/q-qemu"* ]]
+	[[ "$(cat "$TEST_TEMP_DIR/sudo-calls")" != *--yes* ]]
+}
+
+@test "a realisation with nothing on stdin to answer refuses, naming --yes" {
+	run bash "$NIXCAGE_BIN" enter --substrate microvm </dev/null
+	[ "$status" -ne 0 ]
+	[[ "$output" == *--yes* ]]
+	[ ! -f "$TEST_TEMP_DIR/sudo-calls" ]
+}

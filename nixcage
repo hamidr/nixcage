@@ -30,6 +30,21 @@ log_ok()   { log_line $'\033[0;32m' "$@"; }
 log_warn() { log_line $'\033[1;33m' "$@"; }
 log_err()  { log_line $'\033[0;31m' "$@"; }
 
+# The answer to a [y/N] question. --yes gives it ahead, for a script with no
+# one to ask; a stdin with nothing on it is refused naming --yes, where read
+# under set -e would otherwise end the run without a word.
+ASSUME_YES=""
+confirm() {
+  [[ -n "$ASSUME_YES" ]] && return 0
+  local answer
+  if ! read -rp "$1 [y/N] " answer; then
+    echo >&2
+    log_err "Nothing on stdin to answer with; pass --yes to go ahead without asking."
+    exit 1
+  fi
+  [[ "$answer" == "y" || "$answer" == "Y" ]]
+}
+
 require_cmd() {
   local cmd="$1"
   local hint="${2:-}"
@@ -616,8 +631,7 @@ microvm_realise() {
   log_warn "  openssh:    74 MiB, what exec and the agent forward use"
   [[ -n "$want_qemu" ]] &&
     log_warn "  qemu:       1450 MiB (this machine has no qemu-system-$(uname -m) of its own)"
-  read -rp "Realise them now? [y/N] " answer
-  if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+  if ! confirm "Realise them now?"; then
     log_err "Nothing realised. A microVM session needs them; an nspawn session does not."
     exit 1
   fi
@@ -706,6 +720,12 @@ cmd_enter() {
     esac
 
     case "$flag" in
+      --yes)
+        # The CLI's own answer to a question it would ask, not the session's.
+        ASSUME_YES=1
+        shift
+        continue
+        ;;
       --no-agent|--print-argv)
         session+=("$flag")
         # A flag that takes no value consumes only itself, whatever followed.
@@ -1048,9 +1068,15 @@ cmd_rebuild() {
 }
 
 cmd_rm() {
-  local name
-  if [[ $# -gt 0 ]]; then
-    name="$1"
+  local name=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    -y | --yes) ASSUME_YES=1 ;;
+    *) name="$1" ;;
+    esac
+    shift
+  done
+  if [[ -n "$name" ]]; then
     if ! validate_container_name "$name"; then
       log_err "Invalid container name: $name"
       exit 1
@@ -1065,8 +1091,7 @@ cmd_rm() {
 
   # Confirm before ensure_vm: aborting must not boot a VM.
   log_warn "This deletes container '$name' and its persistent home."
-  read -rp "Continue? [y/N] " answer
-  if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+  if ! confirm "Continue?"; then
     log_info "Aborted."
     return 0
   fi
@@ -1155,7 +1180,7 @@ ${BOLD}Usage:${NC}
 ${BOLD}Commands:${NC}
   enter [--memory <size>] [--cpus <n>] [--bind SRC:DST] [--bind-ro SRC:DST]
         [--setenv K=V] [--shell <name>] [--no-agent] [--print-argv]
-        [--substrate nspawn|microvm] [--disk <size>] [-- cmd...]
+        [--substrate nspawn|microvm] [--disk <size>] [--yes] [-- cmd...]
                      Enter this project's cage (macOS: starts the VM if needed).
                      The substrate is fixed at the cage's first enter; a microVM
                      needs the host's nixcage.microvm.enable, and --disk gives
@@ -1170,7 +1195,7 @@ ${BOLD}Commands:${NC}
                      inside the VM on macOS. This is how a tool built on
                      nixcage reaches nixcage-container.
   list [--json]      What cages this machine has, with what each was given
-  rm [name]          Delete a project container and its persistent home
+  rm [--yes] [name]  Delete a project container and its persistent home
   status             Show container state (macOS: VM state and age public key)
   down               macOS only: stop the VM
   rebuild            macOS only: rebuild the VM from the config flake and restart it
