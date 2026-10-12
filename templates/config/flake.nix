@@ -33,8 +33,9 @@
       ## Silicon and other arm64 machines, x86_64-linux on Intel/AMD.
       guestSystem = "aarch64-linux";
 
-      ## Uncomment on macOS so the qemu runner is a host-native binary.
-      # hostSystem = "aarch64-darwin";
+      ## The Mac the VM runs on, so the qemu runner is a native binary:
+      ## aarch64-darwin on Apple Silicon, x86_64-darwin on Intel.
+      hostSystem = "aarch64-darwin";
     in
     {
       nixosConfigurations.nixcage = nixpkgs.lib.nixosSystem {
@@ -45,8 +46,9 @@
           sops-nix.nixosModules.sops
           {
             nixcage = {
-              ## Only flake directories under these roots can be entered.
-              workspaceRoots = [ "/home/me/Src" ];
+              ## Any directory under these roots can be entered; each root
+              ## is shared into the VM at the same absolute path.
+              workspaceRoots = [ "/Users/me/Src" ];
 
               ## Paste the key printed by 'nixcage status' (generated at
               ## ~/.local/state/nixcage/id_ed25519.pub on first run).
@@ -72,8 +74,7 @@
               # principalUidRange = { base = 700000; size = 64; };
             };
 
-            ## Uncomment on macOS (see hostSystem above).
-            # microvm.vmHostPackages = nixpkgs.legacyPackages.${hostSystem};
+            microvm.vmHostPackages = nixpkgs.legacyPackages.${hostSystem};
 
             ## Secrets: encrypt secrets.yaml with sops + the VM's age key
             ## ('nixcage status' prints the public key for .sops.yaml).
