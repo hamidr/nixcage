@@ -288,6 +288,16 @@
                     assert '"uid":' + first in record, record
                     assert '"project":"/srv/proj"' in record, record
 
+                with subtest("a session has no journal or syslog socket to write to"):
+                    # Its output goes to whoever entered it; a journal it
+                    # could write is one it could flood or forge (ADR-011).
+                    host.succeed(
+                        "nixcage exec -- nixcage-container enter --no-agent --uid " + first
+                        + " cage /srv/proj sh -c 'test ! -e /dev/log"
+                        + " && test ! -e /run/systemd/journal/socket"
+                        + " && test ! -e /run/systemd/journal/stdout'"
+                    )
+
                 with subtest("exec reaches the machine the cages are on"):
                     assert "cage" in host.succeed(
                         "nixcage exec -- nixcage-container list"

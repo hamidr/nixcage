@@ -115,3 +115,15 @@ of the host and not off the host; a forged source address was dropped at
 the bridge. A role session asked separately had no daemon socket and saw
 253 store paths of the host's 119365, its closure. One scenario
 was gated on operator configuration (a substrate floor), not on nixcage.
+
+## Amendment, 2026-10-12: a cage has no journal
+
+A session is `systemd-nspawn --register=no` without a boot, and nothing
+binds the host's journal or syslog socket into it, so a cage has no
+`/dev/log`, no `/run/systemd/journal/socket` and no
+`/run/systemd/journal/stdout`. That is kept, not overlooked: a journal a
+cage could write to is one it could flood, and one whose lines a caller
+reading the host's journal could not tell from the host's own. What a
+session says goes to its stdout and stderr, back to whoever ran `enter`,
+over the forward for a machine (ADR-026). A dependant that wants a cage's
+lines in a log reads them there. The `cage` NixOS check holds the absence.
