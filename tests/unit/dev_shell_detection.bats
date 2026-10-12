@@ -122,3 +122,40 @@ EOF
 	[[ "$output" != *hello* ]]
 	[[ "$output" != *"ran nix develop"* ]]
 }
+
+# The probe names the project the way nix develop's command line does. A
+# bare path to builtins.getFlake is a path: flake, copied whole into the
+# store with everything git ignores; on a project with gigabytes of build
+# output under it that took ten minutes and failed, where the git+file
+# reference nix develop resolves to copies only what git tracks.
+
+@test "a git work tree is named to getFlake as git+file" {
+	git -C "$PROJECT" init -q
+	run nixcage_flake_ref "$PROJECT"
+	[ "$output" = "git+file://$PROJECT" ]
+}
+
+@test "a project below the top of its repository is named with dir=" {
+	git -C "$PROJECT" init -q
+	mkdir -p "$PROJECT/sub/proj"
+	run nixcage_flake_ref "$PROJECT/sub/proj"
+	[ "$output" = "git+file://$PROJECT?dir=sub/proj" ]
+}
+
+@test "a directory outside any repository is named as a path" {
+	run nixcage_flake_ref "$PROJECT"
+	[ "$output" = "path:$PROJECT" ]
+}
+
+@test "the probe hands getFlake the project's reference, not a bare path" {
+	git -C "$PROJECT" init -q
+	cat >"$STUB_DIR/nix" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >"$TEST_TEMP_DIR/nix-args"
+printf yes
+EOF
+	chmod +x "$STUB_DIR/nix"
+	run nixcage_has_dev_shell "$PROJECT"
+	[ "$status" -eq 0 ]
+	grep -qF "getFlake \"git+file://$PROJECT\"" "$TEST_TEMP_DIR/nix-args"
+}

@@ -23,7 +23,8 @@
 ## do not apply, because a session that named a shell wants that shell and
 ## nothing else.
 nixcage_has_dev_shell() {
-	local project="${1:-/workspace}" want="${2:-}" answer test
+	local project="${1:-/workspace}" want="${2:-}" answer test ref
+	ref="$(nixcage_flake_ref "$project")"
 
 	if [ -n "$want" ]; then
 		nixcage_shell_name_ok "$want" || return 2
@@ -37,7 +38,7 @@ nixcage_has_dev_shell() {
 
 	answer="$(nix eval --impure --raw --no-warn-dirty --expr "
     let
-      flake = builtins.getFlake \"${project}\";
+      flake = builtins.getFlake \"${ref}\";
       system = builtins.currentSystem;
       shells = flake.devShells.\${system} or { };
       legacy = flake.devShell or { };
@@ -52,6 +53,22 @@ nixcage_has_dev_shell() {
 	[ "$answer" = "yes" ]
 }
 
+## The flake reference nix develop's command line resolves $1 to. A bare
+## path handed to builtins.getFlake is a path: flake, copied whole into the
+## store with everything git ignores, which on a project with gigabytes of
+## build output under it took minutes and then failed; git+file copies what
+## git tracks. A directory git cannot answer for stays a path.
+nixcage_flake_ref() {
+	local project="$1" top prefix
+	if top="$(git -C "$project" rev-parse --show-toplevel 2>/dev/null)" &&
+		prefix="$(git -C "$project" rev-parse --show-prefix 2>/dev/null)"; then
+		prefix="${prefix%/}"
+		echo "git+file://${top}${prefix:+?dir=$prefix}"
+		return
+	fi
+	echo "path:$project"
+}
+
 ## Answer whether $1 is spelled like a Nix attribute name nixcage will accept
 ## as a devShell. Narrower than Nix allows on purpose: the name reaches a
 ## flake reference and an eval expression, so anything that could be read as
@@ -64,10 +81,11 @@ nixcage_shell_name_ok() {
 ## refusal useful: a caller naming a shell that is not there needs to see what
 ## is, or the mistake is a typo hunt.
 nixcage_dev_shell_names() {
-	local project="${1:-/workspace}"
+	local project="${1:-/workspace}" ref
+	ref="$(nixcage_flake_ref "$project")"
 	nix eval --impure --raw --no-warn-dirty --expr "
     let
-      flake = builtins.getFlake \"${project}\";
+      flake = builtins.getFlake \"${ref}\";
       shells = flake.devShells.\${builtins.currentSystem} or { };
     in
     builtins.concatStringsSep \"\\n\" (builtins.attrNames shells)
