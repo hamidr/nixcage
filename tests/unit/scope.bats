@@ -194,6 +194,19 @@ STUB
 	[ "$(jq 'has("netns")' "$record")" = false ]
 }
 
+# The project a cage was entered for, and the host end a bridged cage's port
+# has: list shows the first beside a name that is only a basename and a hash,
+# and the second is the name the bridge's own messages use for the cage.
+@test "a record names the project the cage was entered for" {
+	nixcage_scope_record_write builder 700000 "" "" "" "" "" --project=/srv/src/my\ proj
+	[ "$(jq -r .project "$NIXCAGE_STATE_DIR/containers/builder/placement")" = "/srv/src/my proj" ]
+}
+
+@test "a bridged cage's record names its port" {
+	nixcage_scope_record_write builder 700000 "" fabriek0 10.77.0.10/24 "" "" --port=nc-0123456789ab
+	[ "$(jq -r .port "$NIXCAGE_STATE_DIR/containers/builder/placement")" = nc-0123456789ab ]
+}
+
 @test "a record for an ordinary session names the cage and its uid and nothing it was not given" {
 	nixcage_scope_record_write builder 700000 "" "" "" "" ""
 	run jq -c 'keys' "$NIXCAGE_STATE_DIR/containers/builder/placement"

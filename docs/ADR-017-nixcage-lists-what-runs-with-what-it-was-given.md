@@ -75,3 +75,21 @@ directory exists, before nspawn, and dispatches `list --json`, which
 host CLI, not it. A session joining a running cage's namespace records
 the namespace path rather than an address, since the path is what it was
 given. The guest script builds on a Linux builder.
+
+## Amendment, 2026-10-12: the project and the port
+
+Two fields are added, each absent where it was not given, so a record from
+before reads as it did.
+
+`project` is the directory the cage was entered for. The name keeps it only
+as a basename and a hash, so `nixcage list` showed cages a person could not
+map back to the directory to `rm` them from; it now prints the path last,
+since it is the one field that may hold a space.
+
+`port` is a bridged cage's host end, `nc-<digest>` (ADR-013). It is the
+name the bridge's own messages give the cage, and a dependant reading those
+had to recompute the digest, which is internal. A cage with no bridge has
+no port and records none.
+
+Neither is a bind path or an environment, which this document left to a
+caller.

@@ -727,7 +727,8 @@ let
         ## installed it at otherwise, which is the difference the field is
         ## recorded for.
         nixcage_scope_record_write "$name" "$owner_uid" "$subject" "$network_bridge" "$network_addr" "$network_ns" "$substrate" \
-          "--writer=$0" "--declared=''${NIXCAGE_DECLARED:-}" \
+          "--writer=$0" "--declared=''${NIXCAGE_DECLARED:-}" "--project=$project" \
+          ''${network_bridge:+"--port=$(nixcage_veth_host_name "$name")"} \
           ''${declared_binds[@]+"''${declared_binds[@]/#/--declared-bind=}"} \
           ''${asked_home:+"--home=$asked_home"} \
           ''${NIXCAGE_ENTER_PROFILE:+"--profile=$NIXCAGE_ENTER_PROFILE"} \

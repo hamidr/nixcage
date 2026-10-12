@@ -161,7 +161,7 @@ nixcage_scope_json_string() {
 	printf '"%s"' "$v"
 }
 
-## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--home=<path>] [--profile=<path>] [--writer=<path>] [--declared=<1|>] [--declared-bind=<arg>...] [root...]
+## nixcage_scope_record_write <name> <uid> <subject> <bridge> <address> <netns> <substrate> [--project=<path>] [--port=<ifname>] [--home=<path>] [--profile=<path>] [--writer=<path>] [--declared=<1|>] [--declared-bind=<arg>...] [root...]
 ## One object on one line, so list --json can extend it without parsing it.
 ## A field the session was not given is absent rather than empty; the
 ## substrate is absent for nspawn, which every cage ran on before ADR-019,
@@ -177,15 +177,21 @@ nixcage_scope_json_string() {
 ## written by a nixcage from the store and cages written by one a module
 ## installed, and a record that says which is a message rather than a puzzle.
 ## Absent where nobody names them, which is what every record held before.
+##
+## The project is what the cage was entered for, which its name keeps only
+## as a basename and a hash; the port is a bridged cage's host end, the name
+## the bridge's own messages give it (ADR-017 amendment).
 nixcage_scope_record_write() {
 	local name="$1" uid="$2" subject="$3" bridge="$4" address="$5" netns="$6" substrate="$7"
 	shift 7
 	nixcage_scope_name_ok "$name" || return 1
 	local dir="$NIXCAGE_STATE_DIR/containers/$name" record root sep home="" profile=""
-	local writer="" declared="" marked=""
+	local writer="" declared="" marked="" project="" port=""
 	local -a roots=() declared_binds=()
 	for root in "$@"; do
 		case "$root" in
+		--project=*) project="${root#--project=}" ;;
+		--port=*) port="${root#--port=}" ;;
 		--home=*) home="${root#--home=}" ;;
 		--profile=*) profile="${root#--profile=}" ;;
 		--writer=*) writer="${root#--writer=}" ;;
@@ -202,6 +208,8 @@ nixcage_scope_record_write() {
 	[ -z "$netns" ] || record+=",\"netns\":$(nixcage_scope_json_string "$netns")"
 	[ -z "$substrate" ] || [ "$substrate" = nspawn ] ||
 		record+=",\"substrate\":$(nixcage_scope_json_string "$substrate")"
+	[ -z "$project" ] || record+=",\"project\":$(nixcage_scope_json_string "$project")"
+	[ -z "$port" ] || record+=",\"port\":$(nixcage_scope_json_string "$port")"
 	[ -z "$home" ] || record+=",\"home\":$(nixcage_scope_json_string "$home")"
 	[ -z "$profile" ] || record+=",\"profile\":$(nixcage_scope_json_string "$profile")"
 	[ -z "$writer" ] || record+=",\"writer\":$(nixcage_scope_json_string "$writer")"

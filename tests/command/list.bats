@@ -25,7 +25,7 @@ EOF
 	export TEST_TEMP_CALLS="$TEST_TEMP_DIR/sudo-calls"
 	export TEST_TEMP_RECORDS="$TEST_TEMP_DIR/records"
 	cat >"$TEST_TEMP_RECORDS" <<'EOF'
-{"name":"proj-1234abcd","uid":700000,"substrate":"microvm","declared":true,"scope":"/machine.slice/proj.scope","leader":4001}
+{"name":"proj-1234abcd","uid":700000,"substrate":"microvm","declared":true,"project":"/home/me/Src/proj","scope":"/machine.slice/proj.scope","leader":4001}
 {"name":"other-5678efgh","uid":1000,"declared":false,"declaredBinds":["--bind-ro=/srv/models:/models"]}
 EOF
 }
@@ -55,6 +55,14 @@ teardown() {
 @test "a cage whose record names no substrate is an nspawn cage" {
 	run_nixcage list
 	[[ "$output" == *nspawn* ]]
+}
+
+@test "list names the project each cage was entered for, and a dash where the record predates it" {
+	run_nixcage list
+	[ "$status" -eq 0 ]
+	[[ "${lines[0]}" == *PATH* ]]
+	[[ "$output" == *"/home/me/Src/proj"* ]]
+	[[ "$(grep other-5678efgh <<<"$output")" == *" -" ]]
 }
 
 @test "list names the uid a cage is mapped onto" {

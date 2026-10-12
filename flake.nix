@@ -111,6 +111,13 @@
                     for i in range(20):
                         host.succeed(enter(i))
 
+                with subtest("a bridged cage's record names its port, the name the bridge uses"):
+                    record = host.succeed(
+                        "cat /var/lib/nixcage/containers/a-bridged-cage-named-00/placement"
+                    )
+                    assert '"port":"nc-' in record, record
+                    assert '"project":"/srv/p0"' in record, record
+
                 with subtest("enters side by side all start"):
                     # Each writes its own status: a record is written before
                     # nspawn runs, so what lists is no evidence of a start.
@@ -265,6 +272,7 @@
                         "cat /var/lib/nixcage/containers/cage/placement"
                     )
                     assert '"uid":' + first in record, record
+                    assert '"project":"/srv/proj"' in record, record
 
                 with subtest("exec reaches the machine the cages are on"):
                     assert "cage" in host.succeed(

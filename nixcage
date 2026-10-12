@@ -911,13 +911,14 @@ cmd_list() {
 
   # A cage with no substrate in its record is an nspawn cage: absent is what
   # every record held before a cage could be anything else.
-  local -a rows=("NAME SUBSTRATE STATE UID")
+  # The path is last because it is the one field that may hold a space.
+  local -a rows=("NAME SUBSTRATE STATE UID PATH")
   local row
   while IFS= read -r row; do
     [[ -n "$row" ]] && rows+=("$row")
   done < <(jq -r '[.name, (.substrate // "nspawn"),
                    (if .leader then "running" else "stopped" end),
-                   (.uid // "-")] | @tsv' <<<"$records" | tr '\t' ' ')
+                   (.uid // "-"), (.project // "-")] | @tsv' <<<"$records" | tr '\t' ' ')
 
   # Padded here rather than by column(1), which is util-linux on one platform
   # and BSD on the other and is in this flake's dependencies on neither.
@@ -936,11 +937,13 @@ cmd_list() {
   # columns read what is there and print a dash for what is not.
   for row in "${rows[@]}"; do
     read -r -a cell <<<"$row"
-    printf '%-*s  %-*s  %-*s  %s\n' \
+    local path="${cell[*]:4}"
+    printf '%-*s  %-*s  %-*s  %-*s  %s\n' \
       "${width[0]}" "${cell[0]:--}" \
       "${width[1]}" "${cell[1]:--}" \
       "${width[2]}" "${cell[2]:--}" \
-      "${cell[3]:--}"
+      "${width[3]}" "${cell[3]:--}" \
+      "${path:--}"
   done
 }
 
