@@ -26,6 +26,11 @@ setup_temp_dir() {
 	TEST_TEMP_DIR="$(cd "$(mktemp -d)" && pwd -P)"
 	export TEST_TEMP_DIR
 	export NIXCAGE_OS=macos
+	# GNU parallel, which bats --jobs runs tests through, hands its jobs
+	# XDG_CACHE_HOME set to the empty string, and nix then takes "nix" as
+	# its cache directory: "not an absolute path" where none exists yet, a
+	# stray ./nix where one is created. Unset, nix uses ~/.cache.
+	[[ -n "${XDG_CACHE_HOME:-}" ]] || unset XDG_CACHE_HOME
 	export XDG_STATE_HOME="$TEST_TEMP_DIR/state"
 	export NIXCAGE_FLAKE="$TEST_TEMP_DIR/config"
 	# An agent inherited from the machine running the suite would make the
