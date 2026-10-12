@@ -164,6 +164,14 @@ GIT
 	[[ "$output" == *principalSubjects* ]]
 }
 
+@test "status with no host config says how to get what is missing, in the user's words" {
+	mkdir -p "$TEST_TEMP_DIR/proj"
+	cd "$TEST_TEMP_DIR/proj"
+	run_nixcage status
+	[[ "$output" == *nixosModules.host* ]]
+	[[ "$output" != *"a subject is"* ]]
+}
+
 
 # rm and status reach the same layer enter does: on a host that declared
 # nothing there is no nixcage-container on PATH to find (ADR-023).

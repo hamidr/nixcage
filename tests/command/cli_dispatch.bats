@@ -50,10 +50,22 @@ teardown() {
 	[[ "$output" == "nixcage "* ]]
 }
 
-@test "unknown command fails with help" {
+@test "unknown command fails in two lines, pointing at the help" {
 	run_nixcage frobnicate
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"Unknown command"* ]]
+	[[ "$output" == *"Unknown command: frobnicate"* ]]
+	[[ "$output" == *"nixcage help"* ]]
+	[ "${#lines[@]}" -le 2 ]
+}
+
+@test "the help names every option exec takes" {
+	run_nixcage help
+	for flag in --tty --agent --machine; do
+		[[ "$output" == *"exec "*"$flag"* ]] || {
+			echo "exec help omits $flag"
+			return 1
+		}
+	done
 }
 
 @test "--flake without an argument fails" {

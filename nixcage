@@ -1120,9 +1120,9 @@ cmd_status() {
       # told reads their absence as a bug rather than as this mode (ADR-023).
       echo "  Host config:  nothing declared at $HOST_CONFIG"
       echo "  Cage:         $PWD, the directory you are standing in"
-      echo "  Without one:  no secretEnv, since the host environment is never"
-      echo "                read, and no principalSubjects, since a subject is"
-      echo "                something a host declares"
+      echo "  Without one:  no secretEnv (the host environment is never read)"
+      echo "                and no principalSubjects; import nixcage's"
+      echo "                nixosModules.host to set them"
     fi
     echo "  Containers:"
     local container
@@ -1190,10 +1190,11 @@ ${BOLD}Commands:${NC}
                      dependant (--uid, --user, --subject, --home, --network,
                      --dns, --store-root, --no-nix-daemon) are reached with
                      nixcage exec -- nixcage-container enter ...
-  exec [--tty] [--agent] -- <cmd...>
+  exec [--tty] [--agent] [--machine <name>] -- <cmd...>
                      Run a command as root where the cages are: here on Linux,
                      inside the VM on macOS. This is how a tool built on
-                     nixcage reaches nixcage-container.
+                     nixcage reaches nixcage-container. --machine runs it in
+                     one of this host's machines instead (Linux only).
   list [--json]      What cages this machine has, with what each was given
   rm [--yes] [name]  Delete a project container and its persistent home
   status             Show container state (macOS: VM state and age public key)
@@ -1261,7 +1262,7 @@ main() {
   help | --help | -h) cmd_help ;;
   *)
     log_err "Unknown command: $command"
-    cmd_help
+    log_err "Run 'nixcage help' for the commands."
     exit 1
     ;;
   esac
