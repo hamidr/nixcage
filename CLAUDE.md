@@ -115,10 +115,11 @@ factory of roles over one repository, is built entirely on those. Architecture:
   `git.*`, `vm.*`, `principalUidRange`) and the VM base config.
 - `modules/host.nix` -- the Linux host module: `workspaceRoots`, `secretEnv`,
   `git.*`, `storage.dataset`, `principalUidRange`, `microvm.*`,
-  `substrate.default` and `cages.<path>.substrate`; renders
-  `/etc/nixcage/config` for the CLI and `/etc/nixcage/container` for the guest,
-  installs the container layer on the host. Everything it declares goes into
-  one rendered file, `/etc/nixcage/declaration`, carrying a version.
+  `substrate.default` and `cages.<path>.substrate`; installs the container
+  layer on the host. Everything it declares goes into one rendered file,
+  `/etc/nixcage/declaration`, carrying a version, which the CLI and
+  `nixcage-container` both read (ADR-024). `/etc/nixcage/config` is still
+  rendered for one release, for a CLI older than the module.
 - `templates/config/` -- the flake template users instantiate at
   `~/.config/nixcage` (their VM configuration; sops-nix wired in).
 - `examples/project/` -- an ordinary project flake showing the devShell
@@ -151,8 +152,8 @@ nixcage input pointed at the working tree.
 ## Architecture
 
 The script follows a command-dispatch pattern: `main()` at the bottom
-dispatches to `cmd_*` functions (`enter`, `exec`, `down`, `rebuild`, `rm`,
-`status`).
+dispatches to `cmd_*` functions (`enter`, `exec`, `list`, `rm`, `status`,
+`down`, `rebuild`), plus `version` and `help`.
 
 ### Key subsystems
 
@@ -203,7 +204,9 @@ sources it directly. Per
 session it builds a throwaway rootfs skeleton (nspawn locks its directory,
 so concurrent sessions need separate ones), binds the store read-only plus
 the nix-daemon socket (`NIX_REMOTE=daemon`), the project dir at `/workspace`,
-and the persistent home at `/root`, then execs `nix develop`.
+and the persistent home at `/root`, then hands the session to
+`modules/dev-shell.sh`, which picks direnv, the devShell, or the base
+userland.
 
 **Git in a session** -- an ordinary repository needs nothing beyond the
 project bind, but a linked worktree keeps its git directory inside the primary
@@ -239,7 +242,7 @@ VM data volume at first boot; `nixcage.secretEnv` maps env vars to secret
 names, injected per session by the guest script from `/run/secrets`. The
 host environment is never read.
 
-**A host that declared nothing** (ADR-023) -- with no `/etc/nixcage/config`,
+**A host that declared nothing** (ADR-023) -- with no `/etc/nixcage/declaration`,
 `host_declared` answers false and every reader gives the undeclared answer
 instead of refusing: `check_workspace_root` takes `$PWD` (refusing `/`,
 `/nix`, `/nix/store`, `$HOME` itself and anything the caller does not own),
@@ -256,7 +259,7 @@ realised on the first microVM session and cached in `$STATE/microvm`.
 
 `detect_os()` (overridable with `NIXCAGE_OS` for tests) selects the
 transport: Linux executes `sudo nixcage-container` locally and reads
-`/etc/nixcage/config` (`NIXCAGE_HOST_CONFIG` override for tests);
+`/etc/nixcage/declaration` (`NIXCAGE_HOST_CONFIG` override for tests);
 macOS goes over SSH into the VM and reads the build-time cache. `cfg_read`
 is the dispatch point. `rebuild`/`down` are macOS-only
 (`require_vm_platform`); on Linux the host owns the lifecycle via

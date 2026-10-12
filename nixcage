@@ -71,7 +71,7 @@ OS="${NIXCAGE_OS:-$(detect_os)}"
 
 # The config flake is user-owned; the CLI never writes into it. It is the
 # macOS configuration source; on Linux the host's nixosModules.host renders
-# /etc/nixcage/config instead and there is no VM.
+# /etc/nixcage/declaration instead and there is no VM.
 NIXCAGE_FLAKE="${NIXCAGE_FLAKE:-$HOME/.config/nixcage}"
 # What a host declared, read through the same module the guest script reads it
 # with. Sourced rather than copied: two readers of one format is the thing
@@ -121,7 +121,7 @@ check_flake() {
 }
 
 # Load configuration into VM_* globals from the platform's source: the
-# host-rendered /etc/nixcage/config on Linux, the build-time cache on macOS.
+# host-rendered /etc/nixcage/declaration on Linux, the build-time cache on macOS.
 cfg_read() {
   if [[ "$OS" == "linux" ]]; then
     host_read_config

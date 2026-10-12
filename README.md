@@ -36,7 +36,7 @@ existing sops-nix setup, never from your shell.
   shared Linux VM, which is a boundary of its own.
 - **Something to build on.** nixcage runs cages and has no opinion about
   what runs in them. A tool that wants several agents sharing one
-  repository, each as its own user on its own private network, gets four
+  repository, each as its own user on its own private network, gets five
   primitives and nothing else; see "Building on nixcage" below.
 
 ## How it works
@@ -46,7 +46,7 @@ there are no containers, so the same container runs inside a shared NixOS
 microVM reached over SSH:
 
 ```
-nixcage enter                 (from any flake dir under a workspace root)
+nixcage enter                 (from any directory under a workspace root)
      |
      +-- Linux: run the container on the host
      |
@@ -85,7 +85,8 @@ the cage's first enter (or declared in the host config) and then fixed; a
 flag against it is refused naming what fixed it. Everything else is the
 same `enter`: the project at `/workspace`, the persistent home (at
 `/home/nixcage`, since the guest owns `/root`), the store read-only, your
-ssh-agent forwarded, secrets injected, `exec`, `status`, `stop`, `list`.
+ssh-agent forwarded, secrets injected, and the `nixcage-container` verbs
+over a cage (`exec`, `status`, `stop`, `list`).
 What differs: a kernel boundary toward the host and toward other cages, no
 nix daemon and no builds inside (the session sees the store and cannot add
 to it, so put the toolchain in the devShell or realise it elsewhere), a
@@ -194,8 +195,9 @@ nixcage = {
 };
 ```
 
-`nixos-rebuild switch` applies it; the CLI is just `enter`, `rm`, and
-`status` (plus `version`; `rebuild`/`down` are macOS-only -- the host owns the lifecycle).
+`nixos-rebuild switch` applies it; the CLI is `enter`, `exec`, `list`, `rm`
+and `status` (`rebuild` and `down` are macOS-only, since on Linux the host
+owns the lifecycle).
 Containers use the host store read-only plus the host nix-daemon.
 
 ## Configuration on macOS
@@ -210,8 +212,8 @@ Edit it like any NixOS configuration. The nixcage options:
 
 ```nix
 nixcage = {
-  ## Only flake directories under these roots can be entered.
-  workspaceRoots = [ "/home/me/Src" ];
+  ## Any directory under these roots can be entered.
+  workspaceRoots = [ "/Users/me/Src" ];
 
   ## The key printed by 'nixcage status' on first run.
   authorizedKeys = [ "ssh-ed25519 AAAA..." ];
@@ -263,7 +265,7 @@ claude-code in a project? Put it in that project's devShell (see
 
 nixcage runs cages and has no opinion about what runs in them. A tool that
 wants more than one person entering one project -- several named workers
-sharing a repository, say -- pins nixcage as a flake input and uses four
+sharing a repository, say -- pins nixcage as a flake input and uses five
 exported primitives, which are the whole interface (ADR-009):
 
 | Primitive | What it gives |
@@ -278,7 +280,8 @@ roots, so a source outside them is not there to bind.
 | `nixcage-container status <name>`, `netns <name>`, `stop <name>` | A running cage from its scope: its leader and cgroup, the namespace path `enter --network ns:` takes (`none` for a microVM, which has no namespace on the host), and an end to it (ADR-012) |
 | `nixcage-container list [--json]` | Every cage entered and not removed; with `--json`, one object per cage with what enter was given (uid, subject, placement, roots) and, while it runs, its scope and leader (ADR-017) |
 | `nixcage-container exec [--subject <name>] <name> [-- cmd]` | A command inside a running cage: its leader's namespaces, its HOME and PATH, as cage root or as a declared subject (ADR-012); over vsock ssh into a microVM cage, as the session's uid with the session's environment (ADR-019) |
-| `nixcage exec [--tty] [--agent] [--machine <name>] -- <cmd>` | A way to reach the other three from your own machine; with `--machine`, the root of a machine (ADR-026) |
+| `nixcage-container plan --machine <name> [--auth-sock <path>]` | An enter or exec line a machine's guest proposed, read NUL-separated from stdin, validated and run on the host (ADR-027) |
+| `nixcage exec [--tty] [--agent] [--machine <name>] -- <cmd>` | A way to reach the others from your own machine; with `--machine`, the root of a machine (ADR-026) |
 | `nixcage-container machine up\|down\|status <name>`, and `--machine <name>` first on any verb above but `netns` | A machine's lifecycle, and the verb run by the machine's own nixcage-container (ADR-026) |
 
 You name paths and principals; nixcage names datasets and numbers. Set
