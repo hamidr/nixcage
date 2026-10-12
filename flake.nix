@@ -760,7 +760,11 @@
               ## The worktree tests build real repositories rather than
               ## stubbing git, so it belongs in the shell.
               git
-            ];
+            ]
+            ## The principal tests take the store's lock for real. Linux has
+            ## util-linux's flock, which production runs; darwin has none, so
+            ## it gets the portable one with the same `-w <s> <fd>` form.
+            ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.flock;
 
             BATS_LIB_PATH = "${pkgs.bats.libraries.bats-support}/share/bats:${pkgs.bats.libraries.bats-assert}/share/bats";
 
