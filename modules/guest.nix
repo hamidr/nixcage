@@ -73,8 +73,6 @@ in
   ## The initrd's default module set is for hardware this guest never
   ## has; the modules named below are all it needs.
   boot.initrd.includeDefaultModules = false;
-
-  boot.initrd.systemd.enable = true;
   boot.initrd.availableKernelModules = [
     "virtiofs"
     "virtio_pci"
