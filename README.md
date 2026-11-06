@@ -268,12 +268,12 @@ wants more than one person entering one project -- several named workers
 sharing a repository, say -- pins nixcage as a flake input and uses five
 exported primitives, which are the whole interface (ADR-009):
 
-| Primitive | What it gives |
-|---|---|
 A `--bind` source is resolved where the cage runs: on Linux that is this host,
 so any path works; on macOS it is the VM, which sees only your workspace
 roots, so a source outside them is not there to bind.
 
+| Primitive | What it gives |
+|---|---|
 | `nixcage-container enter [--uid n] [--user name] [--subject name] [--home path] [--shell name] [--bind SRC:DST] [--bind-ro SRC:DST] [--setenv K=V] [--no-agent] [--network BRIDGE:ADDR/PREFIX\|ns:PATH] [--dns none\|ADDR] [--no-nix-daemon] [--memory SIZE] [--cpus N] [--substrate nspawn\|microvm] [--disk SIZE] [--print-argv] <name> <project> [cmd]` | A session built out of what you asked for, bounded on its scope when asked; with `--print-argv`, the nspawn or vmspawn line it would run, one word per line, and no session. On a microVM cage (ADR-019) `--memory` and `--cpus` are the guest's own, `--shell` and `ns:` are refused, and `--network` places a tap nixcage makes |
 | `nixcage-container uid <principal> [<subject>]` | A durable uid for a name, never reissued |
 | `nixcage-container storage ensure <path> <uid> [quota]` | That path, under `/var/lib/nixcage`, owned by that uid, bounded where it can be |
